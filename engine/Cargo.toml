@@ -1,0 +1,27 @@
+[package]
+name = "postern-perps-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "PosternDEX Perpetuals deterministic exchange engine (UNAUDITED prototype; docs/SPEC.md)"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "engine"
+path = "src/bin/engine.rs"
+
+[dependencies]
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+k256 = { version = "0.13.4", features = ["ecdsa"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+
+[dev-dependencies]
+proptest = "1"
+
+[profile.release]
+debug = false
+overflow-checks = true
