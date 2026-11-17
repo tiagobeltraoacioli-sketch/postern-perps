@@ -8,7 +8,7 @@
     "Perpetual futures are leveraged. A small price move can lose your whole margin, and a cross-margin position can use your whole account balance.",
     "A position is liquidated when its margin falls below the maintenance requirement. Liquidation closes it through the book, never worse than the price at which your account reaches zero, with a 0.5% liquidation fee; in extreme markets the backstop, the insurance fund and, last, auto-deleveraging of profitable positions are used.",
     "A market halts when its price feed is stale or jumps. While halted you can only cancel: no closing, no liquidation, no stop-loss or take-profit. It may resume far from where it stopped.",
-    "Funding is paid every hour between longs and shorts (capped at 0.1% of position value per hour) and can cost you money while you hold a position.",
+    "Funding is paid every hour between longs and shorts (capped at 0.05% of position value per hour) and can cost you money while you hold a position.",
     "One sequencer orders all actions. It cannot sign for you or move funds out, but it can delay or reorder; the forced-action path on the Bloch L2 bounds that delay.",
     "Collateral is bUSDC on the Bloch L2: it depends on the Bloch bridge, on the L2 and on USDC (which its issuer can freeze) as well as on this exchange.",
     "The software is an unaudited prototype and may contain errors that lose funds."
@@ -34,7 +34,7 @@
     "risk": {
       "path": "compliance/legal/risk-disclosure.md",
       "id": "RISK-0.1-20261117",
-      "sha256": "b416963103c74de78b6aa033af940ebd45ccdffe5ca99e46e288e93551003bb3"
+      "sha256": "4e9d6ec4b299017a4679ca8a32fa1a157984480adf3699e42d29632b52c36dfe"
     },
     "privacy": {
       "path": "compliance/legal/privacy-notice.md",
@@ -44,7 +44,7 @@
     "attestation": {
       "path": "compliance/legal/attestation.md",
       "id": "ATTEST-0.1-20261117",
-      "sha256": "befe9b3ca060571415b0873cdd9bca24ee62f91d20a8428b71323fb36b5d5079"
+      "sha256": "aed80559e0f2d9864afd29580471e2caa1869a9c6094b591f181a20b1a93213d"
     }
   },
   "attestation": {
@@ -55,7 +55,8 @@
       "domain": {
         "name": "PosternPerps",
         "version": "1",
-        "chainId": 7007701
+        "chainId": 700770,
+        "verifyingContract": "TBD-deploy: the PerpsVault address, pinned at build time (SPEC 2.1)"
       },
       "primaryType": "Attestation",
       "types": {

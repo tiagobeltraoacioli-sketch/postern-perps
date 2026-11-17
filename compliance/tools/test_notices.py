@@ -60,7 +60,9 @@ class Notices(unittest.TestCase):
         self.assertEqual(hashlib.sha256(a["text"].encode("utf8")).hexdigest(), a["sha256"])
         self.assertEqual(a["eip712"]["documentHash"], "0x" + a["sha256"])
         self.assertTrue(a["text"].startswith(a["documentId"] + "\n"))
-        self.assertEqual(a["eip712"]["domain"], {"name": "PosternPerps", "version": "1", "chainId": 7007701})
+        d = a["eip712"]["domain"]
+        self.assertEqual((d["name"], d["version"], d["chainId"]), ("PosternPerps", "1", 700770))  # SPEC 2.1
+        self.assertIn("PerpsVault", d["verifyingContract"])  # bound to one deployment (R395-2)
 
     def test_every_blocked_entry_named_in_terms_and_summary(self):
         codes = blocked_codes(GEO)
@@ -83,9 +85,9 @@ class Notices(unittest.TestCase):
         self.assertEqual({x["liquidationFeePpm"] for x in m.values()}, {5000})
         self.assertIn("0.5% of the closed size", RISK)
         self.assertIn("0.5% liquidation fee", " ".join(NOT["riskPoints"]))
-        self.assertEqual({x["maxFundingRate"] for x in m.values()}, {1000000})
-        self.assertIn("0.1% of position value per hour", RISK)
-        self.assertIn("0.1% of position value per hour", " ".join(NOT["riskPoints"]))
+        self.assertEqual({x["maxFundingRate"] for x in m.values()}, {500000})
+        self.assertIn("0.05% of position value per hour", RISK)
+        self.assertIn("0.05% of position value per hour", " ".join(NOT["riskPoints"]))
         self.assertEqual({x["markBandBps"] for x in m.values()}, {50})
         self.assertIn("bounded to 0.5% around the oracle index", RISK)
         self.assertEqual({x["marketSlippageBps"] for x in m.values()}, {500})

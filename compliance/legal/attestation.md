@@ -9,8 +9,9 @@ The text signed is the `attestation.text` string of `compliance/legal/notices.js
 
 ## How it is signed (Decided, technical, agent 392; the record format is agent 397's)
 
-- Signed as EIP-712 typed data in the domain `{name "PosternPerps", version "1", chainId 7007701}` (the engine's
-  signing domain of SPEC, no verifying contract), primary type
+- Signed as EIP-712 typed data in the engine's signing domain of SPEC 2.1 (`{name "PosternPerps", version "1",
+  chainId 700770, verifyingContract = the PerpsVault address pinned at build time}`; so a staging attestation
+  never verifies against production, R395-2), primary type
   `Attestation(address account,string documentId,bytes32 documentHash,string country,uint64 issuedAt)`, where
   `documentHash` = SHA-256 of the exact UTF-8 text, `country` = the ISO code the Interface detected (or `XX`),
   `issuedAt` = seconds since the epoch. The wallet shows the document id and the country; the text itself is shown

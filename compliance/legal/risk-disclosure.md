@@ -45,7 +45,7 @@ hold a profitable leveraged position, ADL can close part or all of it without yo
 ## 5. Funding
 
 Every hour, longs pay shorts or shorts pay longs, depending on the difference between the contract price and the
-index. Funding is capped at 0.1% of position value per hour (up to 2.4% per day) and can make a position lose money
+index. Funding is capped at 0.05% of position value per hour (up to 1.2% per day) and can make a position lose money
 even if the price does not move.
 
 ## 6. How the exchange runs, and its limits

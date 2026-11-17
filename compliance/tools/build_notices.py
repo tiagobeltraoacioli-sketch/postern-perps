@@ -43,7 +43,8 @@ def build():
         "text": text,
         "sha256": hashlib.sha256(text.encode("utf8")).hexdigest(),
         "eip712": {
-            "domain": {"name": "PosternPerps", "version": "1", "chainId": 7007701},
+            "domain": {"name": "PosternPerps", "version": "1", "chainId": 700770,
+                       "verifyingContract": "TBD-deploy: the PerpsVault address, pinned at build time (SPEC 2.1)"},
             "primaryType": "Attestation",
             "types": {"Attestation": [
                 {"name": "account", "type": "address"}, {"name": "documentId", "type": "string"},
