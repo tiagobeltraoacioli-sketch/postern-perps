@@ -29,11 +29,21 @@ pub struct MarketParams {
     pub max_staleness_ms: u64,
     /// Agreeing committee prices needed to (re)start the index after a halt (H3).
     pub confirm_rounds: u8,
+    /// Exit price band while halted (X1, README section 6a, R395-5): base half-width in bps.
+    pub exit_haircut_bps: u32,
+    /// Added to the half-width per whole minute since the last good index.
+    pub exit_haircut_per_min_bps: u32,
+    /// Largest half-width (< 10000, so the low side of the band stays above 0).
+    pub exit_max_haircut_bps: u32,
+    /// After this long without a good index the market is due for settlement at the band (X3).
+    pub max_halt_ms: u64,
 }
 
 /// Oracle parameters fixed at genesis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitteeParams {
+    /// The PerpsVault address of this deployment: the `verifyingContract` of the engine signing domain (SPEC 2.1).
+    pub verifying_contract: [u8; 20],
     /// The oracle committee: Ethereum addresses of the dedicated oracle keys, index = `SignedObservation.signer`.
     pub signers: Vec<[u8; 20]>,
     /// Minimum number of signed observations in one update (C2) and of agreeing values per market (C3, C4).
@@ -60,11 +70,16 @@ pub enum ParamError {
     Staleness,
     AgeAboveStaleness,
     ConfirmRounds,
+    ZeroVault,
+    ExitBand,
 }
 
 impl CommitteeParams {
     /// Refuses parameters under which the rules lose their meaning. Called by [`OracleState::genesis`].
     pub fn validate(&self) -> Result<(), ParamError> {
+        if self.verifying_contract == [0u8; 20] {
+            return Err(ParamError::ZeroVault);
+        }
         let n = self.signers.len();
         if n == 0 || n > 255 {
             return Err(ParamError::CommitteeSize);
@@ -109,6 +124,15 @@ impl CommitteeParams {
             if m.confirm_rounds < 2 {
                 return Err(ParamError::ConfirmRounds);
             }
+            // The band starts at least as wide as one permitted step, never shrinks, keeps its low side above 0,
+            // and settlement waits at least for a confirmation to be possible.
+            if m.exit_haircut_bps < m.jump_bps
+                || m.exit_max_haircut_bps < m.exit_haircut_bps
+                || m.exit_max_haircut_bps >= 10_000
+                || m.max_halt_ms < m.max_staleness_ms
+            {
+                return Err(ParamError::ExitBand);
+            }
         }
         Ok(())
     }
@@ -143,6 +167,10 @@ pub struct MarketOracle {
     pub index_time_ms: u64,
     pub status: Status,
     pub run: Option<Run>,
+    /// Lowest and highest committee price accepted by C4 since the market halted (0 while active): the exit band
+    /// always covers every price the committee has stood behind since the last good index (X1).
+    pub halt_low: u64,
+    pub halt_high: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +194,8 @@ impl OracleState {
                     index_time_ms: 0,
                     status: Status::Halted(HaltReason::Init),
                     run: None,
+                    halt_low: 0,
+                    halt_high: 0,
                 })
                 .collect(),
         })
@@ -182,7 +212,8 @@ impl OracleState {
 
     /// Canonical bytes of the oracle state, for the engine's state commitment:
     /// `lastRound:u64be count:u16be { marketId:u32be index:u64be indexTimeMs:u64be status:u8 hasRun:u8
-    /// [runLast:u64be runCount:u8 runLastTimeMs:u64be] }`, status 0 active, 1 init, 2 stale, 3 jump.
+    /// [runLast:u64be runCount:u8 runLastTimeMs:u64be] haltLow:u64be haltHigh:u64be }`, status 0 active, 1 init,
+    /// 2 stale, 3 jump.
     pub fn encode(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(10 + self.markets.len() * 39);
         b.extend_from_slice(&self.last_round.to_be_bytes());
@@ -206,6 +237,8 @@ impl OracleState {
                     b.extend_from_slice(&r.last_time_ms.to_be_bytes());
                 }
             }
+            b.extend_from_slice(&m.halt_low.to_be_bytes());
+            b.extend_from_slice(&m.halt_high.to_be_bytes());
         }
         b
     }
@@ -311,14 +344,14 @@ fn validate(params: &CommitteeParams, last_round: u64, u: &OracleUpdate, t: u64)
     }
     let start = u.round.checked_mul(ROUND_MS).ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
     let end = start.checked_add(ROUND_MS).ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
-    let domain = eip712::domain_separator();
+    let domain = eip712::domain_separator(&params.verifying_contract);
     for (i, o) in u.observations.iter().enumerate() {
         // C2c
         if o.time_ms < start || o.time_ms >= end || o.time_ms > t.saturating_add(params.max_future_ms) || t.saturating_sub(o.time_ms) > params.max_age_ms {
             return Err(OracleError::Time { observation: i });
         }
         // C2b
-        let digest = eip712::digest_with_domain(&domain, &o.message(u.round));
+        let digest = eip712::digest(&domain, &o.message(u.round));
         match sig::recover(&digest, &o.signature) {
             Ok(a) if a == params.signers[usize::from(o.signer)] => {}
             Ok(_) => return Err(OracleError::BadSignature { observation: i, reason: None }),
@@ -374,6 +407,8 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
             } else {
                 m.status = Status::Halted(HaltReason::Jump);
                 m.run = Some(Run { last: price, count: 1, last_time_ms: tau });
+                m.halt_low = price;
+                m.halt_high = price;
                 MarketOutcome::HaltedJump { price }
             }
         }
@@ -384,8 +419,13 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
                 m.index_time_ms = tau;
                 m.status = Status::Active;
                 m.run = None;
+                m.halt_low = 0;
+                m.halt_high = 0;
                 return MarketOutcome::Resumed { price, confirmed: false };
             }
+            // X2: every committee price while halted widens the exit band (never narrows it).
+            m.halt_low = if m.halt_low == 0 { price } else { m.halt_low.min(price) };
+            m.halt_high = m.halt_high.max(price);
             let run = match m.run {
                 Some(r)
                     if tau.saturating_sub(r.last_time_ms) <= p.max_staleness_ms
@@ -400,6 +440,8 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
                 m.index_time_ms = tau;
                 m.status = Status::Active;
                 m.run = None;
+                m.halt_low = 0;
+                m.halt_high = 0;
                 MarketOutcome::Resumed { price, confirmed: true }
             } else {
                 m.run = Some(run);
@@ -407,4 +449,64 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
             }
         }
     }
+}
+
+/// Where an exit price comes from (README section 6a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitSource {
+    /// The market is active: the index itself.
+    Index,
+    /// The market is halted: the band around the last good index and every committee price since.
+    HaltBand,
+}
+
+/// The defined price path for exits (withdrawal of free collateral, forced closes) in every oracle state except
+/// genesis (R395-5). The engine values a position at the side of the band that is worse for its holder: a long at
+/// `low`, a short at `high`; a close while halted settles at that side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExitPrice {
+    pub source: ExitSource,
+    pub low: u64,
+    pub high: u64,
+    /// The last good index and its age at the block time.
+    pub reference: u64,
+    pub age_ms: u64,
+    /// X3: no good index for `max_halt_ms`: the market is due for settlement of every position at the band.
+    pub settle_due: bool,
+}
+
+/// X1 to X3 for `market_id` at block time `t`. `None` only before the first index (genesis `INIT`: no trade can
+/// have happened, so no position exists) or for an unknown market.
+pub fn exit_price(params: &CommitteeParams, state: &OracleState, market_id: u32, t: u64) -> Option<ExitPrice> {
+    let i = params.markets.iter().position(|m| m.market_id == market_id)?;
+    let (p, m) = (&params.markets[i], &state.markets[i]);
+    if m.index == 0 {
+        return None;
+    }
+    let age_ms = t.saturating_sub(m.index_time_ms);
+    if m.status == Status::Active {
+        return Some(ExitPrice { source: ExitSource::Index, low: m.index, high: m.index, reference: m.index, age_ms, settle: m.index, settle_due: false });
+    }
+    // X1: half-width h = min(max, base + perMin * whole minutes since the last good index), in bps.
+    let minutes = age_ms / 60_000;
+    let h = u64::from(p.exit_haircut_bps)
+        .saturating_add(u64::from(p.exit_haircut_per_min_bps).saturating_mul(minutes))
+        .min(u64::from(p.exit_max_haircut_bps));
+    let (lo_ref, hi_ref) = if m.halt_low == 0 { (m.index, m.index) } else { (m.index.min(m.halt_low), m.index.max(m.halt_high)) };
+    // Outward rounding: low down, high up. u128: 2^64 * 2 * 10^4 < 2^128.
+    let low = u128::from(lo_ref) * u128::from(10_000 - h) / 10_000;
+    let high = (u128::from(hi_ref) * u128::from(10_000 + h)).div_ceil(10_000);
+    Some(ExitPrice {
+        source: ExitSource::HaltBand,
+        // h < 10000 (validated) and lo_ref >= 1: low >= 0; never 0 for a price >= 2 (stated: a 1-unit index at
+        // a 50% band floors to 0, clamped to 1).
+        low: u64::try_from(low).unwrap_or(u64::MAX).max(1),
+        high: u64::try_from(high).unwrap_or(u64::MAX),
+        reference: m.index,
+        age_ms,
+        // X2: settlement at the latest committee price since the halt, else the last good index.
+        settle: m.run.map(|r| r.last).unwrap_or(m.index),
+        // X3
+        settle_due: age_ms >= p.max_halt_ms,
+    })
 }

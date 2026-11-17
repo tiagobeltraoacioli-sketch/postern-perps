@@ -136,6 +136,11 @@ pub fn record(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
 pub fn run_live(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
     let signer: u8 = one(m, "signer")?.parse().map_err(|_| "--signer: 0..255")?;
     let key = keyfile::read_key(Path::new(one(m, "key-file")?))?;
+    let vault = json::hex_bytes::<20>(&one(m, "vault")?.to_lowercase(), "--vault")?;
+    if vault == [0u8; 20] {
+        return Err("--vault: the zero address".into());
+    }
+    let domain = eip712::domain_separator(&vault);
     let mut out = fs::OpenOptions::new().create(true).append(true).open(one(m, "out")?).map_err(|e| e.to_string())?;
     let mut feeder = Feeder::new(default_config()).map_err(|e| format!("{e:?}"))?;
     let sources = all_sources(&feeder.config);
@@ -149,7 +154,7 @@ pub fn run_live(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
             (Err(e), _) => json!({"round": round_of(t0), "refused": e, "report": json::round_report_to_json(&rep)}),
             (Ok(()), None) => json!({"round": round_of(t0), "observation": null, "report": json::round_report_to_json(&rep)}),
             (Ok(()), Some(o)) => {
-                let s = sig::sign(&key, &eip712::digest(&o));
+                let s = sig::sign(&key, &eip712::digest(&domain, &o));
                 let so = perps_oracle::types::SignedObservation { signer, time_ms: o.time_ms, prices: o.prices.clone(), signature: s };
                 json!({"observation": json::signed_to_json(&so, o.round), "report": json::round_report_to_json(&rep)})
             }

@@ -99,7 +99,9 @@ pub fn update_from_json(v: &Value) -> R<OracleUpdate> {
 }
 
 pub fn committee_from_json(v: &Value) -> R<CommitteeParams> {
-    let o = obj(v, "committee", &["_note", "signers", "quorum", "maxFutureMs", "maxAgeMs", "markets"])?;
+    let o = obj(v, "committee", &["_note", "verifyingContract", "signers", "quorum", "maxFutureMs", "maxAgeMs", "markets"])?;
+    let vault = o.get("verifyingContract").and_then(Value::as_str).ok_or("verifyingContract: not a string")?;
+    let verifying_contract = hex_bytes::<20>(&vault.to_lowercase(), "verifyingContract")?;
     let signers = o
         .get("signers")
         .and_then(Value::as_array)
@@ -113,7 +115,11 @@ pub fn committee_from_json(v: &Value) -> R<CommitteeParams> {
         .ok_or("markets: not an array")?
         .iter()
         .map(|m| {
-            let o = obj(m, "market", &["marketId", "symbol", "minSources", "agreeBps", "jumpBps", "maxStalenessMs", "confirmRounds"])?;
+            let o = obj(
+                m,
+                "market",
+                &["marketId", "symbol", "minSources", "agreeBps", "jumpBps", "maxStalenessMs", "confirmRounds", "exitHaircutBps", "exitHaircutPerMinBps", "exitMaxHaircutBps", "maxHaltMs"],
+            )?;
             let small = |k: &str, max: u64| -> R<u64> {
                 let v = u64f(o, k)?;
                 if v > max {
@@ -128,11 +134,15 @@ pub fn committee_from_json(v: &Value) -> R<CommitteeParams> {
                 jump_bps: small("jumpBps", 10_000)? as u32,
                 max_staleness_ms: u64f(o, "maxStalenessMs")?,
                 confirm_rounds: small("confirmRounds", 255)? as u8,
+                exit_haircut_bps: small("exitHaircutBps", 10_000)? as u32,
+                exit_haircut_per_min_bps: small("exitHaircutPerMinBps", 10_000)? as u32,
+                exit_max_haircut_bps: small("exitMaxHaircutBps", 10_000)? as u32,
+                max_halt_ms: u64f(o, "maxHaltMs")?,
             })
         })
         .collect::<R<Vec<_>>>()?;
     let quorum = u8::try_from(u64f(o, "quorum")?).map_err(|_| "quorum out of range".to_string())?;
-    let p = CommitteeParams { signers, quorum, max_future_ms: u64f(o, "maxFutureMs")?, max_age_ms: u64f(o, "maxAgeMs")?, markets };
+    let p = CommitteeParams { verifying_contract, signers, quorum, max_future_ms: u64f(o, "maxFutureMs")?, max_age_ms: u64f(o, "maxAgeMs")?, markets };
     p.validate().map_err(|e| format!("committee parameters refused: {e:?}"))?;
     Ok(p)
 }

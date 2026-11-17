@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: price oracle (`node/oracle/`)
 
-UNAUDITED PROTOTYPE. Owned by agent 394. Nothing here is deployed. Version 0.1 (2026-11-17).
+UNAUDITED PROTOTYPE. Owned by agent 394. Nothing here is deployed. Version 0.2 (2026-11-17): code in `core/` and `feeder/` implements every rule below.
 
 The oracle gives the engine one USD index price per market. It never trusts one venue and never trusts one
 signer: every index value is a median of medians (venues inside each validator's feeder, then validators inside the
@@ -41,8 +41,11 @@ set once in the engine's genesis, like the checkpoint committee.
 
 ## 3. The signed observation (what each oracle signer signs)
 
-EIP-712, domain `{name: "PosternPerps", version: "1", chainId: 7007701}` (the engine's signing domain of BRIEF-PERPS;
-no `verifyingContract`), primary type `OracleObservation`:
+EIP-712, the ENGINE domain of `docs/SPEC.md` 2.1 (agreed with 388 as O-7, 2026-11-17; v0.1 of this document had
+the provisional `{PosternPerps, 1, 7007701}` without `verifyingContract`):
+`EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)` =
+`{PosternPerps, 1, 700770, <PerpsVault address of the deployment>}`, so an observation signed for a test or staging
+deployment is invalid on production. Primary type `OracleObservation`:
 
 ```
 OracleObservation(uint64 round,uint64 timeMs,OraclePrice[] prices)OraclePrice(uint32 marketId,uint64 price,uint8 sources)
@@ -89,7 +92,13 @@ No trailing bytes; `count`, `priceCount` and every ordering rule below are part 
 Parameters per engine: oracle committee `signers[0..n)` (set once), quorum `q`; per market: `minSources`,
 `agreeBps`, `jumpBps`, `maxStalenessMs`, `confirmRounds`; global: `maxFutureMs`, `maxAgeMs`.
 
-Validity of the whole input (any failure: the input is rejected with the named error and NO state changes):
+Parameters are refused at genesis (`CommitteeParams::validate`) unless: `1 <= n <= 255`, `n/2 < q <= n`, signers
+distinct and non-zero, markets strictly ascending (1 to 256), `minSources >= 1`, `1 <= agreeBps <= jumpBps <= 10000`,
+`maxStalenessMs >= 3000`, `maxAgeMs <= maxStalenessMs` of every market, `confirmRounds >= 2`.
+
+Validity of the whole input (any failure: the input is rejected with the named error and NO state changes). Error
+order, normative so every implementation reports the same error: C1; then C2 over the whole input; then for each
+observation in input order C2c before C2b; the first failing check is reported:
 
 - C1 `ORACLE_ROUND_NOT_NEW`: `round > lastOracleRound`.
 - C2 `ORACLE_MALFORMED`: `q <= count <= n`; `signer` strictly ascending and `< n`; every `prices` list strictly
@@ -101,6 +110,7 @@ Validity of the whole input (any failure: the input is rejected with the named e
 Then `lastOracleRound = round`, and for each market `m` the engine knows (entries for unknown markets are ignored),
 in ascending `marketId` order:
 
+- A round rejected by C3 or C4 for a market still consumes the round number (C1 is about the input).
 - C3 values `V` = the `price` of `m` in each observation whose entry has `sources >= minSources(m)`. If `|V| < q`:
   no change for `m` (`NO_QUORUM`). Else `M = sort(V)[|V| / 2]` (the median; the upper median when `|V|` is even).
 - C4 `A` = the number of `v` in `V` with `|v - M| * 10000 <= agreeBps * M` (u128). If `A < q`: no change for `m`
@@ -113,8 +123,11 @@ values on each side, so it lies between two honest values. C4 refuses a round in
 
 ## 6. Halt and resume (per market, normative)
 
-State per market: `index` (u64, market price scale), `indexTimeMs`, `status` (`active` or `halted`),
-`haltReason` (`STALE` or `JUMP`), and a confirmation run `{last, count, lastTimeMs}`.
+State per market: `index` (u64, market price scale; 0 before the first), `indexTimeMs`, `status` (`active` or
+`halted`), `haltReason` (`INIT` at genesis, `STALE` or `JUMP`), and a confirmation run `{last, count, lastTimeMs}`.
+Genesis: every market `halted` with `INIT`; the first index needs `confirmRounds` agreeing committee prices.
+Canonical state bytes for the engine's commitment: `OracleState::encode` in `core/src/committee.rs`. A committee
+price that is `NoQuorum` or `Disagree` leaves the run unchanged (the freshness bound on the run handles gaps).
 
 - H1 (at the start of every block, before its inputs): if `status = active` and `T - indexTimeMs > maxStalenessMs`:
   `status = halted`, `haltReason = STALE`, run cleared.
@@ -130,8 +143,45 @@ State per market: `index` (u64, market price scale), `indexTimeMs`, `status` (`a
 - The index moves only by (a) a bounded step from a fresh index, or (b) `confirmRounds` successive committee prices
   that agree with each other. A flash move that reverts within the staleness window never reaches the index.
 - While `halted` (recommendation to the engine, 388 decides): no matching except cancels, no liquidations, no
-  stop or take-profit triggers, no funding samples, no withdrawal that depends on this market's price (the vault's
-  escape hatch is the exit if a halt lasts).
+  stop or take-profit triggers, no funding samples. Exits are NOT blocked: they use the exit price of section 6a.
+
+## 6a. Exit price path (normative; R395-5, coordinator decision 2026-11-17 04:59 UTC)
+
+The sequencer alone can halt every market (it chooses whether an oracle input is in a block: H1 then halts the
+market 10 s later). A halt must therefore never leave a withdrawal of free collateral or a forced close without a
+price. `exit_price(params, state, market, T)` (`core/src/committee.rs`) defines one in every state except genesis
+(`INIT`: no index ever existed, so no trade and no position can exist):
+
+- X0 active: `low = high = settle = index`.
+- X1 halted: the band `[low, high]` with half-width `h = min(exitMaxHaircutBps, exitHaircutBps +
+  exitHaircutPerMinBps * floor(age / 60000))` bps, `age = T - indexTimeMs` (time since the last good index);
+  `low = floor(min(index, haltLow) * (10000 - h) / 10000)` (at least 1), `high = ceil(max(index, haltHigh) *
+  (10000 + h) / 10000)`.
+- X2 `haltLow`/`haltHigh` are the lowest and highest committee price (C3 and C4 passed) since the market halted,
+  including the price that caused a `JUMP` halt; they only widen the band and are cleared on resume; they are part
+  of the canonical state bytes. `settle` = the latest committee price since the halt, else the last good index.
+- X3 `settleDue` when `age >= maxHaltMs`.
+
+Proposed use by the engine (388 decides and writes it into SPEC): a withdrawal of free collateral values every
+position in a halted market at the side of the band worse for its holder (long at `low`, short at `high`); a forced
+close of a position in a halted market settles at `settle` and is checked against the band (a forced close is
+never refused for a halt); after `settleDue` every position of the market is settled at `settle`, and a forced
+request that still cannot be served is not consumed (the vault's deadline then fires escape).
+
+Why this is safe for the other users: the band covers the last good index and every price the committee has
+signed since, widened by at least one permitted step (`exitHaircutBps >= jumpBps`) and by a further amount per
+minute of darkness, so a long cannot withdraw collateral that a crash the committee already saw would have consumed;
+the sequencer cannot narrow it (X2 only widens; withholding only ages the index, which widens `h`). Cost (stated):
+during a long halt honest users can withdraw less than their mark-to-market equity, and `settle` after a halt
+without any committee price is the pre-halt index (the only price the protocol stands behind).
+
+Defaults (section 8): `exitHaircutBps = jumpBps`, `exitHaircutPerMinBps = 100`, `exitMaxHaircutBps = 5000`,
+`maxHaltMs = 3600000` (one hour, well inside the vault's one-day forced-request delay).
+- Stated limit: the halt machine bounds the size of one step (`jumpBps` per round from a fresh index), not the
+  level. A coordinated manipulation of a majority of a market's venues that creeps in steps below `jumpBps`, or
+  holds a new level for `confirmRounds` rounds, reaches the index. The defences against that are the choice of
+  deep, independent USD venues (`SOURCES.md`), the engine's mark-price and liquidation rules (388) and the
+  validators' own refusal to sign a checkpoint whose price deviates from their own view (389's proposal E).
 - Trade-off (stated): during a violent genuine move the market stays halted until prices are stable for
   `confirmRounds` rounds, so liquidations wait and the insurance fund carries the gap; the alternative (following a
   jump at once) is what an oracle manipulator needs.
@@ -144,7 +194,7 @@ State per market: `index` (u64, market price scale), `indexTimeMs`, `status` (`a
   ahead of the receive time and not older than the bound of its kind (snapshot time `maxSnapshotAgeMs`, last-trade
   time `maxTradeAgeMs`), and it is not frozen (unchanged for `frozenAfterMs` while the market's observation moved
   by at least `frozenMoveBps`).
-- F3 the reading's price is `median(bid, ask, last)` (equal to `last` clamped into `[bid, ask]`), or `(bid + ask) / 2`
+- F3 the reading's price is (USDT/USD rate sources: four USD venues, without Bitfinex, see `SOURCES.md`) `median(bid, ask, last)` (equal to `last` clamped into `[bid, ask]`), or `(bid + ask) / 2`
   when the venue gives no last price, at 18 decimals; a venue quoted in USDT is converted with the round's
   USDT/USD rate (the same rule F1 to F6 over USD venues of the pair USDT/USD); without a rate, or with a rate more
   than `maxDepegBps` from 1, readings in that quote are dropped.
@@ -171,8 +221,12 @@ State per market: `index` (u64, market price scale), `indexTimeMs`, `status` (`a
 | `maxSnapshotAgeMs`, `maxTradeAgeMs`, `maxFutureSkewMs` | 5000, 300000, 2000 | feeder |
 | `frozenAfterMs`, `frozenMoveBps` | 60000, 20 | feeder |
 | `fetchTimeoutMs`, `maxClockSkewMs` | 1500, 1000 | feeder |
+| `exitHaircutBps`, `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs` | `jumpBps`, 100, 5000, 3600000 | engine, per market (section 6a) |
 | USDT/USD conversion: `minSources`, `maxDepegBps` | 3, 500 | feeder |
 
 ## 9. Not done / not proven
 
-Version 0.1 of this document is written before the code; sections are updated as `core/` and `feeder/` land.
+See the report `~/Desktop/POSTERNDEX-PERPS-20261117/agents/394-oracle.md` for the current list. In short: not
+reviewed; parameters not calibrated on historical data; venue terms of use and most rate limits unconfirmed; the
+feeder's submission to the sequencer and the node's ingest are not wired (389); the engine does not call `core` yet
+(388); the price scale (10^priceDecimals per market vs a fixed 1e8) waits for SPEC.md.

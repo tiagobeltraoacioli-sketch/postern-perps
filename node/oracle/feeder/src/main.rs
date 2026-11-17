@@ -3,12 +3,16 @@
 //! ```text
 //! perps-oracle address  --key-file F
 //! perps-oracle dev-key  --label L --out F                      (THROWAWAY key from a public label)
-//! perps-oracle observe  --fixtures DIR --signer I --key-file F  (sign one round from recorded responses)
+//! perps-oracle observe  --fixtures DIR --signer I --key-file F --vault 0x..  (sign one round from recorded responses)
 //! perps-oracle replay   --rounds DIR                            (unsigned observations of recorded rounds, in order)
 //! perps-oracle assemble --obs F1 F2 ...                         (OracleUpdate from feeder submissions)
 //! perps-oracle apply    --committee F --updates JSONL           (the engine rule from genesis over updates)
 //! perps-oracle record   --out DIR [--rounds N]                  (net feature: record live venue responses)
-//! perps-oracle run      --signer I --key-file F --out JSONL [--rounds N]   (net feature: live feeder)
+//! perps-oracle run      --signer I --key-file F --vault 0x.. --out JSONL [--rounds N]   (net feature: live feeder)
+//! perps-oracle exit     --committee F --updates JSONL --market M --at T  (exit price band after the updates)
+//!
+//! `--vault` is the PerpsVault address of the deployment: the verifyingContract of the engine signing domain
+//! (SPEC 2.1). An observation signed for one deployment is invalid on every other.
 //! ```
 
 use std::collections::BTreeMap;
@@ -82,8 +86,16 @@ pub fn load_round(dir: &Path) -> Result<(u64, Vec<Response>), String> {
     Ok((t0, out))
 }
 
-fn sign_observation(signer: u8, key: &k256::ecdsa::SigningKey, o: &perps_oracle::types::Observation) -> SignedObservation {
-    let sigb = sig::sign(key, &eip712::digest(o));
+pub fn vault_arg(v: &str) -> Result<[u8; 20], String> {
+    let a = json::hex_bytes::<20>(&v.to_lowercase(), "--vault")?;
+    if a == [0u8; 20] {
+        return Err("--vault: the zero address".into());
+    }
+    Ok(a)
+}
+
+fn sign_observation(signer: u8, key: &k256::ecdsa::SigningKey, vault: &[u8; 20], o: &perps_oracle::types::Observation) -> SignedObservation {
+    let sigb = sig::sign(key, &eip712::digest(&eip712::domain_separator(vault), o));
     SignedObservation { signer, time_ms: o.time_ms, prices: o.prices.clone(), signature: sigb }
 }
 
@@ -104,9 +116,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let (t0, resp) = load_round(Path::new(one(&m, "fixtures")?))?;
             let signer: u8 = one(&m, "signer")?.parse().map_err(|_| "--signer: 0..255")?;
             let key = keyfile::read_key(Path::new(one(&m, "key-file")?))?;
+            let vault = vault_arg(one(&m, "vault")?)?;
             let mut f = Feeder::new(default_config()).map_err(|e| format!("{e:?}"))?;
             let (obs, rep) = f.observe(round_of(t0), t0, &resp);
-            let signed = obs.as_ref().map(|o| json::signed_to_json(&sign_observation(signer, &key, o), o.round));
+            let signed = obs.as_ref().map(|o| json::signed_to_json(&sign_observation(signer, &key, &vault, o), o.round));
             println!("{}", serde_json::to_string_pretty(&json!({"observation": signed, "report": json::round_report_to_json(&rep)})).unwrap());
         }
         "replay" => {
@@ -145,7 +158,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let u = OracleUpdate { round: round.ok_or("no observations")?, observations: obs };
             println!("{}", serde_json::to_string(&json::update_to_json(&u)).unwrap());
         }
-        "apply" => {
+        "apply" | "exit" => {
+            let exit_at = if cmd == "exit" {
+                let mk: u32 = one(&m, "market")?.parse().map_err(|_| "--market: a market id")?;
+                let at: u64 = one(&m, "at")?.parse().map_err(|_| "--at: block time in ms")?;
+                Some((mk, at))
+            } else {
+                None
+            };
             let prm = json::committee_from_json(&read_json(Path::new(one(&m, "committee")?))?)?;
             let mut st = OracleState::genesis(&prm).map_err(|e| format!("{e:?}"))?;
             let text = fs::read_to_string(one(&m, "updates")?).map_err(|e| e.to_string())?;
@@ -161,6 +181,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 println!("{}", serde_json::to_string(&json!({"blockTime": t, "haltedStale": stale, "result": res})).unwrap());
             }
             println!("{}", serde_json::to_string(&json!({"stateBytes": format!("0x{}", hex::encode(st.encode()))})).unwrap());
+            if let Some((mk, at)) = exit_at {
+                let x = perps_oracle::committee::exit_price(&prm, &st, mk, at);
+                println!("{}", serde_json::to_string(&json!({"exit": x.map(|x| json!({
+                    "source": format!("{:?}", x.source), "low": x.low.to_string(), "high": x.high.to_string(),
+                    "reference": x.reference.to_string(), "settle": x.settle.to_string(), "ageMs": x.age_ms, "settleDue": x.settle_due}))})).unwrap());
+            }
         }
         #[cfg(feature = "net")]
         "record" => perps_oracle_feeder::net::record(&m)?,

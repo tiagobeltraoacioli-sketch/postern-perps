@@ -10,6 +10,7 @@ use perps_oracle::sig::{self, SigError};
 use perps_oracle::types::*;
 use perps_oracle::ROUND_MS;
 
+
 fn key(i: u8) -> SigningKey {
     SigningKey::from_bytes(&keccak256(format!("postern-perps-oracle-test-signer-{i}").as_bytes()).into()).unwrap()
 }
@@ -18,12 +19,27 @@ fn addr(i: u8) -> [u8; 20] {
     sig::address_of(key(i).verifying_key())
 }
 
+/// A throwaway vault address (the engine domain's verifyingContract of this test deployment).
+const VAULT: [u8; 20] = [0xdb; 20];
+
 fn market(id: u32, jump: u32) -> MarketParams {
-    MarketParams { market_id: id, min_sources: 3, agree_bps: 100, jump_bps: jump, max_staleness_ms: 10_000, confirm_rounds: 3 }
+    MarketParams {
+        market_id: id,
+        min_sources: 3,
+        agree_bps: 100,
+        jump_bps: jump,
+        max_staleness_ms: 10_000,
+        confirm_rounds: 3,
+        exit_haircut_bps: jump,
+        exit_haircut_per_min_bps: 100,
+        exit_max_haircut_bps: 5000,
+        max_halt_ms: 3_600_000,
+    }
 }
 
 fn params() -> CommitteeParams {
     CommitteeParams {
+        verifying_contract: VAULT,
         signers: (0..7).map(addr).collect(),
         quorum: 5,
         max_future_ms: 1000,
@@ -43,7 +59,7 @@ fn obs(i: u8, round: u64, prices: &[(u32, u64, u8)]) -> SignedObservation {
     let prices: Vec<OraclePrice> = prices.iter().map(|&(m, p, s)| OraclePrice { market_id: m, price: p, sources: s }).collect();
     let time_ms = round * ROUND_MS + 100;
     let msg = Observation { round, time_ms, prices: prices.clone() };
-    SignedObservation { signer: i, time_ms, prices, signature: sig::sign(&key(i), &eip712::digest(&msg)) }
+    SignedObservation { signer: i, time_ms, prices, signature: sig::sign(&key(i), &eip712::digest(&eip712::domain_separator(&VAULT), &msg)) }
 }
 
 /// Every signer in `signers` observes BTC at `btc[k]`.
@@ -166,7 +182,7 @@ fn c2b_signatures() {
     // A key outside the committee.
     let mut u = honest(r, 648_700);
     let msg = u.observations[6].message(r);
-    u.observations[6].signature = sig::sign(&key(99), &eip712::digest(&msg));
+    u.observations[6].signature = sig::sign(&key(99), &eip712::digest(&eip712::domain_separator(&VAULT), &msg));
     assert_rejected_unchanged(&prm, &mut st, &u, t, OracleError::BadSignature { observation: 6, reason: None });
     // High-s twin of a valid signature.
     let mut u = honest(r, 648_700);
@@ -180,13 +196,15 @@ fn c2b_signatures() {
     assert_rejected_unchanged(&prm, &mut st, &u, t, OracleError::BadSignature { observation: 1, reason: Some(SigError::BadV) });
     // Signed in another domain (the vault's checkpoint domain name, the L2 chain id).
     for dom in [
-        eip712::domain_separator_for("PosternPerpsVault", "1", 7_007_701),
-        eip712::domain_separator_for("PosternPerps", "1", 700_770),
-        eip712::domain_separator_for("PosternPerps", "2", 7_007_701),
+        eip712::domain_separator_for("PosternPerpsVault", "1", 700_770, &VAULT),
+        eip712::domain_separator_for("PosternPerps", "1", 7_007_701, &VAULT),
+        eip712::domain_separator_for("PosternPerps", "2", 700_770, &VAULT),
+        // The same engine domain of another deployment (a staging vault).
+        eip712::domain_separator(&[0xdc; 20]),
     ] {
         let mut u = honest(r, 648_700);
         let msg = u.observations[0].message(r);
-        u.observations[0].signature = sig::sign(&key(0), &eip712::digest_with_domain(&dom, &msg));
+        u.observations[0].signature = sig::sign(&key(0), &eip712::digest(&dom, &msg));
         assert_rejected_unchanged(&prm, &mut st, &u, t, OracleError::BadSignature { observation: 0, reason: None });
     }
 }
@@ -443,6 +461,21 @@ fn parameter_validation() {
     let mut p = ok.clone();
     p.markets[0].min_sources = 0;
     assert_eq!(p.validate(), Err(ParamError::MinSources));
+    let mut p = ok.clone();
+    p.verifying_contract = [0; 20];
+    assert_eq!(p.validate(), Err(ParamError::ZeroVault));
+    let mut p = ok.clone();
+    p.markets[0].exit_haircut_bps = 499;
+    assert_eq!(p.validate(), Err(ParamError::ExitBand), "the band starts at least one permitted step wide");
+    let mut p = ok.clone();
+    p.markets[0].exit_max_haircut_bps = 10_000;
+    assert_eq!(p.validate(), Err(ParamError::ExitBand));
+    let mut p = ok.clone();
+    p.markets[0].exit_max_haircut_bps = 400;
+    assert_eq!(p.validate(), Err(ParamError::ExitBand));
+    let mut p = ok.clone();
+    p.markets[0].max_halt_ms = 9_999;
+    assert_eq!(p.validate(), Err(ParamError::ExitBand));
     let mut p = ok;
     p.markets.clear();
     assert_eq!(p.validate(), Err(ParamError::NoMarkets));
