@@ -35,6 +35,7 @@ sha3 = "=0.10.9"
 hex = "0.4.3"
 anyhow = "1"
 postern-perps-engine = { path = "../engine" }
+postern-geoblock = { path = "../compliance/geoblock/rust" }
 
 [dev-dependencies]
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect"] }

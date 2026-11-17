@@ -349,8 +349,34 @@ async fn blocks_stream(State(app): State<Arc<App>>, q: Q) -> Response {
 }
 
 /// Admission path shared by REST and WebSocket: parse, recover the signer, geoblock, then the sequencer.
-pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_country: Option<&str>, req: &serde_json::Value) -> Result<crate::sequencer::Ack, Response> {
+/// Where the action arrived from: REST (the assertion is in the request headers) or a WebSocket frame (the
+/// assertion is the frame's own `edgeGeo`, never the upgrade request's headers: R395-36).
+pub enum Via<'a> {
+    Rest,
+    Ws(Option<&'a serde_json::Value>),
+}
+
+pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_country: Option<&str>, req: &serde_json::Value, via: Via) -> Result<crate::sequencer::Ack, Response> {
     let now = now_ms();
+    let geo_refusal = |reason: &str| {
+        error(451, "GEO_RESTRICTED", "PosternDEX Perpetuals is not available in your jurisdiction; cancelling, reducing and withdrawing stay open.",
+            serde_json::json!({"country": null, "listVersion": app.geo.version, "assertion": reason}))
+    };
+    // country: with an edge verifier configured, ONLY from a valid per-action assertion
+    let asserted: Option<(Option<String>, Option<String>)> = match (&app.geo.edge, &via) {
+        (Some(ev), Via::Rest) => {
+            let h = headers.get(crate::geo::ASSERTION_HEADER).and_then(|v| v.to_str().ok());
+            let m = headers.get(crate::geo::ASSERTION_MAC_HEADER).and_then(|v| v.to_str().ok());
+            Some(ev.verify(h, m, now).map_err(|e| geo_refusal(&e))?)
+        }
+        (Some(ev), Via::Ws(eg)) => {
+            let eg = eg.ok_or_else(|| geo_refusal("missing edgeGeo"))?;
+            Some(ev.verify(eg.get("header").and_then(|v| v.as_str()), eg.get("mac").and_then(|v| v.as_str()), now).map_err(|e| geo_refusal(&e))?)
+        }
+        // no verifier: a WebSocket frame that claims an edge assertion cannot be honoured
+        (None, Via::Ws(Some(_))) => return Err(geo_refusal("edgeGeo present but this node has no edge verifier")),
+        (None, _) => None,
+    };
     if let Some(p) = peer {
         if !app.ip_rate.lock().unwrap().allow(&ip_key(p.ip()), now) {
             return Err(error(429, "RATE_LIMITED", "per-IP action rate", serde_json::json!({})));
@@ -361,7 +387,10 @@ pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_co
         error(400, code, &e, serde_json::json!({}))
     })?;
     let v = verify_signed_action(&app.g, &a).map_err(|e| error(400, "BAD_SIGNATURE", &e.to_string(), serde_json::json!({})))?;
-    let (country, sub) = app.geo.country(peer.map(|p| p.ip()), headers, query_country);
+    let (country, sub) = match asserted {
+        Some(cs) => cs,
+        None => app.geo.country(peer.map(|p| p.ip()), headers, query_country),
+    };
     let d = app.geo.decide(country.as_deref(), sub.as_deref(), &v.account, &v.signer);
     let ro = field_bool(&app.g, &v.primary, &a.message, "reduceOnly");
     if !app.geo.admits(&d, &v.primary, ro) {
@@ -394,7 +423,7 @@ async fn post_action(
         Ok(v) => v,
         Err(e) => return error(400, "MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
     };
-    let ack = match submit(&app, Some(peer), &headers, q.get("country").map(|s| s.as_str()), &req) {
+    let ack = match submit(&app, Some(peer), &headers, q.get("country").map(|s| s.as_str()), &req, Via::Rest) {
         Ok(a) => a,
         Err(r) => return r,
     };
@@ -693,8 +722,12 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                         serde_json::json!({"op":"unsubscribed","id":id,"channel":ch})
                     }
                     Some("action") => {
+                        // the frame's own assertion; stripped before the request is parsed (never reaches the engine)
                         let req = j.get("request").cloned().unwrap_or(serde_json::Value::Null);
-                        match submit(&app, Some(peer), &headers, None, &req) {
+                        let eg = j.get(crate::geo::EDGE_GEO_FIELD).or_else(|| req.get(crate::geo::EDGE_GEO_FIELD)).cloned();
+                        let mut req = req;
+                        if let Some(o) = req.as_object_mut() { o.remove(crate::geo::EDGE_GEO_FIELD); }
+                        match submit(&app, Some(peer), &headers, None, &req, Via::Ws(eg.as_ref())) {
                             Ok(a) => serde_json::json!({"op":"actionResult","id":id,"ack":a.to_json()}),
                             Err(r) => {
                                 let body = axum::body::to_bytes(r.into_body(), 64 * 1024).await.unwrap_or_default();

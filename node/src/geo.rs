@@ -14,8 +14,42 @@
 use crate::util::{parse_address, Address};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
+use std::sync::Mutex;
 
-#[derive(Clone, Debug)]
+pub const ASSERTION_HEADER: &str = "x-postern-geo";
+pub const ASSERTION_MAC_HEADER: &str = "x-postern-geo-mac";
+/// WebSocket `op: action` frames carry their own per-action assertion here (397, R395-36).
+pub const EDGE_GEO_FIELD: &str = "edgeGeo";
+
+/// The edge's HMAC assertion (agent 397's `compliance/geoblock`, verified with its Rust port): one shared secret,
+/// one replay cache for REST and WebSocket together, so an assertion admits at most one action anywhere.
+pub struct EdgeVerifier {
+    secret: Vec<u8>,
+    replay: Mutex<postern_geoblock::assertion::ReplayCache>,
+}
+
+impl EdgeVerifier {
+    pub fn new(secret: Vec<u8>) -> Result<EdgeVerifier, String> {
+        if secret.len() < postern_geoblock::assertion::MIN_SECRET_BYTES {
+            return Err("edge secret shorter than 32 bytes".into());
+        }
+        Ok(EdgeVerifier { secret, replay: Mutex::new(postern_geoblock::assertion::ReplayCache::new(200_000)) })
+    }
+
+    /// (country, subdivision) of a valid, fresh, never-seen assertion whose anonymizer signals do not deny.
+    pub fn verify(&self, header: Option<&str>, mac: Option<&str>, now_ms: u64) -> Result<(Option<String>, Option<String>), String> {
+        let mut r = self.replay.lock().unwrap();
+        let v = postern_geoblock::assertion::verify(header, mac, &self.secret, now_ms as i64, Some(&mut r)).map_err(|e| e.to_string())?;
+        // geoblock.json anonymizers: tor and vpn_proxy deny; hosting is allowed on the API only with an attested
+        // account, which this node does not check yet: deny (fail closed, stated)
+        if v.tor == Some(true) || v.vpn_proxy == Some(true) || v.hosting == Some(true) {
+            return Ok((None, None));
+        }
+        Ok((v.country, v.subdivision))
+    }
+}
+
+#[derive(Clone)]
 pub struct GeoPolicy {
     pub version: String,
     pub allowed: BTreeSet<String>,
@@ -28,6 +62,9 @@ pub struct GeoPolicy {
     pub dev: bool,
     /// dev only, explicit flag: the country of a request that names none (conformance runs); never in live mode
     pub dev_default_country: Option<String>,
+    /// when set, the country of an action comes ONLY from a valid edge assertion (REST header or WebSocket
+    /// per-action `edgeGeo`); nothing else is trusted
+    pub edge: Option<std::sync::Arc<EdgeVerifier>>,
     pub tiers: BTreeMap<String, String>,
 }
 
@@ -82,6 +119,7 @@ impl GeoPolicy {
             subdivision_header: None,
             dev,
             dev_default_country: None,
+            edge: None,
             tiers,
         })
     }

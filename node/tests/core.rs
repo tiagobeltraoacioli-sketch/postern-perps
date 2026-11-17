@@ -498,3 +498,34 @@ fn r395_30_forced_deadline_is_judged_in_l2_seconds() {
     n.deposit_everywhere(deposit(2, ua, 1));
     assert!(n.step().iter().all(|r| matches!(r, VResult::AppliedNotSigned(s) if s.contains("deadline"))));
 }
+
+/// R395-37 (395, Medium, fails closed): an honest block whose deposit this validator's own L2 view sees only
+/// 3 s later must still be signed: lateness is measured at first receipt, not after the L2-view wait. With
+/// dc2c235 every validator returned AppliedNotSigned here (0/7). The 60 s-late case stays 0/7 (test r395_29).
+#[test]
+fn r395_37_waiting_for_the_own_l2_view_does_not_make_a_block_late() {
+    let mut n = net("r395-37", 1);
+    let ua = key_address(&user(61));
+    n.seq_view.lock().unwrap().deposits.insert(0, deposit(0, ua, 1_000_000));
+    let info = n.seq.produce(now()).unwrap().unwrap();
+    let b = info.block.as_ref().clone();
+    let t0 = now();
+    for v in n.vals.iter_mut() {
+        assert!(matches!(v.process(&b, t0), VResult::Wait(_)));
+    }
+    for v in &n.val_views {
+        v.lock().unwrap().deposits.insert(0, deposit(0, ua, 1_000_000));
+    }
+    let mut signed = 0;
+    for v in n.vals.iter_mut() {
+        match v.process(&b, t0 + 3_000) {
+            VResult::Applied { checkpoint: Some((body, sig)) } => {
+                n.seq.add_signature(body.height, sig).unwrap();
+                signed += 1;
+            }
+            r => panic!("honest block not signed after the L2-view wait: {r:?}"),
+        }
+    }
+    assert_eq!(signed, 7);
+    assert_eq!(n.seq.latest_final(), Some(1));
+}

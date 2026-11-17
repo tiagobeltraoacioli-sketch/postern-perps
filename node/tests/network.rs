@@ -214,6 +214,10 @@ struct Running {
 }
 
 async fn start_node(name: &str) -> Running {
+    start_node_with(name, None).await
+}
+
+async fn start_node_with(name: &str, edge_secret: Option<Vec<u8>>) -> Running {
     let (g, keys) = perps_node::dev::dev_genesis(&format!("http-{name}"), 7, 5, 5, 0);
     let dir = tmpdir(name);
     let sv = view();
@@ -225,6 +229,10 @@ async fn start_node(name: &str) -> Running {
         true,
     )
     .unwrap();
+    let mut geo = geo;
+    if let Some(sec) = edge_secret {
+        geo.edge = Some(Arc::new(perps_node::geo::EdgeVerifier::new(sec).unwrap()));
+    }
     let app = App::new(g.clone(), seq, geo, Mode::Dev, sv.clone(), 50, false);
     let (tx, rx) = tokio::sync::watch::channel(false);
     let views: Vec<_> = (0..7).map(|_| sv.clone()).collect();
@@ -361,5 +369,79 @@ async fn http_api_actions_finality_geo_and_websocket() {
     let st = n.app.validators.lock().unwrap().clone();
     assert_eq!(st.len(), 7);
     assert!(st.values().all(|v| v.latched.is_none()));
+    let _ = n.stop.send(true);
+}
+
+
+fn assertion(secret: &[u8], country: &str, rid: u8, ts: u64) -> (String, String) {
+    let header = format!("v1;c={country};s=-;tor=0;vpn=0;host=0;sur=api;ts={ts};rid={:032x}", rid as u128 + 1);
+    let mac = postern_geoblock::assertion::mac_hex(secret, &header).unwrap();
+    (header, mac)
+}
+
+async fn ws_action(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, id: u64, frame: serde_json::Value) -> serde_json::Value {
+    ws.send(tokio_tungstenite::tungstenite::Message::Text(frame.to_string().into())).await.unwrap();
+    for _ in 0..100 {
+        if let Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t)))) = tokio::time::timeout(Duration::from_millis(200), ws.next()).await {
+            let j: serde_json::Value = serde_json::from_str(&t).unwrap();
+            if j["id"] == id {
+                return j;
+            }
+        }
+    }
+    panic!("no answer to {id}");
+}
+
+/// R395-36 (395) / 397 38ca9a4: with an edge verifier, a WebSocket action is admitted only with its OWN valid
+/// per-action `edgeGeo` assertion (HMAC, 30 s, replay cache shared with REST); the upgrade request's headers never
+/// count. Before this change the node took the WebSocket action's country from the upgrade request (a 30 s
+/// connection-wide assertion, or the dev header), so the first action below was admitted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r395_36_ws_action_needs_its_own_edge_assertion() {
+    let secret = vec![7u8; 32];
+    let n = start_node_with("edge", Some(secret.clone())).await;
+    let g = n.g.clone();
+    let u = user(60);
+    let ua = key_address(&u);
+    let t = now();
+    let ws_url = format!("{}/v1/ws?country=PA", n.url.replace("http://", "ws://"));
+    let req = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url.as_str()).unwrap();
+    let mut req = req;
+    // a valid assertion on the UPGRADE request must not admit frames
+    let (uh, um) = assertion(&secret, "PA", 1, t);
+    req.headers_mut().insert("x-postern-geo", uh.parse().unwrap());
+    req.headers_mut().insert("x-postern-geo-mac", um.parse().unwrap());
+    req.headers_mut().insert("x-mock-country", "PA".parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    let r = ws_action(&mut ws, 1, serde_json::json!({"op":"action","id":1,"request": request(&g, &place_order(&g, &u, ua, t, 1, 10, 1, false))})).await;
+    assert_eq!((r["op"].as_str(), r["error"]["code"].as_str()), (Some("error"), Some("GEO_RESTRICTED")), "{r}");
+    assert_eq!(r["error"]["details"]["assertion"], "missing edgeGeo");
+    // a bad MAC is refused
+    let (h, _) = assertion(&secret, "PA", 2, t);
+    let r = ws_action(&mut ws, 2, serde_json::json!({"op":"action","id":2,"request": request(&g, &place_order(&g, &u, ua, t + 1, 1, 10, 1, false)), "edgeGeo": {"header": h, "mac": "0".repeat(64)}})).await;
+    assert_eq!(r["error"]["details"]["assertion"], "mac", "{r}");
+    // a valid per-action assertion from an allowed country admits; edgeGeo is stripped before parsing
+    let (h, m) = assertion(&secret, "PA", 3, now());
+    let r = ws_action(&mut ws, 3, serde_json::json!({"op":"action","id":3,"request": request(&g, &place_order(&g, &u, ua, t + 2, 1, 10, 1, false)), "edgeGeo": {"header": h.clone(), "mac": m.clone()}})).await;
+    assert_eq!(r["op"], "actionResult", "{r}");
+    // the same assertion again (replay) is refused, also over REST: one cache for both
+    let r = ws_action(&mut ws, 4, serde_json::json!({"op":"action","id":4,"request": request(&g, &place_order(&g, &u, ua, t + 3, 1, 10, 1, false)), "edgeGeo": {"header": h.clone(), "mac": m.clone()}})).await;
+    assert_eq!(r["error"]["details"]["assertion"], "replay", "{r}");
+    let (s, e) = post_json(&format!("{}/v1/actions", n.url), &request(&g, &place_order(&g, &u, ua, t + 4, 1, 10, 1, false)), &[("x-postern-geo", &h), ("x-postern-geo-mac", &m)]).await;
+    assert_eq!((s, e["error"]["details"]["assertion"].as_str()), (451, Some("replay")));
+    // a valid assertion from a blocked country: geo decision applies (exit-only)
+    let (h, m) = assertion(&secret, "BR", 5, now());
+    let r = ws_action(&mut ws, 5, serde_json::json!({"op":"action","id":5,"request": request(&g, &place_order(&g, &u, ua, t + 5, 1, 10, 1, false)), "edgeGeo": {"header": h, "mac": m}})).await;
+    assert_eq!(r["error"]["code"], "GEO_RESTRICTED", "{r}");
+    // a stale assertion (older than 30 s) is refused
+    let (h, m) = assertion(&secret, "PA", 6, now() - 31_000);
+    let r = ws_action(&mut ws, 6, serde_json::json!({"op":"action","id":6,"request": request(&g, &place_order(&g, &u, ua, t + 6, 1, 10, 1, false)), "edgeGeo": {"header": h, "mac": m}})).await;
+    assert_eq!(r["error"]["details"]["assertion"], "stale", "{r}");
+    // REST: the dev mock header no longer counts once an edge verifier is configured; a fresh header does
+    let (s, e) = post_json(&format!("{}/v1/actions", n.url), &request(&g, &place_order(&g, &u, ua, t + 7, 1, 10, 1, false)), &[("X-Mock-Country", "PA")]).await;
+    assert_eq!((s, e["error"]["details"]["assertion"].as_str()), (451, Some("missing")));
+    let (h, m) = assertion(&secret, "PA", 7, now());
+    let (s, e) = post_json(&format!("{}/v1/actions", n.url), &request(&g, &place_order(&g, &u, ua, t + 8, 1, 10, 1, false)), &[("x-postern-geo", &h), ("x-postern-geo-mac", &m)]).await;
+    assert_eq!(s, 200, "{e}");
     let _ = n.stop.send(true);
 }

@@ -118,6 +118,8 @@ pub struct Validator {
     pub signed_count: u64,
     /// first height since the last checkpoint height whose block was first seen more than MAX_LAG_MS after its time
     pub late_since_checkpoint: Option<u64>,
+    /// R395-37: when this validator FIRST received each not-yet-applied block (before any wait on its own L2 view)
+    first_seen: BTreeMap<u64, u64>,
 }
 
 impl Validator {
@@ -156,6 +158,7 @@ impl Validator {
             signed_file,
             signed_count: 0,
             late_since_checkpoint: None,
+            first_seen: BTreeMap::new(),
         })
     }
 
@@ -171,6 +174,13 @@ impl Validator {
         if b.header.height <= self.height {
             return VResult::Refused { reason: format!("block {} already applied", b.header.height), latched: false };
         }
+        // R395-37: lateness is judged at RECEIPT (the first call for this height); waiting for this validator's own
+        // L2 view never counts
+        let seen = {
+            let k = b.header.height;
+            self.first_seen.retain(|h, _| *h > self.height && *h <= k.saturating_add(10_000));
+            *self.first_seen.entry(k).or_insert(now_ms)
+        };
         if let Err(e) = check_block_link(&self.g, self.height, &self.log_hash, self.time, b) {
             if b.header.height == self.height + 1 {
                 return self.latch(e);
@@ -181,7 +191,7 @@ impl Validator {
             return VResult::Wait("block time too far ahead of this validator's clock".into());
         }
         // R395-29: lower bound, judged at the first time this validator sees the block (now)
-        let late = now_ms.saturating_sub(b.header.time) > MAX_LAG_MS;
+        let late = seen.saturating_sub(b.header.time) > MAX_LAG_MS;
         let inputs = match decode_inputs(&self.g.types, &b.inputs_encoded) {
             Ok(i) => i,
             Err(e) => return self.latch(format!("block {}: inputs do not decode: {e}", b.header.height)),
@@ -228,6 +238,7 @@ impl Validator {
         self.height = b.header.height;
         self.log_hash = b.header.log_hash;
         self.time = b.header.time;
+        self.first_seen.remove(&b.header.height);
         if late && self.late_since_checkpoint.is_none() {
             self.late_since_checkpoint = Some(b.header.height);
         }
