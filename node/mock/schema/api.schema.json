@@ -1,0 +1,2797 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "postern-perps/api/0.1",
+ "title": "PosternDEX Perpetuals API v0.1 (UNAUDITED prototype)",
+ "description": "Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries every field of the signed digest (389 proposal B) so anyone can recompute it; VAULT.md (390) will extend it. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
+ "$defs": {
+  "Dec": {
+   "type": "string",
+   "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+   "description": "decimal string in human units (API.md 1)"
+  },
+  "UDec": {
+   "type": "string",
+   "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+   "description": "non-negative decimal string"
+  },
+  "U64": {
+   "type": "string",
+   "pattern": "^(0|[1-9][0-9]{0,19})$",
+   "description": "64-bit identifier or nonce as a decimal string"
+  },
+  "Int": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 9007199254740991
+  },
+  "Ms": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 9007199254740991,
+   "description": "Unix milliseconds"
+  },
+  "Address": {
+   "type": "string",
+   "pattern": "^0x[0-9a-f]{40}$",
+   "description": "lower-case 0x address"
+  },
+  "Hash": {
+   "type": "string",
+   "pattern": "^0x[0-9a-f]{64}$"
+  },
+  "Hex": {
+   "type": "string",
+   "pattern": "^0x([0-9a-f]{2})*$"
+  },
+  "Sig": {
+   "type": "string",
+   "pattern": "^0x[0-9a-f]{130}$",
+   "description": "65 bytes r||s||v"
+  },
+  "Symbol": {
+   "type": "string",
+   "pattern": "^[A-Z0-9]{2,12}-USD$"
+  },
+  "Side": {
+   "type": "string",
+   "enum": [
+    "buy",
+    "sell"
+   ]
+  },
+  "Error": {
+   "type": "object",
+   "properties": {
+    "error": {
+     "type": "object",
+     "properties": {
+      "code": {
+       "type": "string",
+       "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
+      "message": {
+       "type": "string"
+      },
+      "details": {
+       "type": "object"
+      }
+     },
+     "required": [
+      "code",
+      "message",
+      "details"
+     ],
+     "additionalProperties": false
+    }
+   },
+   "required": [
+    "error"
+   ],
+   "additionalProperties": false
+  },
+  "MarginTier": {
+   "type": "object",
+   "properties": {
+    "notionalFloor": {
+     "$ref": "#/$defs/UDec"
+    },
+    "initialMarginFraction": {
+     "$ref": "#/$defs/UDec"
+    },
+    "maintenanceMarginFraction": {
+     "$ref": "#/$defs/UDec"
+    },
+    "maxLeverage": {
+     "$ref": "#/$defs/UDec"
+    }
+   },
+   "required": [
+    "notionalFloor",
+    "initialMarginFraction",
+    "maintenanceMarginFraction",
+    "maxLeverage"
+   ],
+   "additionalProperties": false
+  },
+  "OracleConfig": {
+   "type": "object",
+   "properties": {
+    "sources": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "minLength": 1
+     },
+     "minItems": 1
+    },
+    "minSources": {
+     "$ref": "#/$defs/Int"
+    },
+    "maxStalenessMs": {
+     "$ref": "#/$defs/Int"
+    },
+    "maxDeviationBps": {
+     "$ref": "#/$defs/UDec"
+    }
+   },
+   "required": [
+    "sources",
+    "minSources",
+    "maxStalenessMs",
+    "maxDeviationBps"
+   ],
+   "additionalProperties": false
+  },
+  "Market": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "marketId": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 4294967295
+    },
+    "base": {
+     "type": "string",
+     "pattern": "^[A-Z0-9]{2,12}$"
+    },
+    "quote": {
+     "const": "USD"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "halted",
+      "closeOnly",
+      "settled"
+     ]
+    },
+    "priceDecimals": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 18
+    },
+    "sizeDecimals": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 18
+    },
+    "tickSize": {
+     "$ref": "#/$defs/UDec"
+    },
+    "stepSize": {
+     "$ref": "#/$defs/UDec"
+    },
+    "minOrderSize": {
+     "$ref": "#/$defs/UDec"
+    },
+    "maxOrderSize": {
+     "$ref": "#/$defs/UDec"
+    },
+    "maxLeverage": {
+     "$ref": "#/$defs/UDec"
+    },
+    "marginTiers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/MarginTier"
+     },
+     "minItems": 1
+    },
+    "makerFeeBps": {
+     "$ref": "#/$defs/Dec"
+    },
+    "takerFeeBps": {
+     "$ref": "#/$defs/UDec"
+    },
+    "liquidationFeeBps": {
+     "$ref": "#/$defs/UDec"
+    },
+    "fundingIntervalSec": {
+     "$ref": "#/$defs/Int"
+    },
+    "maxFundingRate": {
+     "$ref": "#/$defs/UDec"
+    },
+    "oracle": {
+     "$ref": "#/$defs/OracleConfig"
+    },
+    "openInterestCap": {
+     "$ref": "#/$defs/UDec"
+    },
+    "haltReason": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    }
+   },
+   "required": [
+    "symbol",
+    "marketId",
+    "base",
+    "quote",
+    "status",
+    "priceDecimals",
+    "sizeDecimals",
+    "tickSize",
+    "stepSize",
+    "minOrderSize",
+    "maxOrderSize",
+    "maxLeverage",
+    "marginTiers",
+    "makerFeeBps",
+    "takerFeeBps",
+    "liquidationFeeBps",
+    "fundingIntervalSec",
+    "maxFundingRate",
+    "oracle",
+    "openInterestCap"
+   ],
+   "additionalProperties": false
+  },
+  "Ticker": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "markPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "indexPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "lastPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "fundingRate": {
+     "$ref": "#/$defs/Dec"
+    },
+    "nextFundingTime": {
+     "$ref": "#/$defs/Ms"
+    },
+    "openInterest": {
+     "$ref": "#/$defs/UDec"
+    },
+    "volume24h": {
+     "$ref": "#/$defs/UDec"
+    },
+    "high24h": {
+     "$ref": "#/$defs/UDec"
+    },
+    "low24h": {
+     "$ref": "#/$defs/UDec"
+    },
+    "price24hAgo": {
+     "$ref": "#/$defs/UDec"
+    },
+    "change24h": {
+     "$ref": "#/$defs/Dec"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    }
+   },
+   "required": [
+    "symbol",
+    "markPrice",
+    "indexPrice",
+    "lastPrice",
+    "fundingRate",
+    "nextFundingTime",
+    "openInterest",
+    "volume24h",
+    "high24h",
+    "low24h",
+    "price24hAgo",
+    "change24h",
+    "height",
+    "time"
+   ],
+   "additionalProperties": false
+  },
+  "Level": {
+   "type": "array",
+   "prefixItems": [
+    {
+     "$ref": "#/$defs/UDec"
+    },
+    {
+     "$ref": "#/$defs/UDec"
+    }
+   ],
+   "minItems": 2,
+   "maxItems": 2
+  },
+  "Book": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "seq": {
+     "$ref": "#/$defs/Int"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "bids": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Level"
+     }
+    },
+    "asks": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Level"
+     }
+    }
+   },
+   "required": [
+    "symbol",
+    "seq",
+    "height",
+    "time",
+    "bids",
+    "asks"
+   ],
+   "additionalProperties": false
+  },
+  "BookDelta": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "seq": {
+     "$ref": "#/$defs/Int"
+    },
+    "prevSeq": {
+     "$ref": "#/$defs/Int"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "bids": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Level"
+     }
+    },
+    "asks": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Level"
+     }
+    }
+   },
+   "required": [
+    "symbol",
+    "seq",
+    "prevSeq",
+    "height",
+    "time",
+    "bids",
+    "asks"
+   ],
+   "additionalProperties": false
+  },
+  "Trade": {
+   "type": "object",
+   "properties": {
+    "tradeId": {
+     "$ref": "#/$defs/U64"
+    },
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "price": {
+     "$ref": "#/$defs/UDec"
+    },
+    "size": {
+     "$ref": "#/$defs/UDec"
+    },
+    "side": {
+     "$ref": "#/$defs/Side"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "liquidation": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "tradeId",
+    "symbol",
+    "price",
+    "size",
+    "side",
+    "time",
+    "height",
+    "liquidation"
+   ],
+   "additionalProperties": false
+  },
+  "Candle": {
+   "type": "object",
+   "properties": {
+    "t": {
+     "$ref": "#/$defs/Ms"
+    },
+    "o": {
+     "$ref": "#/$defs/UDec"
+    },
+    "h": {
+     "$ref": "#/$defs/UDec"
+    },
+    "l": {
+     "$ref": "#/$defs/UDec"
+    },
+    "c": {
+     "$ref": "#/$defs/UDec"
+    },
+    "v": {
+     "$ref": "#/$defs/UDec"
+    },
+    "q": {
+     "$ref": "#/$defs/UDec"
+    },
+    "n": {
+     "$ref": "#/$defs/Int"
+    }
+   },
+   "required": [
+    "t",
+    "o",
+    "h",
+    "l",
+    "c",
+    "v",
+    "q",
+    "n"
+   ],
+   "additionalProperties": false
+  },
+  "FundingRate": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "rate": {
+     "$ref": "#/$defs/Dec"
+    },
+    "premium": {
+     "$ref": "#/$defs/Dec"
+    },
+    "markPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "indexPrice": {
+     "$ref": "#/$defs/UDec"
+    }
+   },
+   "required": [
+    "symbol",
+    "time",
+    "rate",
+    "premium",
+    "markPrice",
+    "indexPrice"
+   ],
+   "additionalProperties": false
+  },
+  "OracleSource": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "price": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/UDec"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "time": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Ms"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "used": {
+     "type": "boolean"
+    },
+    "reason": {
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "required": [
+    "name",
+    "price",
+    "time",
+    "used"
+   ],
+   "additionalProperties": false
+  },
+  "OracleStatus": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "ok",
+      "stale",
+      "insufficientSources",
+      "deviation",
+      "halted"
+     ]
+    },
+    "price": {
+     "$ref": "#/$defs/UDec"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "round": {
+     "$ref": "#/$defs/U64"
+    },
+    "sources": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/OracleSource"
+     }
+    },
+    "signers": {
+     "$ref": "#/$defs/Int"
+    },
+    "threshold": {
+     "$ref": "#/$defs/Int"
+    },
+    "haltReason": {
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "required": [
+    "symbol",
+    "status",
+    "price",
+    "time",
+    "round",
+    "sources",
+    "signers",
+    "threshold",
+    "haltReason"
+   ],
+   "additionalProperties": false
+  },
+  "BlockRef": {
+   "type": "object",
+   "properties": {
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "hash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "stateRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "logHash": {
+     "$ref": "#/$defs/Hash"
+    }
+   },
+   "required": [
+    "height",
+    "time",
+    "hash",
+    "stateRoot",
+    "logHash"
+   ],
+   "additionalProperties": false
+  },
+  "Status": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "version": {
+     "type": "string"
+    },
+    "apiVersion": {
+     "type": "string",
+     "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "mock",
+      "dev",
+      "live"
+     ]
+    },
+    "unaudited": {
+     "type": "boolean"
+    },
+    "network": {
+     "type": "object",
+     "properties": {
+      "eip712": {
+       "$ref": "#/$defs/Domain"
+      },
+      "collateralChainId": {
+       "const": 700770
+      },
+      "vault": {
+       "$ref": "#/$defs/Address"
+      },
+      "collateralToken": {
+       "$ref": "#/$defs/Address"
+      },
+      "collateralSymbol": {
+       "type": "string"
+      },
+      "collateralDecimals": {
+       "const": 6
+      }
+     },
+     "required": [
+      "eip712",
+      "collateralChainId",
+      "vault",
+      "collateralToken",
+      "collateralSymbol",
+      "collateralDecimals"
+     ],
+     "additionalProperties": false
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "latestBlock": {
+     "$ref": "#/$defs/BlockRef"
+    },
+    "latestFinalized": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/BlockRef"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "sequencer": {
+     "type": "object",
+     "properties": {
+      "state": {
+       "type": "string",
+       "enum": [
+        "running",
+        "recovering",
+        "halted"
+       ]
+      },
+      "blockIntervalMs": {
+       "$ref": "#/$defs/Int"
+      },
+      "pendingActions": {
+       "$ref": "#/$defs/Int"
+      }
+     },
+     "required": [
+      "state",
+      "blockIntervalMs",
+      "pendingActions"
+     ],
+     "additionalProperties": false
+    },
+    "committee": {
+     "type": "object",
+     "properties": {
+      "n": {
+       "$ref": "#/$defs/Int"
+      },
+      "threshold": {
+       "$ref": "#/$defs/Int"
+      },
+      "online": {
+       "$ref": "#/$defs/Int"
+      }
+     },
+     "required": [
+      "n",
+      "threshold",
+      "online"
+     ],
+     "additionalProperties": false
+    },
+    "vaultMode": {
+     "type": "string",
+     "enum": [
+      "normal",
+      "paused",
+      "escape",
+      "unknown"
+     ]
+    },
+    "l2": {
+     "type": "object",
+     "properties": {
+      "finalizedBlock": {
+       "$ref": "#/$defs/Int"
+      },
+      "lastDepositBlock": {
+       "$ref": "#/$defs/Int"
+      },
+      "endpointsAgree": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "finalizedBlock",
+      "lastDepositBlock",
+      "endpointsAgree"
+     ],
+     "additionalProperties": false
+    }
+   },
+   "required": [
+    "name",
+    "version",
+    "apiVersion",
+    "mode",
+    "unaudited",
+    "network",
+    "time",
+    "latestBlock",
+    "latestFinalized",
+    "sequencer",
+    "committee",
+    "vaultMode",
+    "l2"
+   ],
+   "additionalProperties": false
+  },
+  "CheckpointSig": {
+   "type": "object",
+   "properties": {
+    "validator": {
+     "$ref": "#/$defs/Address"
+    },
+    "signature": {
+     "$ref": "#/$defs/Sig"
+    }
+   },
+   "required": [
+    "validator",
+    "signature"
+   ],
+   "additionalProperties": false
+  },
+  "Checkpoint": {
+   "type": "object",
+   "properties": {
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "blockHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "stateRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "logHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "withdrawalsRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "depositsCredited": {
+     "$ref": "#/$defs/Int"
+    },
+    "forcedProcessed": {
+     "$ref": "#/$defs/Int"
+    },
+    "digest": {
+     "$ref": "#/$defs/Hash"
+    },
+    "threshold": {
+     "$ref": "#/$defs/Int"
+    },
+    "final": {
+     "type": "boolean"
+    },
+    "signatures": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/CheckpointSig"
+     }
+    }
+   },
+   "required": [
+    "height",
+    "time",
+    "blockHash",
+    "stateRoot",
+    "logHash",
+    "withdrawalsRoot",
+    "depositsCredited",
+    "forcedProcessed",
+    "digest",
+    "threshold",
+    "final",
+    "signatures"
+   ],
+   "additionalProperties": false
+  },
+  "Committee": {
+   "type": "object",
+   "properties": {
+    "threshold": {
+     "$ref": "#/$defs/Int"
+    },
+    "validators": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Address"
+     },
+     "minItems": 1
+    },
+    "setHash": {
+     "$ref": "#/$defs/Hash"
+    }
+   },
+   "required": [
+    "threshold",
+    "validators",
+    "setHash"
+   ],
+   "additionalProperties": false
+  },
+  "BlockInput": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "kind": {
+       "const": "action"
+      },
+      "account": {
+       "$ref": "#/$defs/Address"
+      },
+      "signer": {
+       "$ref": "#/$defs/Address"
+      },
+      "type": {
+       "type": "string"
+      },
+      "message": {
+       "type": "object"
+      },
+      "signature": {
+       "$ref": "#/$defs/Sig"
+      }
+     },
+     "required": [
+      "kind",
+      "account",
+      "type",
+      "message",
+      "signature"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "kind": {
+       "enum": [
+        "oracle",
+        "deposit",
+        "forced"
+       ]
+      },
+      "payload": {
+       "type": "object"
+      }
+     },
+     "required": [
+      "kind",
+      "payload"
+     ],
+     "additionalProperties": false
+    }
+   ]
+  },
+  "Block": {
+   "type": "object",
+   "properties": {
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "prevLogHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "logHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "stateRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "inputs": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/BlockInput"
+     },
+     "minItems": 1
+    },
+    "inputsEncoded": {
+     "$ref": "#/$defs/Hex"
+    },
+    "sequencerSignature": {
+     "$ref": "#/$defs/Sig"
+    }
+   },
+   "required": [
+    "height",
+    "time",
+    "prevLogHash",
+    "logHash",
+    "stateRoot",
+    "inputs",
+    "inputsEncoded",
+    "sequencerSignature"
+   ],
+   "additionalProperties": false
+  },
+  "FeeTier": {
+   "type": "object",
+   "properties": {
+    "tier": {
+     "$ref": "#/$defs/Int"
+    },
+    "makerFeeBps": {
+     "$ref": "#/$defs/Dec"
+    },
+    "takerFeeBps": {
+     "$ref": "#/$defs/UDec"
+    },
+    "volume30d": {
+     "$ref": "#/$defs/UDec"
+    }
+   },
+   "required": [
+    "tier",
+    "makerFeeBps",
+    "takerFeeBps",
+    "volume30d"
+   ],
+   "additionalProperties": false
+  },
+  "Position": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "size": {
+     "$ref": "#/$defs/Dec"
+    },
+    "entryPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "markPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "notional": {
+     "$ref": "#/$defs/UDec"
+    },
+    "unrealizedPnl": {
+     "$ref": "#/$defs/Dec"
+    },
+    "realizedPnl": {
+     "$ref": "#/$defs/Dec"
+    },
+    "liquidationPrice": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/UDec"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "marginMode": {
+     "type": "string",
+     "enum": [
+      "cross",
+      "isolated"
+     ]
+    },
+    "leverage": {
+     "$ref": "#/$defs/UDec"
+    },
+    "isolatedMargin": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/UDec"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "initialMargin": {
+     "$ref": "#/$defs/UDec"
+    },
+    "maintenanceMargin": {
+     "$ref": "#/$defs/UDec"
+    },
+    "fundingSinceOpen": {
+     "$ref": "#/$defs/Dec"
+    }
+   },
+   "required": [
+    "symbol",
+    "size",
+    "entryPrice",
+    "markPrice",
+    "notional",
+    "unrealizedPnl",
+    "realizedPnl",
+    "liquidationPrice",
+    "marginMode",
+    "leverage",
+    "isolatedMargin",
+    "initialMargin",
+    "maintenanceMargin",
+    "fundingSinceOpen"
+   ],
+   "additionalProperties": false
+  },
+  "Account": {
+   "type": "object",
+   "properties": {
+    "address": {
+     "$ref": "#/$defs/Address"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "collateral": {
+     "$ref": "#/$defs/Dec"
+    },
+    "unrealizedPnl": {
+     "$ref": "#/$defs/Dec"
+    },
+    "equity": {
+     "$ref": "#/$defs/Dec"
+    },
+    "initialMargin": {
+     "$ref": "#/$defs/UDec"
+    },
+    "maintenanceMargin": {
+     "$ref": "#/$defs/UDec"
+    },
+    "freeCollateral": {
+     "$ref": "#/$defs/Dec"
+    },
+    "withdrawable": {
+     "$ref": "#/$defs/UDec"
+    },
+    "marginRatio": {
+     "$ref": "#/$defs/UDec"
+    },
+    "feeTier": {
+     "$ref": "#/$defs/FeeTier"
+    },
+    "positions": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Position"
+     }
+    },
+    "openOrders": {
+     "$ref": "#/$defs/Int"
+    }
+   },
+   "required": [
+    "address",
+    "height",
+    "time",
+    "collateral",
+    "unrealizedPnl",
+    "equity",
+    "initialMargin",
+    "maintenanceMargin",
+    "freeCollateral",
+    "withdrawable",
+    "marginRatio",
+    "feeTier",
+    "positions",
+    "openOrders"
+   ],
+   "additionalProperties": false
+  },
+  "Order": {
+   "type": "object",
+   "properties": {
+    "orderId": {
+     "$ref": "#/$defs/U64"
+    },
+    "clientOrderId": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Hash"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "side": {
+     "$ref": "#/$defs/Side"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "limit",
+      "market",
+      "stopMarket",
+      "stopLimit",
+      "takeProfitMarket",
+      "takeProfitLimit"
+     ]
+    },
+    "timeInForce": {
+     "type": "string",
+     "enum": [
+      "GTC",
+      "IOC",
+      "POST_ONLY"
+     ]
+    },
+    "price": {
+     "$ref": "#/$defs/UDec"
+    },
+    "size": {
+     "$ref": "#/$defs/UDec"
+    },
+    "filledSize": {
+     "$ref": "#/$defs/UDec"
+    },
+    "avgFillPrice": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/UDec"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "reduceOnly": {
+     "type": "boolean"
+    },
+    "triggerPrice": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/UDec"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "triggerCondition": {
+     "enum": [
+      "markAbove",
+      "markBelow",
+      null
+     ]
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "untriggered",
+      "open",
+      "filled",
+      "canceled",
+      "rejected",
+      "expired"
+     ]
+    },
+    "createdAt": {
+     "$ref": "#/$defs/Ms"
+    },
+    "updatedAt": {
+     "$ref": "#/$defs/Ms"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "rejectReason": {
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "required": [
+    "orderId",
+    "clientOrderId",
+    "account",
+    "symbol",
+    "side",
+    "type",
+    "timeInForce",
+    "price",
+    "size",
+    "filledSize",
+    "avgFillPrice",
+    "reduceOnly",
+    "triggerPrice",
+    "triggerCondition",
+    "status",
+    "createdAt",
+    "updatedAt",
+    "height",
+    "rejectReason"
+   ],
+   "additionalProperties": false
+  },
+  "Fill": {
+   "type": "object",
+   "properties": {
+    "fillId": {
+     "$ref": "#/$defs/U64"
+    },
+    "tradeId": {
+     "$ref": "#/$defs/U64"
+    },
+    "orderId": {
+     "$ref": "#/$defs/U64"
+    },
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "side": {
+     "$ref": "#/$defs/Side"
+    },
+    "price": {
+     "$ref": "#/$defs/UDec"
+    },
+    "size": {
+     "$ref": "#/$defs/UDec"
+    },
+    "fee": {
+     "$ref": "#/$defs/Dec"
+    },
+    "liquidity": {
+     "type": "string",
+     "enum": [
+      "maker",
+      "taker"
+     ]
+    },
+    "realizedPnl": {
+     "$ref": "#/$defs/Dec"
+    },
+    "liquidation": {
+     "type": "boolean"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    }
+   },
+   "required": [
+    "fillId",
+    "tradeId",
+    "orderId",
+    "account",
+    "symbol",
+    "side",
+    "price",
+    "size",
+    "fee",
+    "liquidity",
+    "realizedPnl",
+    "liquidation",
+    "time",
+    "height"
+   ],
+   "additionalProperties": false
+  },
+  "FundingPayment": {
+   "type": "object",
+   "properties": {
+    "symbol": {
+     "$ref": "#/$defs/Symbol"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "rate": {
+     "$ref": "#/$defs/Dec"
+    },
+    "positionSize": {
+     "$ref": "#/$defs/Dec"
+    },
+    "markPrice": {
+     "$ref": "#/$defs/UDec"
+    },
+    "payment": {
+     "$ref": "#/$defs/Dec"
+    }
+   },
+   "required": [
+    "symbol",
+    "time",
+    "rate",
+    "positionSize",
+    "markPrice",
+    "payment"
+   ],
+   "additionalProperties": false
+  },
+  "Agent": {
+   "type": "object",
+   "properties": {
+    "agent": {
+     "$ref": "#/$defs/Address"
+    },
+    "name": {
+     "type": "string",
+     "maxLength": 64
+    },
+    "approvedAt": {
+     "$ref": "#/$defs/Ms"
+    },
+    "expiresAt": {
+     "$ref": "#/$defs/Ms"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    }
+   },
+   "required": [
+    "agent",
+    "name",
+    "approvedAt",
+    "expiresAt",
+    "height"
+   ],
+   "additionalProperties": false
+  },
+  "AccountProof": {
+   "type": "object",
+   "properties": {
+    "address": {
+     "$ref": "#/$defs/Address"
+    },
+    "checkpoint": {
+     "$ref": "#/$defs/Checkpoint"
+    },
+    "leaf": {
+     "$ref": "#/$defs/Hash"
+    },
+    "leafData": {
+     "type": "object"
+    },
+    "proof": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Hash"
+     }
+    },
+    "index": {
+     "$ref": "#/$defs/U64"
+    }
+   },
+   "required": [
+    "address",
+    "checkpoint",
+    "leaf",
+    "leafData",
+    "proof",
+    "index"
+   ],
+   "additionalProperties": false
+  },
+  "Deposit": {
+   "type": "object",
+   "properties": {
+    "depositId": {
+     "$ref": "#/$defs/U64"
+    },
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "amount": {
+     "$ref": "#/$defs/UDec"
+    },
+    "l2TxHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "logIndex": {
+     "$ref": "#/$defs/Int"
+    },
+    "l2Block": {
+     "$ref": "#/$defs/Int"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "seen",
+      "l2Finalized",
+      "credited"
+     ]
+    },
+    "creditedHeight": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Int"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    }
+   },
+   "required": [
+    "depositId",
+    "account",
+    "amount",
+    "l2TxHash",
+    "logIndex",
+    "l2Block",
+    "status",
+    "creditedHeight",
+    "time"
+   ],
+   "additionalProperties": false
+  },
+  "WithdrawalCertificate": {
+   "type": "object",
+   "properties": {
+    "digest": {
+     "$ref": "#/$defs/Hash"
+    },
+    "record": {
+     "type": "object"
+    },
+    "checkpoint": {
+     "$ref": "#/$defs/Checkpoint"
+    },
+    "proof": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Hash"
+     }
+    },
+    "signatures": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/CheckpointSig"
+     }
+    }
+   },
+   "required": [
+    "digest",
+    "record",
+    "checkpoint",
+    "proof",
+    "signatures"
+   ],
+   "additionalProperties": false
+  },
+  "Withdrawal": {
+   "type": "object",
+   "properties": {
+    "withdrawalId": {
+     "$ref": "#/$defs/U64"
+    },
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "recipient": {
+     "$ref": "#/$defs/Address"
+    },
+    "amount": {
+     "$ref": "#/$defs/UDec"
+    },
+    "fee": {
+     "$ref": "#/$defs/UDec"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "requested",
+      "included",
+      "finalized",
+      "certified",
+      "submitted",
+      "delayed",
+      "paid",
+      "rejected"
+     ]
+    },
+    "requestedHeight": {
+     "$ref": "#/$defs/Int"
+    },
+    "checkpointHeight": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Int"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "certificate": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/WithdrawalCertificate"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "l2TxHash": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Hash"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "availableAt": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Ms"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    }
+   },
+   "required": [
+    "withdrawalId",
+    "account",
+    "recipient",
+    "amount",
+    "fee",
+    "status",
+    "requestedHeight",
+    "checkpointHeight",
+    "certificate",
+    "l2TxHash",
+    "availableAt",
+    "time"
+   ],
+   "additionalProperties": false
+  },
+  "ForcedAction": {
+   "type": "object",
+   "properties": {
+    "forcedId": {
+     "$ref": "#/$defs/U64"
+    },
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "kind": {
+     "type": "string",
+     "enum": [
+      "cancelAll",
+      "close",
+      "withdraw"
+     ]
+    },
+    "l2TxHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "l2Block": {
+     "$ref": "#/$defs/Int"
+    },
+    "deadlineTime": {
+     "$ref": "#/$defs/Ms"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "queued",
+      "included",
+      "expired"
+     ]
+    },
+    "includedHeight": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Int"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    }
+   },
+   "required": [
+    "forcedId",
+    "account",
+    "kind",
+    "l2TxHash",
+    "l2Block",
+    "deadlineTime",
+    "status",
+    "includedHeight"
+   ],
+   "additionalProperties": false
+  },
+  "TypedField": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "pattern": "^[a-zA-Z][a-zA-Z0-9]*$"
+    },
+    "type": {
+     "type": "string",
+     "pattern": "^(address|bool|string|bytes32|u?int(8|16|32|64|128|256))$"
+    }
+   },
+   "required": [
+    "name",
+    "type"
+   ],
+   "additionalProperties": false
+  },
+  "Domain": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "const": "PosternPerps"
+    },
+    "version": {
+     "const": "1"
+    },
+    "chainId": {
+     "const": 700770
+    },
+    "verifyingContract": {
+     "$ref": "#/$defs/Address"
+    }
+   },
+   "required": [
+    "name",
+    "version",
+    "chainId",
+    "verifyingContract"
+   ],
+   "additionalProperties": false
+  },
+  "Eip712": {
+   "type": "object",
+   "properties": {
+    "domain": {
+     "$ref": "#/$defs/Domain"
+    },
+    "scales": {
+     "type": "object",
+     "properties": {
+      "price": {
+       "const": 8
+      },
+      "size": {
+       "const": 8
+      },
+      "usdc": {
+       "const": 6
+      }
+     },
+     "required": [
+      "price",
+      "size",
+      "usdc"
+     ],
+     "additionalProperties": false
+    },
+    "types": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "array",
+      "items": {
+       "$ref": "#/$defs/TypedField"
+      },
+      "minItems": 2
+     }
+    },
+    "actions": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 1
+    },
+    "agentAllowed": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "specVersion": {
+     "type": "string"
+    },
+    "enums": {
+     "type": "object"
+    },
+    "notes": {
+     "type": "object"
+    },
+    "_note": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "domain",
+    "scales",
+    "types",
+    "actions",
+    "agentAllowed",
+    "specVersion"
+   ],
+   "additionalProperties": false
+  },
+  "ActionResult": {
+   "type": "object",
+   "properties": {
+    "ok": {
+     "type": "boolean"
+    },
+    "orderId": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/U64"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "orderStatus": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "filledSize": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/UDec"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "withdrawalId": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/U64"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "error": {
+     "type": [
+      "string",
+      "null"
+     ]
+    }
+   },
+   "required": [
+    "ok",
+    "error"
+   ],
+   "additionalProperties": false
+  },
+  "ActionAck": {
+   "type": "object",
+   "properties": {
+    "actionHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "accepted",
+      "included",
+      "rejected"
+     ]
+    },
+    "receivedAt": {
+     "$ref": "#/$defs/Ms"
+    },
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "index": {
+     "$ref": "#/$defs/Int"
+    },
+    "result": {
+     "$ref": "#/$defs/ActionResult"
+    }
+   },
+   "required": [
+    "actionHash",
+    "status",
+    "receivedAt"
+   ],
+   "additionalProperties": false
+  },
+  "GeoStatus": {
+   "type": "object",
+   "properties": {
+    "country": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "pattern": "^[A-Z0-9]{2}$"
+    },
+    "restricted": {
+     "type": "boolean"
+    },
+    "policy": {
+     "type": "string",
+     "enum": [
+      "actions_refused",
+      "exit_only",
+      "open"
+     ]
+    },
+    "listVersion": {
+     "type": "string"
+    },
+    "reasonCode": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "message": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "sanctioned": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "country",
+    "restricted",
+    "policy",
+    "listVersion",
+    "reasonCode",
+    "message",
+    "sanctioned"
+   ],
+   "additionalProperties": false
+  },
+  "NonceInfo": {
+   "type": "object",
+   "properties": {
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "nextNonce": {
+     "$ref": "#/$defs/U64"
+    },
+    "agents": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "agent": {
+        "$ref": "#/$defs/Address"
+       },
+       "nextNonce": {
+        "$ref": "#/$defs/U64"
+       }
+      },
+      "required": [
+       "agent",
+       "nextNonce"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "required": [
+    "account",
+    "nextNonce",
+    "agents"
+   ],
+   "additionalProperties": false
+  },
+  "MarketList": {
+   "type": "object",
+   "properties": {
+    "markets": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Market"
+     }
+    }
+   },
+   "required": [
+    "markets"
+   ],
+   "additionalProperties": false
+  },
+  "TickerList": {
+   "type": "object",
+   "properties": {
+    "tickers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Ticker"
+     }
+    }
+   },
+   "required": [
+    "tickers"
+   ],
+   "additionalProperties": false
+  },
+  "TradeList": {
+   "type": "object",
+   "properties": {
+    "trades": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Trade"
+     }
+    },
+    "nextCursor": {
+     "type": "string",
+     "minLength": 1
+    }
+   },
+   "required": [
+    "trades"
+   ],
+   "additionalProperties": false
+  },
+  "CandleList": {
+   "type": "object",
+   "properties": {
+    "candles": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Candle"
+     }
+    }
+   },
+   "required": [
+    "candles"
+   ],
+   "additionalProperties": false
+  },
+  "FundingRateList": {
+   "type": "object",
+   "properties": {
+    "funding": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/FundingRate"
+     }
+    },
+    "nextCursor": {
+     "type": "string",
+     "minLength": 1
+    }
+   },
+   "required": [
+    "funding"
+   ],
+   "additionalProperties": false
+  },
+  "BlockList": {
+   "type": "object",
+   "properties": {
+    "blocks": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Block"
+     }
+    }
+   },
+   "required": [
+    "blocks"
+   ],
+   "additionalProperties": false
+  },
+  "OrderList": {
+   "type": "object",
+   "properties": {
+    "orders": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Order"
+     }
+    },
+    "nextCursor": {
+     "type": "string",
+     "minLength": 1
+    }
+   },
+   "required": [
+    "orders"
+   ],
+   "additionalProperties": false
+  },
+  "FillList": {
+   "type": "object",
+   "properties": {
+    "fills": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Fill"
+     }
+    },
+    "nextCursor": {
+     "type": "string",
+     "minLength": 1
+    }
+   },
+   "required": [
+    "fills"
+   ],
+   "additionalProperties": false
+  },
+  "FundingPaymentList": {
+   "type": "object",
+   "properties": {
+    "payments": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/FundingPayment"
+     }
+    },
+    "nextCursor": {
+     "type": "string",
+     "minLength": 1
+    }
+   },
+   "required": [
+    "payments"
+   ],
+   "additionalProperties": false
+  },
+  "DepositList": {
+   "type": "object",
+   "properties": {
+    "deposits": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Deposit"
+     }
+    }
+   },
+   "required": [
+    "deposits"
+   ],
+   "additionalProperties": false
+  },
+  "WithdrawalList": {
+   "type": "object",
+   "properties": {
+    "withdrawals": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Withdrawal"
+     }
+    }
+   },
+   "required": [
+    "withdrawals"
+   ],
+   "additionalProperties": false
+  },
+  "AgentList": {
+   "type": "object",
+   "properties": {
+    "agents": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Agent"
+     }
+    }
+   },
+   "required": [
+    "agents"
+   ],
+   "additionalProperties": false
+  },
+  "ForcedList": {
+   "type": "object",
+   "properties": {
+    "forced": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/ForcedAction"
+     }
+    }
+   },
+   "required": [
+    "forced"
+   ],
+   "additionalProperties": false
+  },
+  "AccountSnapshot": {
+   "type": "object",
+   "properties": {
+    "account": {
+     "$ref": "#/$defs/Account"
+    },
+    "orders": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Order"
+     }
+    },
+    "agents": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Agent"
+     }
+    }
+   },
+   "required": [
+    "account",
+    "orders",
+    "agents"
+   ],
+   "additionalProperties": false
+  },
+  "AccountUpdate": {
+   "type": "object",
+   "properties": {
+    "height": {
+     "$ref": "#/$defs/Int"
+    },
+    "time": {
+     "$ref": "#/$defs/Ms"
+    },
+    "account": {
+     "$ref": "#/$defs/Account"
+    },
+    "orders": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Order"
+     }
+    },
+    "fills": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Fill"
+     }
+    },
+    "funding": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/FundingPayment"
+     }
+    },
+    "deposits": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Deposit"
+     }
+    },
+    "withdrawals": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Withdrawal"
+     }
+    },
+    "actions": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/ActionAck"
+     }
+    }
+   },
+   "required": [
+    "height",
+    "time"
+   ],
+   "additionalProperties": false
+  },
+  "StatusUpdate": {
+   "type": "object",
+   "properties": {
+    "latestBlock": {
+     "$ref": "#/$defs/BlockRef"
+    },
+    "latestFinalized": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/BlockRef"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    }
+   },
+   "required": [
+    "latestBlock",
+    "latestFinalized"
+   ],
+   "additionalProperties": false
+  },
+  "WsData": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "book"
+      },
+      "type": {
+       "const": "snapshot"
+      },
+      "data": {
+       "$ref": "#/$defs/Book"
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "book"
+      },
+      "type": {
+       "const": "delta"
+      },
+      "data": {
+       "$ref": "#/$defs/BookDelta"
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "trades"
+      },
+      "type": {
+       "const": "snapshot"
+      },
+      "data": {
+       "type": "object",
+       "properties": {
+        "trades": {
+         "type": "array",
+         "items": {
+          "$ref": "#/$defs/Trade"
+         }
+        }
+       },
+       "required": [
+        "trades"
+       ],
+       "additionalProperties": false
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "trades"
+      },
+      "type": {
+       "const": "update"
+      },
+      "data": {
+       "type": "object",
+       "properties": {
+        "trades": {
+         "type": "array",
+         "items": {
+          "$ref": "#/$defs/Trade"
+         }
+        }
+       },
+       "required": [
+        "trades"
+       ],
+       "additionalProperties": false
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "ticker"
+      },
+      "type": {
+       "const": "update"
+      },
+      "data": {
+       "$ref": "#/$defs/Ticker"
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "candles"
+      },
+      "type": {
+       "const": "snapshot"
+      },
+      "data": {
+       "type": "object",
+       "properties": {
+        "candles": {
+         "type": "array",
+         "items": {
+          "$ref": "#/$defs/Candle"
+         }
+        }
+       },
+       "required": [
+        "candles"
+       ],
+       "additionalProperties": false
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      },
+      "interval": {
+       "enum": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+       ]
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol",
+      "interval"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "candles"
+      },
+      "type": {
+       "const": "update"
+      },
+      "data": {
+       "$ref": "#/$defs/Candle"
+      },
+      "symbol": {
+       "$ref": "#/$defs/Symbol"
+      },
+      "interval": {
+       "enum": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+       ]
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "symbol",
+      "interval"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "account"
+      },
+      "type": {
+       "const": "snapshot"
+      },
+      "data": {
+       "$ref": "#/$defs/AccountSnapshot"
+      },
+      "account": {
+       "$ref": "#/$defs/Address"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "account"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "account"
+      },
+      "type": {
+       "const": "update"
+      },
+      "data": {
+       "$ref": "#/$defs/AccountUpdate"
+      },
+      "account": {
+       "$ref": "#/$defs/Address"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data",
+      "account"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "channel": {
+       "const": "status"
+      },
+      "type": {
+       "const": "update"
+      },
+      "data": {
+       "$ref": "#/$defs/StatusUpdate"
+      }
+     },
+     "required": [
+      "channel",
+      "type",
+      "data"
+     ],
+     "additionalProperties": false
+    }
+   ]
+  },
+  "WsControl": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "op": {
+       "enum": [
+        "subscribed",
+        "unsubscribed"
+       ]
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "channel": {
+       "enum": [
+        "book",
+        "trades",
+        "ticker",
+        "candles",
+        "account",
+        "status"
+       ]
+      },
+      "symbol": {
+       "type": "string"
+      },
+      "interval": {
+       "type": "string"
+      },
+      "account": {
+       "$ref": "#/$defs/Address"
+      }
+     },
+     "required": [
+      "op",
+      "channel"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "op": {
+       "const": "actionResult"
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string"
+       ]
+      },
+      "ack": {
+       "$ref": "#/$defs/ActionAck"
+      }
+     },
+     "required": [
+      "op",
+      "ack"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "op": {
+       "const": "error"
+      },
+      "id": {
+       "type": [
+        "integer",
+        "string",
+        "null"
+       ]
+      },
+      "error": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "message": {
+         "type": "string"
+        },
+        "details": {
+         "type": "object"
+        }
+       },
+       "required": [
+        "code",
+        "message",
+        "details"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "required": [
+      "op",
+      "error"
+     ],
+     "additionalProperties": false
+    },
+    {
+     "type": "object",
+     "properties": {
+      "op": {
+       "const": "pong"
+      },
+      "time": {
+       "$ref": "#/$defs/Ms"
+      }
+     },
+     "required": [
+      "op",
+      "time"
+     ],
+     "additionalProperties": false
+    }
+   ]
+  },
+  "WsMessage": {
+   "anyOf": [
+    {
+     "$ref": "#/$defs/WsData"
+    },
+    {
+     "$ref": "#/$defs/WsControl"
+    }
+   ]
+  },
+  "ActionRequest": {
+   "type": "object",
+   "properties": {
+    "type": {
+     "type": "string",
+     "pattern": "^[A-Z][A-Za-z]+$"
+    },
+    "message": {
+     "type": "object"
+    },
+    "signature": {
+     "$ref": "#/$defs/Sig"
+    },
+    "wire": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "type",
+    "message",
+    "signature"
+   ],
+   "additionalProperties": false
+  }
+ }
+}
