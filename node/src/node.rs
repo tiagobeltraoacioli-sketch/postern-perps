@@ -231,8 +231,26 @@ pub async fn run_remote_validator(base: String, mut v: Validator, mut stop: toki
     }
 }
 
+#[cfg(all(feature = "dev-oracle", not(debug_assertions)))]
+compile_error!("the dev-oracle feature is DEV ONLY and must never be built into a release (no debug assertions)");
+
+/// Start-time gate of the dev oracle (independent of the cargo feature): dev mode only, and only when the genesis
+/// oracle committee is EXACTLY the throwaway committee these keys form (a real committee configuration refuses).
+pub fn dev_oracle_allowed(mode: Mode, g: &crate::genesis::Genesis, keys: &[k256::ecdsa::SigningKey]) -> Result<(), String> {
+    if mode != Mode::Dev {
+        return Err("the dev oracle is refused outside dev mode".into());
+    }
+    let mut addrs: Vec<crate::util::Address> = keys.iter().map(crate::sig::key_address).collect();
+    addrs.sort();
+    if addrs != g.oracle_committee {
+        return Err("the dev oracle's throwaway keys are not the genesis oracle committee: refused (a real committee is configured)".into());
+    }
+    Ok(())
+}
+
 /// Builds one oracle round signed by every given (THROWAWAY) oracle key: the observation of agent 394's format,
 /// digest from the ENGINE crate's own `oracle_struct_hash` under the node's engine domain.
+#[cfg(feature = "dev-oracle")]
 pub fn dev_oracle_update(g: &crate::genesis::Genesis, keys: &[k256::ecdsa::SigningKey], t_ms: u64, prices: &[(u32, u64)]) -> crate::types::OracleUpdate {
     use postern_perps_engine as pe;
     let round = t_ms / 3000;
@@ -254,7 +272,14 @@ pub fn dev_oracle_update(g: &crate::genesis::Genesis, keys: &[k256::ecdsa::Signi
 
 /// DEV ONLY: a stand-in oracle committee (throwaway keys, FIXED prices) so a dev node's markets are active and
 /// its book moves; agent 394's feeder is the real source. Not a price source of any kind.
-pub async fn run_dev_oracle(app: Arc<App>, keys: Vec<k256::ecdsa::SigningKey>, prices: Vec<(u32, u64)>, mut stop: tokio::sync::watch::Receiver<bool>) {
+#[cfg(feature = "dev-oracle")]
+pub fn start_dev_oracle(app: Arc<App>, keys: Vec<k256::ecdsa::SigningKey>, prices: Vec<(u32, u64)>, stop: tokio::sync::watch::Receiver<bool>) -> Result<tokio::task::JoinHandle<()>, String> {
+    dev_oracle_allowed(app.mode, &app.g, &keys)?;
+    Ok(tokio::spawn(run_dev_oracle(app, keys, prices, stop)))
+}
+
+#[cfg(feature = "dev-oracle")]
+async fn run_dev_oracle(app: Arc<App>, keys: Vec<k256::ecdsa::SigningKey>, prices: Vec<(u32, u64)>, mut stop: tokio::sync::watch::Receiver<bool>) {
     let mut iv = tokio::time::interval(Duration::from_millis(3000));
     loop {
         tokio::select! {

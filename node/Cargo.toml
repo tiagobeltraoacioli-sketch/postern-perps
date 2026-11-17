@@ -37,6 +37,12 @@ anyhow = "1"
 postern-perps-engine = { path = "../engine" }
 postern-geoblock = { path = "../compliance/geoblock/rust" }
 
+[features]
+# DEV ONLY: a stand-in oracle committee with throwaway keys and fixed prices (no price source). Off by default;
+# refused in a build without debug assertions (the release profile) by a compile_error, and at start unless the
+# node runs in dev mode with the dev-derived oracle committee.
+dev-oracle = []
+
 [dev-dependencies]
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect"] }
 

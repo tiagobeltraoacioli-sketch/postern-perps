@@ -616,6 +616,7 @@ fn r395_38_placeholder_at_the_same_height_does_not_lend_its_first_seen_time() {
 /// refused STEP and no book delta could ever appear. Here: an order at the PUBLISHED minimum and step rests, and
 /// the block publishes a book delta chained from seq 0.
 #[test]
+#[cfg(feature = "dev-oracle")]
 fn r393_n1_published_market_table_is_enforced_and_the_book_moves() {
     let mut n = net_real("r393-n1", 1000);
     let u = user(90);
@@ -664,6 +665,7 @@ fn r393_n2_block_deposit_json_is_the_encoded_fields() {
 /// 393's conformance (decoder `node/mock/lib/encoding.mjs`): oracle JSON = round and timeMs as decimal strings,
 /// signer, marketId and sources as numbers, price as a decimal string; forced kind a number.
 #[test]
+#[cfg(feature = "dev-oracle")]
 fn r393_oracle_and_forced_json_forms() {
     let (g, k) = perps_node::dev::dev_genesis("json-forms", 7, 5, 10, 0);
     let u = perps_node::node::dev_oracle_update(&g, &k.oracle[..1], 1_800_000_000_123, &[(1, 5)]);
@@ -675,4 +677,52 @@ fn r393_oracle_and_forced_json_forms() {
     let f = ForcedEvent { index: 1, account: [1; 20], kind: ForcedKind::Withdraw, deadline: 9, arg: 3, head: [0; 32], l2_block: 0, l2_block_hash: [0; 32], l2_tx_hash: [0; 32], log_index: 0 };
     let j = perps_node::types::input_json(&g.types, &Input::Forced(f));
     assert_eq!(j["payload"], serde_json::json!({"forcedIndex": "1", "account": to_hex(&[1u8; 20]), "kind": 2, "deadline": "9", "arg": "3"}));
+}
+
+
+/// 393 hold on d4c5bd0: the dev oracle is refused outside dev mode, and refused when the genesis oracle committee
+/// is a real one (not the throwaway keys); the engine itself rejects throwaway-key observations under a real
+/// committee (ORACLE_BAD_SIGNATURE), so even a bypass could not move a price.
+#[test]
+fn dev_oracle_refused_in_live_mode_and_with_a_real_committee() {
+    use perps_node::node::{dev_oracle_allowed, Mode};
+    let (g, k, _) = perps_node::dev::dev_genesis_real("gate", 7, 5, 10, 0);
+    assert!(dev_oracle_allowed(Mode::Dev, &g, &k.oracle).is_ok());
+    assert!(dev_oracle_allowed(Mode::Live, &g, &k.oracle).unwrap_err().contains("outside dev mode"));
+    // a "real" committee (other keys) in the genesis
+    let mut real = (*g).clone();
+    let mut other: Vec<[u8; 20]> = (0..7u64).map(|i| key_address(&perps_node::sig::throwaway_key("operator committee", i))).collect();
+    other.sort();
+    real.oracle_committee = other;
+    assert!(dev_oracle_allowed(Mode::Dev, &real, &k.oracle).unwrap_err().contains("real committee"));
+}
+
+/// The engine under a real oracle committee rejects observations signed by the dev throwaway keys.
+#[test]
+fn real_committee_engine_rejects_throwaway_oracle_signatures() {
+    use perps_node::types::{OraclePrice, OracleUpdate, SignedObservation};
+    let (g, k, checked) = perps_node::dev::dev_genesis_real("gate2", 7, 5, 10, 0);
+    // the engine genesis bound to ANOTHER committee
+    let mut eg = checked.g.clone();
+    let mut okeys: Vec<k256::ecdsa::SigningKey> = (0..7u64).map(|i| perps_node::sig::throwaway_key("operator committee", i)).collect();
+    okeys.sort_by_key(key_address);
+    let other: Vec<[u8; 20]> = okeys.iter().map(key_address).collect();
+    eg.oracle_signers = other.iter().map(|a| to_hex(a)).collect();
+    let real_checked = eg.check().unwrap();
+    let mut g2 = (*g).clone();
+    g2.oracle_committee = other;
+    let g2 = std::sync::Arc::new(g2);
+    let mut e = perps_node::engine::real::RealEngine::new(g2.clone(), real_checked).unwrap();
+    let t = 1_800_000_000_000u64;
+    let round = t / 3000;
+    let prices = vec![OraclePrice { market_id: 1, price: 6_725_000_000_000, sources: 5 }];
+    let pe_prices = vec![postern_perps_engine::OraclePrice { market_id: 1, price: 6_725_000_000_000, sources: 5 }];
+    // the digest from the ENGINE's own functions, so only the signer set differs
+    let d = postern_perps_engine::eip712::digest(&g2.engine_domain.separator(), &postern_perps_engine::eip712::oracle_struct_hash(round, round * 3000, &pe_prices));
+    let mk = |keys: &[k256::ecdsa::SigningKey]| OracleUpdate { round, observations: keys.iter().enumerate().map(|(i, key)| SignedObservation { signer: i as u8, time_ms: round * 3000, prices: prices.clone(), signature: sign(key, &d) }).collect() };
+    let mut e_ok = e.clone();
+    let out = e_ok.apply_block(1, round * 3000 + 100, &[Input::Oracle(mk(&okeys))]).unwrap();
+    assert_eq!(out.outcomes[0].error, None, "positive control: the configured committee's own keys are accepted");
+    let out = e.apply_block(1, round * 3000 + 100, &[Input::Oracle(mk(&k.oracle))]).unwrap();
+    assert_eq!(out.outcomes[0].error.as_deref(), Some("ORACLE_BAD_SIGNATURE"), "{:?}", out.outcomes[0]);
 }

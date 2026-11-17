@@ -188,8 +188,19 @@ async fn dev(a: HashMap<String, String>) {
     spawn_local_validators(&app, keys.validators.clone(), engines, val_views, &stop_rx).expect("validators");
     tokio::spawn(run_producer(app.clone(), stop_rx.clone()));
     if a.contains_key("dev-oracle") {
-        eprintln!("DEV ORACLE: throwaway oracle keys, FIXED prices (not a price source)");
-        tokio::spawn(perps_node::node::run_dev_oracle(app.clone(), keys.oracle.clone(), perps_node::dev::dev_prices(), stop_rx.clone()));
+        #[cfg(feature = "dev-oracle")]
+        {
+            eprintln!("DEV ORACLE: throwaway oracle keys, FIXED prices (not a price source)");
+            if let Err(e) = perps_node::node::start_dev_oracle(app.clone(), keys.oracle.clone(), perps_node::dev::dev_prices(), stop_rx.clone()) {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        }
+        #[cfg(not(feature = "dev-oracle"))]
+        {
+            eprintln!("--dev-oracle refused: this binary is built without the dev-oracle feature");
+            std::process::exit(2);
+        }
     }
     let listener = tokio::net::TcpListener::bind(listen).await.expect("bind");
     eprintln!("postern-perps-node dev (UNAUDITED, THROWAWAY keys) on http://{listen} data {}", data.display());
