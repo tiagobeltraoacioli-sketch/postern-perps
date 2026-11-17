@@ -192,6 +192,10 @@ pub fn decide(list: Option<&List>, req: &Value, sanctions: Option<&Sanctions>) -
     if surface != Some("api") && surface != Some("ui") {
         return refuse(d, "MALFORMED", 400, "surface");
     }
+    // R395-35: 'deferred' is the edge's value only.
+    if req.get("attestation").and_then(Value::as_str) == Some("deferred") && req.get("caller").and_then(Value::as_str) != Some("edge") {
+        return refuse(d, "MALFORMED", 400, "attestation deferred outside the edge");
+    }
     let mut ty = "";
     let mut reduce_only = false;
     if kind == "action" {

@@ -31,7 +31,7 @@ fn decision_vectors() {
     let s = sanctions::load_sanctions(&json("fixtures/sanctions-fixture.json"), sanctions::DEFAULT_MAX_AGE_MS).unwrap();
     assert_eq!(s.built_ms, v["sanctionsBuiltMs"].as_i64().unwrap());
     let cases = v["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 86);
+    assert_eq!(cases.len(), 88);
     let mut n = 0;
     for c in cases {
         let name = c["name"].as_str().unwrap();
@@ -49,7 +49,7 @@ fn decision_vectors() {
         }
         n += 1;
     }
-    assert_eq!(n, 86);
+    assert_eq!(n, 88);
 }
 
 fn apply(base: &Value, ops: &Value) -> Value {
