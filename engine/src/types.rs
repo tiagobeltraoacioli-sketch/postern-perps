@@ -116,15 +116,20 @@ pub struct OracleUpdate {
     pub observations: Vec<SignedObservation>,
 }
 
-pub const FORCED_CANCEL_ALL: u8 = 0;
-pub const FORCED_CLOSE_ALL: u8 = 1;
-pub const FORCED_WITHDRAW: u8 = 2;
+/// Forced request kinds = VAULT.md `requestForced` kinds (390).
+pub const FORCED_CANCEL_ALL: u8 = 1;
+/// Close positions (`market_id` 0 = every market).
+pub const FORCED_CLOSE: u8 = 2;
+/// Withdraw `amount` (0 = everything withdrawable) to the account itself.
+pub const FORCED_WITHDRAW: u8 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
     Oracle(OracleUpdate),
     Deposit { index: u64, account: Addr, amount: u64 },
-    Forced { index: u64, account: Addr, kind: u8, deadline: u64, arg: u64 },
+    /// `deadline` is the vault's (L2 `block.timestamp`, seconds): carried for the forced chain head only; the vault
+    /// enforces it (SPEC section 14).
+    Forced { index: u64, account: Addr, kind: u8, market_id: u32, amount: u64, deadline: u64 },
     Action(SignedAction),
 }
 
@@ -182,6 +187,7 @@ pub enum Error {
     OracleTime,
     SelfTrade,
     Cancelled,
+    NotLaunched,
 }
 
 impl Error {
@@ -221,6 +227,7 @@ impl Error {
             OracleTime => "ORACLE_TIME",
             SelfTrade => "SELF_TRADE",
             Cancelled => "CANCELLED",
+            NotLaunched => "NOT_LAUNCHED",
         }
     }
 }

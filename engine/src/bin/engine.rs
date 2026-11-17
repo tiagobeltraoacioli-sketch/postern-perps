@@ -3,6 +3,8 @@
 //!   engine replay <genesis.json> <log.jsonl> [--expect-root <0xhex> --at <height>]
 //!   engine demo <out-dir> [blocks]      writes a throwaway-key genesis and log (fixtures for node/review)
 //!   engine bench [orders]               matching throughput on one core
+//!   engine genesis <markets.json> <risk.json> --vault 0x.. --oracle-signers 0x..,0x.. --quorum q --backstop-seed <USDC>
+//!                                       converts 392's compliance files to an engine genesis (exact decimals)
 //!   engine vectors                      EIP-712 test vectors (JSON on stdout) for independent checkers
 //!
 //! Log format: one JSON object per line `{"height":"1","time":"1794880001000","inputs":"0x<inputsEncoded>"}`
@@ -190,6 +192,21 @@ fn vectors() {
     println!("{}", serde_json::to_string_pretty(&v).unwrap());
 }
 
+fn genesis_cmd(args: &[String]) {
+    let opt = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
+    if args.len() < 2 {
+        die("usage: engine genesis <markets.json> <risk.json> --vault 0x.. --oracle-signers a,b,.. --quorum q --backstop-seed USDC [--backstop-oi-ppm 250000]");
+    }
+    let rd = |p: &str| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap_or_else(|e| die(&e.to_string()))).unwrap_or_else(|e| die(&e.to_string())) };
+    let vault = opt("--vault").unwrap_or_else(|| die("--vault required (the PerpsVault address: SPEC 2.1)"));
+    let signers: Vec<String> = opt("--oracle-signers").unwrap_or_else(|| die("--oracle-signers required")).split(',').map(|s| s.to_string()).collect();
+    let q: u8 = opt("--quorum").and_then(|v| v.parse().ok()).unwrap_or_else(|| die("--quorum required"));
+    let seed = opt("--backstop-seed").unwrap_or_else(|| die("--backstop-seed required (owner input; risk.json says TBD-owner)"));
+    let ppm: u32 = opt("--backstop-oi-ppm").and_then(|v| v.parse().ok()).unwrap_or(250_000);
+    let g = postern_perps_engine::genesis::from_compliance(&rd(&args[0]), &rd(&args[1]), &vault, signers, q, &seed, ppm).unwrap_or_else(|e| die(&e));
+    println!("{}", String::from_utf8(g.encoding()).unwrap());
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
@@ -197,6 +214,7 @@ fn main() {
         Some("demo") => demo(&args[2..]),
         Some("bench") => bench(&args[2..]),
         Some("vectors") => vectors(),
+        Some("genesis") => genesis_cmd(&args[2..]),
         _ => die("usage: engine replay|demo|bench …"),
     }
 }

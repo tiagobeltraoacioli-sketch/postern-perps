@@ -90,6 +90,14 @@ pub fn check(e: &Engine) -> Result<(), String> {
             return Err(format!("system account {i} negative"));
         }
     }
+    if e.forced_processed + e.forced_queue.len() as u64 != e.next_forced {
+        return Err("forced queue: processed + pending != received".into());
+    }
+    for (k, r) in e.forced_queue.iter().enumerate() {
+        if r.index != e.forced_processed + k as u64 {
+            return Err("forced queue out of index order".into());
+        }
+    }
     let wsum: i128 = e.withdrawals.iter().map(|w| w.amount as i128).sum();
     if wsum != e.total_withdrawn {
         return Err("withdrawal records do not sum to total_withdrawn".into());

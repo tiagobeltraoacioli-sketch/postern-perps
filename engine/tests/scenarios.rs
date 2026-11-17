@@ -303,9 +303,12 @@ fn halted_market_refuses_orders_and_withdrawal_with_position() {
     r.block(11_000, vec![]);
     let t = r.t + 1000;
     let o = sign_action(&r.e, &kb, place(b, t, BTC, false, ORDER_LIMIT, TIF_GTC, P67250, 1_000_000, false));
+    // Restated for R395-5 (SPEC 0.1.3): a halt no longer blocks the withdrawal of FREE collateral. The old property
+    // (a halted market accepts no new order) is still asserted; a withdrawal beyond free collateral is still refused.
     let w = sign_action(&r.e, &ka, Action::Withdraw { account: a, nonce: t, amount: usdc(10), recipient: a });
-    let out = r.block(1000, vec![o, w]);
-    assert_eq!(out.outcomes, vec![Err(Error::MarketHalted), Err(Error::PositionInHaltedMarket)]);
+    let all = sign_action(&r.e, &ka, Action::Withdraw { account: a, nonce: t + 1, amount: usdc(10_000), recipient: a });
+    let out = r.block(1000, vec![o, w, all]);
+    assert_eq!(out.outcomes, vec![Err(Error::MarketHalted), Ok(()), Err(Error::InsufficientMargin)]);
 }
 
 #[test]

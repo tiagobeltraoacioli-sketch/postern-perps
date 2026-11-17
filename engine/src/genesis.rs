@@ -90,7 +90,7 @@ pub struct MarketParams {
     #[serde(with = "strnum")]
     pub interest: i64,
     #[serde(with = "strnum")]
-    pub interest_clamp: i64,
+    pub funding_clamp: i64,
     #[serde(with = "strnum")]
     pub max_funding_rate: i64,
     pub oracle: OracleParams,
@@ -115,7 +115,29 @@ pub struct Genesis {
     pub withdrawal_fee: u64,
     #[serde(with = "strnum")]
     pub min_fee_sweep: u64,
+    /// Volume fee tiers (SPEC S-9.4): tier 0 has minVolume14d 0 and equals every market's fees.
+    pub fee_tiers: Vec<FeeTier>,
+    /// Launch gate (SPEC S-4.11): no order is accepted until INSURANCE and BACKSTOP balances reach these.
+    #[serde(with = "strnum")]
+    pub launch_insurance_min: u64,
+    #[serde(with = "strnum")]
+    pub launch_backstop_min: u64,
+    /// The backstop takes over at most this fraction (ppm) of a market's oiCap (SPEC 6.3 step 3).
+    #[serde(with = "strnum")]
+    pub backstop_oi_ppm: u32,
     pub markets: Vec<MarketParams>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct FeeTier {
+    /// Sum of the account's maker + taker notional over the 14 complete UTC days before today, USDC units.
+    #[serde(with = "strnum")]
+    pub min_volume_14d: u64,
+    #[serde(with = "strnum")]
+    pub taker_fee_ppm: u32,
+    #[serde(with = "strnum")]
+    pub maker_fee_ppm: u32,
 }
 
 /// The owner's fee address (BRIEF-PERPS "Fees and revenue"); the vault fixes the same constant.
@@ -174,6 +196,22 @@ impl Genesis {
         if q == 0 || q > n || q * 2 <= n || q % 2 == 0 {
             return Err("oracle quorum must be odd, a strict majority and <= n".into());
         }
+        if self.fee_tiers.is_empty() || self.fee_tiers[0].min_volume_14d != 0 || self.fee_tiers.len() > 16 {
+            return Err("feeTiers: 1 to 16 tiers, the first with minVolume14d 0".into());
+        }
+        for w in self.fee_tiers.windows(2) {
+            if w[1].min_volume_14d <= w[0].min_volume_14d || w[1].taker_fee_ppm > w[0].taker_fee_ppm || w[1].maker_fee_ppm > w[0].maker_fee_ppm {
+                return Err("feeTiers: volumes ascending, fees non-increasing".into());
+            }
+        }
+        for t in &self.fee_tiers {
+            if t.maker_fee_ppm > t.taker_fee_ppm || t.taker_fee_ppm as i128 > PPM / 100 {
+                return Err("feeTiers: need 0 <= maker <= taker <= 1%".into());
+            }
+        }
+        if self.backstop_oi_ppm as i128 > PPM {
+            return Err("backstopOiPpm <= 1e6".into());
+        }
         if self.markets.is_empty() || self.markets.len() > 255 {
             return Err("markets count".into());
         }
@@ -217,13 +255,19 @@ impl Genesis {
             if (m.max_leverage as i128) * (m.tiers[0].imf_ppm as i128) > PPM {
                 return Err(format!("{}: maxLeverage above 1/imf of tier 0", m.symbol));
             }
+            if m.taker_fee_ppm != self.fee_tiers[0].taker_fee_ppm || m.maker_fee_ppm != self.fee_tiers[0].maker_fee_ppm {
+                return Err(format!("{}: market fees must equal fee tier 0 (S-9.4)", m.symbol));
+            }
+            if m.oi_cap == 0 || m.oi_cap > MAX_SIZE {
+                return Err(format!("{}: oiCap in 1..=MAX_SIZE (bounds every position, SPEC section 1)", m.symbol));
+            }
             if m.taker_fee_ppm as i128 > PPM / 100 || m.maker_fee_ppm as i128 > PPM / 100 || m.liquidation_fee_ppm as i128 > PPM / 10 {
                 return Err(format!("{}: fee bounds", m.symbol));
             }
             if m.mark_band_bps == 0 || m.mark_band_bps > 1000 || m.market_slippage_bps == 0 || m.market_slippage_bps > 5000 {
                 return Err(format!("{}: band/slippage bounds", m.symbol));
             }
-            if m.funding_interval_ms == 0 || m.max_funding_rate <= 0 || m.max_funding_rate > 10_000_000 || m.interest.abs() > m.max_funding_rate || m.interest_clamp < 0 {
+            if m.funding_interval_ms == 0 || m.max_funding_rate <= 0 || m.max_funding_rate > 10_000_000 || m.interest.abs() > m.max_funding_rate || m.funding_clamp < 0 {
                 return Err(format!("{}: funding bounds (S-1.3)", m.symbol));
             }
             if m.oracle.min_sources == 0 || m.oracle.agree_bps == 0 || m.oracle.jump_bps == 0 || m.oracle.confirm_rounds == 0 || m.oracle.max_staleness_ms == 0 {
@@ -232,5 +276,151 @@ impl Genesis {
         }
         let hash = keccak(&self.encoding());
         Ok(Checked { verifying_contract: vc, fee_recipient: fr, oracle_signers: signers, hash, g: self })
+    }
+}
+
+/// S-1.2: exact decimal string -> integer units with `decimals` fractional digits; refuses anything not exactly
+/// representable (never rounds), signs, exponents, empty parts.
+pub fn dec_units(s: &str, decimals: u32) -> Result<u64, String> {
+    let (i, f) = match s.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (s, ""),
+    };
+    if i.is_empty() || !i.bytes().all(|c| c.is_ascii_digit()) || !f.bytes().all(|c| c.is_ascii_digit()) || (s.contains('.') && f.is_empty()) {
+        return Err(format!("not a plain decimal: {s:?}"));
+    }
+    if f.len() as u32 > decimals {
+        let (keep, rest) = f.split_at(decimals as usize);
+        if rest.bytes().any(|c| c != b'0') {
+            return Err(format!("{s:?} has more than {decimals} fractional digits (S-1.2: refused, not rounded)"));
+        }
+        return dec_units(&format!("{i}.{keep}"), decimals);
+    }
+    let mut digits = String::from(i);
+    digits.push_str(f);
+    for _ in 0..(decimals - f.len() as u32) {
+        digits.push('0');
+    }
+    digits.trim_start_matches('0').parse::<u64>().or_else(|e| if digits.bytes().all(|c| c == b'0') { Ok(0) } else { Err(e) }).map_err(|_| format!("{s:?} out of range"))
+}
+
+fn jint(v: &serde_json::Value, k: &str) -> Result<i64, String> {
+    match &v[k] {
+        serde_json::Value::Number(n) => n.as_i64().ok_or(format!("{k}: integer expected")),
+        serde_json::Value::String(s) => s.parse().map_err(|_| format!("{k}: integer expected")),
+        _ => Err(format!("{k}: missing")),
+    }
+}
+
+fn jstr<'a>(v: &'a serde_json::Value, k: &str) -> Result<&'a str, String> {
+    v[k].as_str().ok_or(format!("{k}: string expected"))
+}
+
+/// Converter from 392's `compliance/markets.json` + `risk.json` (human units) to an engine genesis (engine units).
+/// Owner and deployment inputs are explicit arguments; a `TBD-owner` value in the files is never guessed.
+pub fn from_compliance(
+    markets: &serde_json::Value,
+    risk: &serde_json::Value,
+    verifying_contract: &str,
+    oracle_signers: Vec<String>,
+    oracle_quorum: u8,
+    backstop_seed_usdc: &str,
+    backstop_oi_ppm: u32,
+) -> Result<Genesis, String> {
+    use crate::num::{PRICE_SCALE, SIZE_SCALE};
+    const PD: u32 = 8; // PRICE_SCALE = 10^8
+    const SD: u32 = 8; // SIZE_SCALE = 10^8
+    const UD: u32 = 6; // USDC 10^6
+    debug_assert_eq!(10u64.pow(PD), PRICE_SCALE);
+    debug_assert_eq!(10u64.pow(SD), SIZE_SCALE);
+    let g = &risk["global"];
+    let mut ms = Vec::new();
+    for m in markets["markets"].as_array().ok_or("markets[] missing")? {
+        let tiers = m["tiers"].as_array().ok_or("tiers missing")?.iter().map(|t| {
+            Ok(Tier { floor: dec_units(jstr(t, "floor")?, UD)?, imf_ppm: jint(t, "imfPpm")? as u32, mmf_ppm: jint(t, "mmfPpm")? as u32 })
+        }).collect::<Result<Vec<_>, String>>()?;
+        let max_lev = jint(m, "maxLeverage")? as u32;
+        let o = &m["oracle"];
+        let tick = dec_units(jstr(m, "tick")?, PD)?;
+        let step = dec_units(jstr(m, "step")?, SD)?;
+        // display decimals must match tick/step precision (SPEC section 1)
+        for (k, unit, d) in [("priceDecimals", tick, PD), ("sizeDecimals", step, SD)] {
+            let want = jint(m, k)? as u32;
+            if unit % 10u64.pow(d - want.min(d)) != 0 {
+                return Err(format!("{}: {k} {want} finer than the tick/step", jstr(m, "symbol")?));
+            }
+        }
+        ms.push(MarketParams {
+            market_id: jint(m, "marketId")? as u32,
+            symbol: jstr(m, "symbol")?.to_string(),
+            tick,
+            step,
+            min_size: dec_units(jstr(m, "minSize")?, SD)?,
+            max_size: dec_units(jstr(m, "maxSize")?, SD)?,
+            oi_cap: dec_units(jstr(m, "oiCap")?, SD)?,
+            max_leverage: max_lev,
+            // Decided (technical): default leverage = min(10, maxLeverage) unless the file names one.
+            default_leverage: jint(m, "defaultLeverage").map(|x| x as u32).unwrap_or(max_lev.min(10)),
+            tiers,
+            taker_fee_ppm: jint(m, "takerFeePpm")? as u32,
+            maker_fee_ppm: jint(m, "makerFeePpm")? as u32,
+            liquidation_fee_ppm: jint(m, "liquidationFeePpm")? as u32,
+            mark_band_bps: jint(m, "markBandBps")? as u32,
+            market_slippage_bps: jint(m, "marketSlippageBps")? as u32,
+            impact_notional: dec_units(jstr(m, "impactNotional")?, UD)?,
+            funding_interval_ms: jint(m, "fundingIntervalMs")? as u64,
+            interest: jint(m, "interest")?,
+            funding_clamp: jint(m, "fundingClamp")?,
+            max_funding_rate: jint(m, "maxFundingRate")?,
+            oracle: OracleParams {
+                min_sources: jint(o, "minSources")? as u8,
+                agree_bps: jint(o, "agreeBps")? as u32,
+                jump_bps: jint(o, "jumpBps")? as u32,
+                max_staleness_ms: jint(o, "maxStalenessMs")? as u64,
+                confirm_rounds: jint(o, "confirmRounds")? as u32,
+            },
+        });
+    }
+    let fee_tiers = risk["feeTiers"]["tiers"].as_array().ok_or("feeTiers.tiers missing")?.iter().map(|t| {
+        Ok(FeeTier { min_volume_14d: dec_units(jstr(t, "minVolume14d")?, UD)?, taker_fee_ppm: jint(t, "takerFeePpm")? as u32, maker_fee_ppm: jint(t, "makerFeePpm")? as u32 })
+    }).collect::<Result<Vec<_>, String>>()?;
+    let ins = jstr(&risk["insuranceFund"], "seedRequired")?;
+    Genesis {
+        spec_version: "0.1".into(),
+        chain_id: jint(g, "feeRecipientChainId")? as u64,
+        verifying_contract: verifying_contract.into(),
+        fee_recipient: jstr(g, "feeRecipient")?.into(),
+        oracle_signers,
+        oracle_quorum,
+        oracle_max_future_ms: jint(g, "maxFutureMs")? as u64,
+        oracle_max_age_ms: jint(g, "maxAgeMs")? as u64,
+        withdrawal_fee: dec_units(jstr(g, "withdrawalFee")?, UD)?,
+        min_fee_sweep: dec_units(jstr(g, "minFeeSweep")?, UD)?,
+        fee_tiers,
+        launch_insurance_min: dec_units(ins, UD)?,
+        launch_backstop_min: dec_units(backstop_seed_usdc, UD)?,
+        backstop_oi_ppm,
+        markets: ms,
+    }
+    .check()
+    .map(|c| c.g)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn exact_decimals() {
+        assert_eq!(dec_units("0.5", 8), Ok(50_000_000));
+        assert_eq!(dec_units("67250", 8), Ok(6_725_000_000_000));
+        assert_eq!(dec_units("0.00000001", 8), Ok(1));
+        assert_eq!(dec_units("1.230", 2), Ok(123));
+        assert_eq!(dec_units("0", 6), Ok(0));
+        assert!(dec_units("0.000000001", 8).is_err(), "more digits than the scale: refused");
+        assert!(dec_units("-1", 6).is_err());
+        assert!(dec_units("1e3", 6).is_err());
+        assert!(dec_units(".5", 6).is_err());
+        assert!(dec_units("5.", 6).is_err());
+        assert!(dec_units("TBD-owner", 6).is_err());
     }
 }
