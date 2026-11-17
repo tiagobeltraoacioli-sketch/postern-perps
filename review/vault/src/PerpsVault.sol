@@ -603,10 +603,11 @@ contract PerpsVault {
         ) revert InvalidWithdrawal();
         (bytes32 root, uint64 total) = sumRoot(withdrawalLeaf(w), w.amount, proof);
         if (root != withdrawalsRootAt[seq] || total != withdrawalsTotalAt[seq]) revert InvalidProof();
+        key = withdrawalKey(w.index);
+        if (payouts[key].total != 0) revert AlreadyRegistered();
         // Bound by the newest committed total: the sum of all records ever paid never exceeds what the committee
         // certified (and the sum tree makes every record's amount part of that total).
         if (uint256(withdrawnTotal) + w.amount > latest.withdrawalsTotal) revert Insolvent();
-        key = withdrawalKey(w.index);
         withdrawnTotal += w.amount;
         _register(key, w.recipient, w.amount);
         if (want != 0) _release(key, want);
@@ -633,10 +634,13 @@ contract PerpsVault {
         if (paused()) revert Paused();
         if (block.timestamp < p.readyAt) revert NotReady();
         uint64 remaining = p.total - p.paid;
-        uint64 amount = want < remaining ? want : remaining;
-        if (amount == 0) revert InvalidWithdrawal();
+        if (remaining == 0 || want == 0) revert InvalidWithdrawal();
         uint256 available = availableToRelease();
-        if (amount > available) revert RateLimited();
+        if (available == 0) revert RateLimited();
+        // The smallest of what was asked, what is left and what the bucket allows: a payout above the window limit
+        // is paid in parts, and a relayer can always ask for everything.
+        uint64 amount = want < remaining ? want : remaining;
+        if (amount > available) amount = uint64(available);
         bucket = uint64(available - amount);
         bucketUpdatedAt = uint64(block.timestamp);
         p.paid += amount;
@@ -699,8 +703,9 @@ contract PerpsVault {
         }
         (bytes32 root, uint64 total) = sumRoot(escapeLeaf(account, amount), amount, proof);
         if (root != latest.escapeRoot || total != latest.escapeTotal) revert InvalidProof();
-        if (uint256(escapeClaimedTotal) + amount > latest.escapeTotal) revert Insolvent();
         key = escapeKey(account);
+        if (payouts[key].total != 0) revert AlreadyRegistered();
+        if (uint256(escapeClaimedTotal) + amount > latest.escapeTotal) revert Insolvent();
         escapeClaimedTotal += amount;
         _register(key, account, amount);
         if (want != 0) _release(key, want);

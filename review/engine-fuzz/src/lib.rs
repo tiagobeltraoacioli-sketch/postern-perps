@@ -257,4 +257,15 @@ mod tests {
         let a = Action { ty: "Withdraw", fields: vec![Val::Address(acct), Val::U64(1), Val::U64(2), Val::Address(acct)] };
         assert_eq!(a.type_string(), "Withdraw(address account,uint64 nonce,uint64 amount,address recipient)");
     }
+    /// Cross-check against the mock's viem-checked EIP-712 library (node/mock/lib/eip712.mjs at f008363), SPEC 0.1
+    /// domain with verifyingContract 0x11..11: two independent implementations must agree byte for byte.
+    #[test]
+    fn digests_match_mock_library() {
+        let d = Domain::production_like([0x11; 20]);
+        let a = [0x22u8; 20];
+        let po = Action { ty: "PlaceOrder", fields: vec![Val::Address(a), Val::U64(1794878412000), Val::U32(1), Val::Bool(true), Val::U8(1), Val::U8(1), Val::U64(6725000000000), Val::U64(50000000), Val::Bool(false), Val::U64(0), Val::B32([0; 32])] };
+        assert_eq!(hex::encode(po.digest(&d)), "a5eaf474abcc78196b5e311bc8e97b3668d133a533db09d45381ef4c986707c6");
+        let aa = Action { ty: "ApproveAgent", fields: vec![Val::Address(a), Val::U64(1794878412001), Val::Address([0x33; 20]), Val::Str("bot".into()), Val::U64(1794964812000)] };
+        assert_eq!(hex::encode(aa.digest(&d)), "0a3d57f11c2c0ff1c9c025578bba5878447a50dbef3a6b4d5911ef9756eff38c");
+    }
 }
