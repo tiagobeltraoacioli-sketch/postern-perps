@@ -27,6 +27,16 @@ export function ReviewSheet() {
             ))}
           </dl>
         )}
+        {pending.estimate && pending.estimate.length > 0 && phase !== 'done' && (
+          <dl className="review-estimate" aria-label="Estimates, not signed">
+            {pending.estimate.map((r) => (
+              <div key={r.label}>
+                <dt>{r.label}</dt>
+                <dd className="num">{r.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {d && d.notes.length > 0 && (
           <ul className="review-notes">
             {d.notes.map((n) => (

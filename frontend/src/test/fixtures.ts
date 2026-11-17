@@ -3,6 +3,11 @@ import pinned from '../../config/markets.json';
 import * as convert from '../lib/convert';
 import type { Market, WireGeo, WireMarket, WireStatus } from '../lib/types';
 import type { Guard } from '../lib/sign';
+import { domainFor } from '../lib/eip712';
+
+/** A test vault (local deployment stand-in); production builds take theirs from config/production.json. */
+export const TEST_VAULT = '0x00000000000000000000000000000000000f0f01';
+export const TEST_DOMAIN = domainFor(TEST_VAULT)!;
 
 export function wireMarkets(): WireMarket[] {
   return pinned.markets.map((m) => ({
@@ -39,5 +44,5 @@ export function status(state: 'running' | 'recovering' | 'halted' = 'running'): 
 
 export const NOW = 1_794_878_400_000;
 export function guard(account: string, over: Partial<Guard> = {}): Guard {
-  return { account, eip712Problem: null, markets: markets(), tableProblems: new Map(), geo: OPEN_GEO, status: status(), now: NOW, ...over };
+  return { domain: TEST_DOMAIN, account, eip712Problem: null, markets: markets(), tableProblems: new Map(), geo: OPEN_GEO, status: status(), now: NOW, ...over };
 }

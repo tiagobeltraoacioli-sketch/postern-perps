@@ -41,7 +41,7 @@ export function System() {
       <section className="panel prose">
         <h2>Checks before every signature</h2>
         <ul className="checks">
-          <Check ok={problem === null} text={problem === undefined ? 'Signing definitions: not checked yet.' : problem === null ? `Signing definitions published by the exchange equal the ones built into this page (domain ${DOMAIN.name} ${DOMAIN.version}, signing id ${DOMAIN.chainId}).` : `Signing definitions DIFFER: ${problem}. Signing is refused.`} />
+          <Check ok={problem === null} text={problem === undefined ? 'Signing definitions: not checked yet.' : problem === null ? DOMAIN ? `Signing definitions published by the exchange equal the ones built into this page (domain ${DOMAIN.name} ${DOMAIN.version}, chain ${DOMAIN.chainId}, vault ${shortAddress(DOMAIN.verifyingContract)}).` : 'This build names no vault: there is no signing domain and nothing can be signed.' : `Signing definitions DIFFER: ${problem}. Signing is refused.`} />
           {PINNED_MARKETS.map((pin) => {
             const m = markets.find((x) => x.symbol === pin.symbol);
             const p = m ? signingProblem(m) : 'not published';

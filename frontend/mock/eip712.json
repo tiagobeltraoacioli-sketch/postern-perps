@@ -1,10 +1,11 @@
 {
- "_note": "Frontend stand-in only: the typed data the stand-in mock serves at GET /v1/eip712 = the frontend pin (src/lib/eip712.ts, PROVISIONAL until docs/SPEC.md). scales: decimals of the scaled integers that are signed.",
- "specVersion": "frontend-provisional-0.1",
+ "_note": "Frontend stand-in only: the typed data the stand-in mock serves at GET /v1/eip712 = SPEC.md 0.1.1 section 2 (domain 700770 + verifyingContract = the stand-in's dev vault 0x00000000000000000000000000000000000f0f01, which is also the vault of the local render config). scales: decimals of the scaled integers that are signed.",
+ "specVersion": "0.1.1",
  "domain": {
   "name": "PosternPerps",
   "version": "1",
-  "chainId": 7007701
+  "chainId": 700770,
+  "verifyingContract": "0x00000000000000000000000000000000000f0f01"
  },
  "types": {
   "PlaceOrder": [
@@ -122,7 +123,11 @@
    },
    {
     "name": "amount",
-    "type": "int64"
+    "type": "uint64"
+   },
+   {
+    "name": "add",
+    "type": "bool"
    }
   ],
   "Withdraw": [

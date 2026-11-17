@@ -2,12 +2,15 @@
  * Action nonces. docs/API.md 5.1: per signer, strictly increasing, gaps allowed, "a client may use the millisecond
  * clock". UNAUDITED prototype.
  *
- * Rule: next = max(clock ms, last used by this signer in this browser + 1). The exchange's `nextNonce` is only
- * CHECKED: a value above the clock by more than a day is refused (an API that published a huge nonce would make the
- * signer burn its nonce space; uint64 ends), a value above our candidate but within a day is followed.
+ * Rule: next = max(clock ms, last used by this signer in this browser + 1). SPEC 2.5 accepts a nonce x at block time
+ * T only when T - 120 s <= x <= T + 30 s, so a nonce above clock + 30 s is never built, followed or stored
+ * (R395-11: following a published nonce up to a day ahead and persisting it poisoned this browser's signer for a day,
+ * cancels included). The exchange's `nextNonce` is followed only inside that bound; above it signing is refused with
+ * a message (the exchange's clock or this device's clock is wrong).
  */
 const KEY = 'postern.perps.nonce.v1';
-const DAY = 86_400_000n;
+/** SPEC 2.5 future bound of the nonce window (ms). */
+export const NONCE_FUTURE_MS = 30_000n;
 export const MAX_UINT64 = (1n << 64n) - 1n;
 
 function load(): Record<string, string> {
@@ -30,9 +33,10 @@ export function nextNonce(signer: string, now: number = Date.now(), published?: 
   const last = memory[key] ? BigInt(memory[key]) : 0n;
   let next = clock > last ? clock : last + 1n;
   if (published !== undefined && published !== null) {
-    if (published > clock + DAY) throw new NonceError('The exchange published a nonce far ahead of the clock. Signing is refused; tell the operator.');
+    if (published > clock + NONCE_FUTURE_MS) throw new NonceError('The exchange expects a nonce ahead of this device clock by more than 30 seconds. Check the clock of this device; nothing was signed.');
     if (published > next) next = published;
   }
+  if (next > clock + NONCE_FUTURE_MS) throw new NonceError('This device clock moved back since the last signature. Wait a moment or correct the clock; nothing was signed.');
   if (next > MAX_UINT64) throw new NonceError('Nonce space exhausted.');
   memory[key] = next.toString();
   try {

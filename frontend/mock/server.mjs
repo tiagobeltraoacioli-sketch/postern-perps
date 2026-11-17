@@ -387,7 +387,7 @@ const wireBook = (m, depth = 50) => ({
 const blockRef = (height) => ({ height, time: START + (height - 120000) * BLOCK_MS, hash: h32(`b${height}`), stateRoot: h32(`s${height}`), logHash: h32(`l${height}`) });
 const status = () => ({
   name: 'postern-perps-node', version: '0.1.0', apiVersion: '0.1', mode: 'mock', unaudited: true,
-  network: { eip712: TYPES.domain, collateralChainId: 700770, vault: ZERO, collateralToken: ZERO, collateralSymbol: 'bUSDC', collateralDecimals: 6 },
+  network: { eip712: TYPES.domain, collateralChainId: 700770, vault: TYPES.domain.verifyingContract, collateralToken: ZERO, collateralSymbol: 'bUSDC', collateralDecimals: 6 },
   time: state.time, latestBlock: blockRef(state.height), latestFinalized: blockRef(state.finalized),
   sequencer: { state: state.sequencer, blockIntervalMs: BLOCK_MS, pendingActions: 3 }, committee: { n: 7, threshold: 5, online: state.finalityStalled ? 4 : 7 },
   vaultMode: state.vaultMode, l2: { finalizedBlock: 18_244, lastDepositBlock: 18_244, endpointsAgree: true },
@@ -513,7 +513,7 @@ function apply(a, type, msg) {
     return { ok: true, withdrawalId: w.withdrawalId, error: null, changedOrders, fills, withdrawals };
   }
   if (type === 'ApproveAgent') {
-    a.agents = [...a.agents.filter((x) => x.agent !== String(msg.agent).toLowerCase()), { agent: String(msg.agent).toLowerCase(), name: String(msg.name), approvedAt: state.time, expiresAt: Number(msg.expiresAt) * 1000, height: state.height + 1 }];
+    a.agents = [...a.agents.filter((x) => x.agent !== String(msg.agent).toLowerCase()), { agent: String(msg.agent).toLowerCase(), name: String(msg.name), approvedAt: state.time, expiresAt: Number(msg.expiresAt), height: state.height + 1 }];
     return { ok: true, error: null, changedOrders, fills, withdrawals };
   }
   if (type === 'RevokeAgent') {
@@ -530,7 +530,7 @@ function apply(a, type, msg) {
     const m = marketById(msg.marketId);
     const p = a.positions.find((x) => x.symbol === m?.pinned.symbol && x.isolated);
     if (!p) return { ok: false, error: 'NO_ISOLATED_POSITION', changedOrders, fills, withdrawals };
-    p.isolatedMargin = Math.max(0, p.isolatedMargin + fromScaled(msg.amount, 6));
+    p.isolatedMargin = Math.max(0, p.isolatedMargin + (msg.add === true ? 1 : -1) * fromScaled(msg.amount, 6));
     return { ok: true, error: null, changedOrders, fills, withdrawals };
   }
   return { ok: false, error: 'UNSUPPORTED', changedOrders, fills, withdrawals };
@@ -644,7 +644,7 @@ const server = createServer(async (req, res) => {
     if (path === '/v1/tickers') return send(res, 200, { tickers: [...markets.values()].map(wireTicker) });
     if (path === '/v1/status') return send(res, 200, status());
     if (path === '/v1/geo') return send(res, 200, geo(req, url));
-    if (path === '/v1/eip712') return send(res, 200, state.eip712 === 'pinned' ? TYPES : { ...TYPES, types: { ...TYPES.types, UpdateMargin: [...TYPES.types.UpdateMargin, { name: 'add', type: 'bool' }] } });
+    if (path === '/v1/eip712') return send(res, 200, state.eip712 === 'pinned' ? TYPES : state.eip712 === 'otherVault' ? { ...TYPES, domain: { ...TYPES.domain, verifyingContract: '0x00000000000000000000000000000000000f0f02' } } : { ...TYPES, types: { ...TYPES.types, UpdateMargin: [...TYPES.types.UpdateMargin, { name: 'memo', type: 'string' }] } });
     if (path === '/v1/committee') return send(res, 200, { threshold: 5, validators: Array.from({ length: 7 }, (_, i) => `0x${String(i + 1).repeat(40)}`), setHash: h32('committee') });
     if (path === '/v1/finality/latest') return send(res, 200, { ...blockRef(state.finalized), blockHash: h32(`b${state.finalized}`), digest: h32(`d${state.finalized}`), threshold: 5, final: true, signatures: [] });
     let m;

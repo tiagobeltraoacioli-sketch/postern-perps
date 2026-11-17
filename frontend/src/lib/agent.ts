@@ -21,13 +21,14 @@ export type AgentRecord = {
   /** Agent address, lower case. */
   agent: string;
   name: string;
-  /** Unix seconds. */
+  /** Unix milliseconds (SPEC 2.3). */
   expiresAt: number;
   persisted: boolean;
   key: `0x${string}`;
 };
 
-const KEY = 'postern.perps.agents.v1';
+// v2: expiry in milliseconds (SPEC 0.1); v1 records (seconds) are never read.
+const KEY = 'postern.perps.agents.v2';
 const memory = new Map<string, AgentRecord>();
 
 function readStored(): AgentRecord[] {
@@ -70,7 +71,7 @@ export function agentFor(account: string, nowMs: number = Date.now()): AgentReco
   const a = account.toLowerCase();
   const r = memory.get(a) ?? readStored().find((x) => x.account === a) ?? null;
   if (!r) return null;
-  if (r.expiresAt * 1000 <= nowMs) {
+  if (r.expiresAt <= nowMs) {
     forgetAgent(a);
     return null;
   }

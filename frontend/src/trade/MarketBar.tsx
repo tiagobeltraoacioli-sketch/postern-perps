@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { feed, go } from '../state/session';
+import { feed, go, clockSkewMs } from '../state/session';
 import { useStore } from '../lib/store';
 import { formatCompactUsd, formatCountdown, formatPpm, formatPx, formatRate, formatSize, DASH } from '../lib/format';
 import { notional } from '../lib/calc';
@@ -11,7 +11,9 @@ import { AssetMark } from './AssetMark';
 const STATUS_WORDS: Record<Market['status'], string> = { active: 'Open', halted: 'Halted', closeOnly: 'Close only', settled: 'Settled' };
 
 export function MarketBar({ market, ticker }: { market: Market | undefined; ticker: Ticker | undefined }) {
-  const now = useNow(1000);
+  // Countdowns run on the exchange's clock (local clock plus the skew measured from /v1/status).
+  const skew = useStore(clockSkewMs) ?? 0;
+  const now = useNow(1000) + skew;
   const dp = market?.priceDecimals ?? 2;
   const change = ticker?.changePpm ?? null;
   return (
@@ -41,12 +43,12 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
           </dd>
         </div>
         <div className="stat">
-          <dt>Funding / 1 h · next in</dt>
+          <dt>Funding (1 h)</dt>
           <dd className="num">
             {ticker ? (
               <>
                 <span className={ticker.fundingRate >= 0n ? 'up' : 'down'}>{formatRate(ticker.fundingRate)}</span>
-                <span className="stat-sub"> · {formatCountdown(ticker.nextFundingTime - now)}</span>
+                <span className="stat-sub" title="Time to the next funding payment"> in {formatCountdown(ticker.nextFundingTime - now)}</span>
               </>
             ) : (
               DASH

@@ -92,7 +92,7 @@ export function MarginDialog({ market, position, onClose }: { market: Market; po
             disabled={!value}
             onClick={() => {
               onClose();
-              request('UpdateMargin', (nonce, account) => ({ account, nonce: nonce.toString(), marketId: market.marketId, amount: (add ? value! : -value!).toString() }));
+              request('UpdateMargin', (nonce, account) => ({ account, nonce: nonce.toString(), marketId: market.marketId, amount: value!.toString(), add }));
             }}
           >
             Review

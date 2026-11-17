@@ -10,7 +10,7 @@
  */
 import { useMemo } from 'react';
 import { api } from '../lib/api';
-import { compareWithNode } from '../lib/eip712';
+import { compareWithNode, DOMAIN } from '../lib/eip712';
 import { Feed } from '../lib/feed';
 import { tableProblems } from '../lib/pins';
 import { Store, useStore } from '../lib/store';
@@ -67,6 +67,7 @@ export function startSession() {
 export function currentGuard(account: string | null): Guard {
   const markets = feed.markets.get();
   return {
+    domain: DOMAIN,
     account: account?.toLowerCase() ?? null,
     eip712Problem: eip712Problem.get(),
     markets,
@@ -82,7 +83,7 @@ export function useGuard(account: string | null): Guard {
   const markets = useStore(feed.markets);
   const status = useStore(feed.status);
   return useMemo(
-    () => ({ account: account?.toLowerCase() ?? null, eip712Problem: problem, markets, tableProblems: tableProblems(markets), geo: g, status, now: Date.now() }),
+    () => ({ domain: DOMAIN, account: account?.toLowerCase() ?? null, eip712Problem: problem, markets, tableProblems: tableProblems(markets), geo: g, status, now: Date.now() }),
     [account, problem, g, markets, status],
   );
 }

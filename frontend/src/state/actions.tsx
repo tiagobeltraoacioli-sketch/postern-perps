@@ -12,7 +12,7 @@ import { api, ApiError, engineErrorWords, errorWords } from '../lib/api';
 import { agentFor, agentSigner } from '../lib/agent';
 import { AGENT_ALLOWED, type ActionType, type Message } from '../lib/eip712';
 import { nextNonce, NonceError } from '../lib/nonce';
-import { prepare, Refused, signAndSubmit, walletSigner, type Prepared, type Signer } from '../lib/sign';
+import { NoDomain, prepare, Refused, signAndSubmit, walletSigner, type Prepared, type Signer } from '../lib/sign';
 import type { ActionAck } from '../lib/types';
 import { useWallet } from '../wallet/useWallet';
 import { walletError } from '../wallet/wallet';
@@ -30,6 +30,8 @@ type Pending = {
   outcome: Outcome | null;
   buildError: string | null;
   onDone?: (outcome: Outcome) => void;
+  /** Estimates shown under the signed values, labelled as estimates (never signed, never part of a refusal). */
+  estimate?: { label: string; value: string }[];
 };
 
 type Ctx = {
@@ -37,7 +39,7 @@ type Ctx = {
   account: string | null;
   /** The agent key of this device for the connected account, if approved and unexpired. */
   agentAddress: string | null;
-  request: (type: ActionType, build: (nonce: bigint, account: string) => Message, onDone?: (o: Outcome) => void) => void;
+  request: (type: ActionType, build: (nonce: bigint, account: string) => Message, onDone?: (o: Outcome) => void, estimate?: { label: string; value: string }[]) => void;
   pending: Pending | null;
   switchSigner: (useAgent: boolean) => void;
   confirm: () => Promise<void>;
@@ -65,7 +67,7 @@ function build(p: Pending, wallet: ReturnType<typeof useWallet>): Pending {
     const message = p.build(nextNonce(signer.address, Date.now()), account);
     return { ...p, signer, prepared: prepare(p.type, message, signer, currentGuard(account)), buildError: null };
   } catch (e) {
-    return { ...p, signer, prepared: null, buildError: e instanceof NonceError ? e.message : 'The request could not be built. Nothing was signed.' };
+    return { ...p, signer, prepared: null, buildError: e instanceof NonceError || e instanceof NoDomain ? e.message : 'The request could not be built. Nothing was signed.' };
   }
 }
 
@@ -94,8 +96,8 @@ export function ActionProvider({ children }: { children: ReactNode }) {
   const agentAddress = useMemo(() => (account ? (agentFor(account)?.agent ?? null) : null), [account, agentTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const request = useCallback<Ctx['request']>(
-    (type, b, onDone) => {
-      setPending(build({ type, build: b, useAgent: true, prepared: null, signer: null, phase: 'review', outcome: null, buildError: null, onDone }, wallet));
+    (type, b, onDone, estimate) => {
+      setPending(build({ type, build: b, useAgent: true, prepared: null, signer: null, phase: 'review', outcome: null, buildError: null, onDone, estimate }, wallet));
     },
     [wallet],
   );

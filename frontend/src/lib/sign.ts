@@ -24,28 +24,30 @@
  *    the past, or longer than the stated maximum.
  */
 import { recoverTypedDataAddress, type Hex } from 'viem';
-import { AGENT_ALLOWED, DOMAIN, TYPES, describe, domainProblem, typedData, type ActionType, type Described, type Message, type TypedData } from './eip712';
+import { AGENT_ALLOWED, NoDomain, type Domain, TYPES, describe, domainProblem, typedData, type ActionType, type Described, type Message, type TypedData } from './eip712';
 import { signingProblem } from './pins';
 import type { Market, WireGeo, WireStatus } from './types';
 import { validAddress } from '../wallet/wallet';
 
 export const MAX_UINT64 = (1n << 64n) - 1n;
 export const MAX_INT64 = (1n << 63n) - 1n;
-/** Longest agent approval this interface signs (seconds). Presentation rule of the interface; the engine may differ. */
-export const MAX_AGENT_SECONDS = 180n * 86_400n;
+/** Longest agent approval (SPEC 2.3: expiresAt <= T + 180 days, in milliseconds). */
+export const MAX_AGENT_MS = 180n * 86_400_000n;
 const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 
 export type Signer = {
   kind: 'wallet' | 'agent';
   /** Lower-case address that produces the signature. */
   address: string;
-  /** Agent keys only: unix seconds after which the exchange no longer accepts it. */
+  /** Agent keys only: unix ms after which the exchange no longer accepts it. */
   expiresAt?: number;
   sign(data: TypedData): Promise<string>;
 };
 
 /** Everything the refusals read. `eip712Problem` undefined means "not read yet". */
 export type Guard = {
+  /** The build's signing domain (lib/eip712.ts DOMAIN); null when no vault is named: nothing can be signed. */
+  domain: Domain | null;
   account: string | null;
   eip712Problem: string | null | undefined;
   markets: Market[];
@@ -66,7 +68,9 @@ export type Prepared = {
 
 /** Actions that let a user leave: open under the exit-only policy (docs/API.md section 6). */
 export function isExitAction(type: ActionType, message: Message): boolean {
-  return type === 'CancelOrder' || type === 'CancelAll' || type === 'Withdraw' || (type === 'PlaceOrder' && message.reduceOnly === true);
+  // RevokeAgent added on 397's proposal (cross-area 04:55): a restricted user must always be able to revoke a
+  // compromised agent key. The node decides; the interface does not stop the attempt.
+  return type === 'CancelOrder' || type === 'CancelAll' || type === 'Withdraw' || type === 'RevokeAgent' || (type === 'PlaceOrder' && message.reduceOnly === true);
 }
 
 const uint = (v: unknown) => {
@@ -137,10 +141,10 @@ export function valueProblems(type: ActionType, message: Message, markets: Marke
       break;
     case 'ApproveAgent': {
       const expires = BigInt(message.expiresAt as string);
-      const nowS = BigInt(Math.floor(now / 1000));
+      const nowMs = BigInt(Math.floor(now));
       if (String(message.agent).toLowerCase() === String(message.account).toLowerCase()) out.push('the agent key must not be the account itself');
-      if (expires <= nowS) out.push('the approval must end in the future');
-      if (expires > nowS + MAX_AGENT_SECONDS) out.push('the approval may last at most 180 days');
+      if (expires <= nowMs) out.push('the approval must end in the future');
+      if (expires > nowMs + MAX_AGENT_MS) out.push('the approval may last at most 180 days');
       const name = String(message.name);
       if (!/^[\x20-\x7e]{1,32}$/.test(name)) out.push('the agent name must be 1 to 32 plain characters');
       break;
@@ -162,7 +166,7 @@ export function refusals(type: ActionType, message: Message, signer: Signer | nu
     if (signer.kind === 'wallet' && signer.address !== account) out.push('The wallet account changed. Review again.');
     if (signer.kind === 'agent') {
       if (!AGENT_ALLOWED.includes(type)) out.push('This action needs your main wallet. An agent key can never sign it.');
-      if (signer.expiresAt !== undefined && signer.expiresAt * 1000 <= guard.now) out.push('The agent key on this device has expired. Approve a new one or sign with your wallet.');
+      if (signer.expiresAt !== undefined && signer.expiresAt <= guard.now) out.push('The agent key on this device has expired. Approve a new one or sign with your wallet.');
     }
   }
   if (guard.eip712Problem === undefined) out.push('The exchange signing definitions have not been checked yet.');
@@ -191,8 +195,10 @@ export function refusals(type: ActionType, message: Message, signer: Signer | nu
   return [...new Set(out)];
 }
 
+/** Thrown by `prepare` when the build has no signing domain (no vault): nothing can be reviewed or signed. */
+export { NoDomain };
 export function prepare(type: ActionType, message: Message, signer: Signer | null, guard: Guard): Prepared {
-  const data = typedData(type, message);
+  const data = typedData(type, message, guard.domain);
   return { type, message, data, described: describe(type, message, guard.markets), refusals: refusals(type, message, signer, guard) };
 }
 
@@ -241,9 +247,8 @@ export async function signAndSubmit<T>(
 ): Promise<T> {
   const again = refusals(prepared.type, prepared.message, signer, guardNow());
   if (again.length) throw new Refused(again);
-  const domain = domainProblem(prepared.data.domain as never);
+  const domain = domainProblem(prepared.data.domain as unknown as Record<string, unknown>, guardNow().domain);
   if (domain) throw new Refused([`Refused: ${domain}.`]);
-  if (prepared.data.domain.chainId !== DOMAIN.chainId) throw new Refused(['Refused: wrong signing chain id.']);
   const signature = await signer.sign(prepared.data);
   const form = signatureProblem(signature);
   if (form) throw new Refused([`The wallet returned an unusable signature: ${form}. Nothing was submitted.`]);

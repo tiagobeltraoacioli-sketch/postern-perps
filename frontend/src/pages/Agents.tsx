@@ -8,7 +8,7 @@ import { useStore } from '../lib/store';
 import { useActions } from '../state/actions';
 import { agentFor, createAgent, forgetAgent, keepAgent, type AgentRecord } from '../lib/agent';
 import { formatDateTime, shortAddress } from '../lib/format';
-import { MAX_AGENT_SECONDS } from '../lib/sign';
+import { MAX_AGENT_MS } from '../lib/sign';
 
 const DAYS = [1, 7, 30, 90, 180];
 
@@ -24,7 +24,7 @@ export function Agents() {
 
   const approve = () => {
     if (!account) return;
-    const expiresAt = Math.floor(Date.now() / 1000) + Math.min(days * 86_400, Number(MAX_AGENT_SECONDS));
+    const expiresAt = Date.now() + Math.min(days * 86_400_000, Number(MAX_AGENT_MS));
     const record = createAgent(account, name, expiresAt);
     setDraft(record);
     request(
@@ -65,7 +65,7 @@ export function Agents() {
             {local ? (
               <div className="dialog-body">
                 <p className="num">
-                  {shortAddress(local.agent)} · “{local.name}” · until {formatDateTime(local.expiresAt * 1000)} UTC · {local.persisted ? 'kept on this device' : 'this tab only'}
+                  {shortAddress(local.agent)} · “{local.name}” · until {formatDateTime(local.expiresAt)} UTC · {local.persisted ? 'kept on this device' : 'this tab only'}
                 </p>
                 <div className="review-actions">
                   <button type="button" className="button button-quiet" onClick={() => { forgetAgent(account); refreshAgent(); }}>

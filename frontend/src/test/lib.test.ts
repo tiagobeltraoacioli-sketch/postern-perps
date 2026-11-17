@@ -84,9 +84,19 @@ describe('nonce', () => {
     expect(nextNonce('0xa', NOW)).toBe(BigInt(NOW) + 1n);
     expect(nextNonce('0xb', NOW)).toBe(BigInt(NOW));
   });
-  it('follows a published nonce within a day, refuses one further ahead', () => {
+  it('follows a published nonce only inside the SPEC 2.5 future bound (30 s), refuses beyond it', () => {
     expect(nextNonce('0xc', NOW, BigInt(NOW) + 5_000n)).toBe(BigInt(NOW) + 5_000n);
-    expect(() => nextNonce('0xd', NOW, BigInt(NOW) + 86_400_001n)).toThrow(NonceError);
+    expect(() => nextNonce('0xd', NOW, BigInt(NOW) + 30_001n)).toThrow(NonceError);
+  });
+  it('R395-11: a far-ahead published nonce is never stored, so the next signature is back on the clock', () => {
+    expect(() => nextNonce('0xe', NOW, BigInt(NOW) + 86_400_000n)).toThrow(NonceError);
+    expect(nextNonce('0xe', NOW + 1)).toBe(BigInt(NOW) + 1n);
+    expect(JSON.parse(localStorage.getItem('postern.perps.nonce.v1')!)['0xe']).toBe(String(NOW + 1));
+  });
+  it('refuses when the clock moved back beyond the window instead of signing a nonce the engine rejects', () => {
+    nextNonce('0xf', NOW);
+    expect(() => nextNonce('0xf', NOW - 60_000)).toThrow(/moved back/);
+    expect(nextNonce('0xf', NOW - 10_000)).toBe(BigInt(NOW) + 1n);
   });
 });
 
@@ -115,15 +125,15 @@ describe('agent keys', () => {
   beforeEach(() => resetAgents());
   it('generated here, kept in memory by default, persisted only when asked, forgotten when expired', () => {
     const owner = '0x1111111111111111111111111111111111111111';
-    const r = createAgent(owner, 'bot', NOW / 1000 + 3600);
+    const r = createAgent(owner, 'bot', NOW + 3_600_000);
     expect(r.agent).toMatch(/^0x[0-9a-f]{40}$/);
     keepAgent(r, false);
-    expect(localStorage.getItem('postern.perps.agents.v1')).toBe('[]');
+    expect(localStorage.getItem('postern.perps.agents.v2')).toBe('[]');
     expect(agentFor(owner, NOW)?.agent).toBe(r.agent);
     keepAgent(r, true);
-    expect(JSON.parse(localStorage.getItem('postern.perps.agents.v1')!)).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem('postern.perps.agents.v2')!)).toHaveLength(1);
     expect(agentFor(owner, NOW + 3_600_001)).toBeNull();
-    expect(localStorage.getItem('postern.perps.agents.v1')).toBe('[]');
+    expect(localStorage.getItem('postern.perps.agents.v2')).toBe('[]');
     forgetAgent(owner);
   });
   it('an agent signer is marked as an agent with its expiry', () => {

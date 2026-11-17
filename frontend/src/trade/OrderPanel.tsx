@@ -64,6 +64,11 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
     const v = parseAt(slip, 4, 4).value; // percent with up to 4 places, as 1e4 units of a percent
     return v === null ? DEFAULT_SLIPPAGE_PPM : v; // percent x 1e4 = ppm
   })();
+  // Exit only (region or close-only market): the side that reduces the open position is the useful default.
+  const positionSign = state?.account.positions.find((p) => p.symbol === market.symbol)?.size ?? 0n;
+  useEffect(() => {
+    if (forcedReduce && positionSign !== 0n) setSide(positionSign > 0n ? 'sell' : 'buy');
+  }, [forcedReduce, positionSign > 0n, positionSign === 0n, market.symbol]); // eslint-disable-line react-hooks/exhaustive-deps
   const form: OrderForm = { side, kind, size, price, trigger, tif, reduceOnly: reduce, slippagePpm: slipPpm };
   const position = state?.account.positions.find((p) => p.symbol === market.symbol);
   const leverage = position?.leverage ?? Math.min(10, market.maxLeverage);
@@ -116,6 +121,14 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
           setSize('');
         }
       },
+      preview
+        ? [
+            { label: 'Estimated order value', value: `${formatUsd(preview.notional)} USDC` },
+            { label: 'Estimated margin', value: `${formatUsd(preview.margin)} USDC` },
+            { label: `Estimated fee (${built.isMarket || tif === 'IOC' ? 'taker' : 'maker if it rests'})`, value: `${formatUsd(preview.fee)} USDC` },
+            { label: 'Estimated liquidation price', value: preview.liquidationPx === null ? 'None' : `${formatPx(preview.liquidationPx, market.priceDecimals)} USD` },
+          ]
+        : undefined,
     );
   };
 

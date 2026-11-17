@@ -95,9 +95,11 @@ const viewport = (width, height, mobile = false) => page.cdp('Emulation.setDevic
 const theme = async (t) => {
   await page.evaluate(`localStorage.setItem('postern.theme.v1', ${JSON.stringify(t)})`);
 };
-const shot = async (name) => {
+const shot = async (name, full = true) => {
   await delay(450);
-  await page.screenshot(join(OUT, `${name}.png`));
+  if (full) return page.screenshot(join(OUT, `${name}.png`));
+  const { data } = await page.cdp('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(OUT, `${name}.png`), Buffer.from(data, 'base64'));
 };
 const visible = () => page.visibleText();
 const has = async (scene, pattern) => expect(scene, pattern.test(await visible()), `visible ${pattern}`);
@@ -116,6 +118,7 @@ try {
   await page.goto(APP);
   await theme('dark');
   await page.goto(`${APP}#/trade/BTC-USD`);
+  await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await page.waitFor('book rows', `document.querySelectorAll('.book-row').length > 10`);
 
@@ -150,13 +153,14 @@ try {
     await has('04', /67,000\.5 USD/);
     await has('04', /Reduce only/);
     await has('04', /cannot move funds out/);
-    await shot('04-review-limit-dark');
+    await has('04', /Estimated liquidation price/);
+    await shot('04-review-limit-dark', false);
   }
   await page.click('Sign in wallet and send');
   await page.waitVisibleText(/Included in block|Rejected|Refused/, 15_000);
   expect('05', signatures === 1, 'exactly one wallet signature for one order');
   await has('05', /Included in block/);
-  await shot('05-order-included-dark');
+  await shot('05-order-included-dark', false);
   await page.click('Close');
 
   // Market order: the worst price is shown and signed.
@@ -166,7 +170,7 @@ try {
   await has('06', /Worst price: mark/);
   await page.click('Review long');
   await page.waitVisibleText(/Worst price accepted/);
-  await shot('06-review-market-dark');
+  await shot('06-review-market-dark', false);
   await page.click('Cancel');
 
   // Light theme.
@@ -181,12 +185,16 @@ try {
   await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
-  await shot('08-trade-phone-light');
+  await shot('08-trade-phone-light', false);
+  await page.evaluate(`document.querySelector('.order-panel').scrollIntoView({ block: 'start' })`);
+  await shot('08b-order-phone-light', false);
   await theme('dark');
   await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
-  await shot('09-trade-phone-dark');
+  await shot('09-trade-phone-dark', false);
+  await page.evaluate(`document.querySelector('.order-panel').scrollIntoView({ block: 'start' })`);
+  await shot('09b-order-phone-dark', false);
   await viewport(1440, 900);
 
   // Restricted region: banner, exit only, reduce-only forced.
@@ -216,7 +224,7 @@ try {
   await page.click('Review long');
   await page.waitVisibleText(/Signing refused/);
   expect('12', (await page.button('Sign in wallet and send'))?.disabled === true, 'sign button disabled when the typed data differs');
-  await shot('12-eip712-mismatch-dark');
+  await shot('12-eip712-mismatch-dark', false);
   await page.click('Cancel');
   await scenario('eip712=pinned');
 

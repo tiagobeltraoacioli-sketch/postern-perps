@@ -1,6 +1,6 @@
 /** The application shell: header, banners that must be seen, the page, the footer, the review sheet. */
 import { useEffect, useRef, useState } from 'react';
-import { Wallet, Copy, LogOut } from 'lucide-react';
+import { Wallet, Copy, LogOut, CandlestickChart, PieChart, ArrowLeftRight, KeyRound, Activity, type LucideIcon } from 'lucide-react';
 import { feed, route as routeStore, go, eip712Problem, geo as geoStore, geoRead, startSession, type Route } from './state/session';
 import { ActionProvider, useActions } from './state/actions';
 import { useStore } from './lib/store';
@@ -18,12 +18,12 @@ import { System } from './pages/System';
 import { Legal } from './pages/Legal';
 import { OPERATOR_LINE, PROTOTYPE_LINE, restrictedText } from './compliance/notices';
 
-const NAV: [Route['page'], string][] = [
-  ['trade', 'Trade'],
-  ['portfolio', 'Portfolio'],
-  ['transfers', 'Transfers'],
-  ['agents', 'Agent keys'],
-  ['system', 'System'],
+const NAV: [Route['page'], string, string, LucideIcon][] = [
+  ['trade', 'Trade', 'Trade', CandlestickChart],
+  ['portfolio', 'Portfolio', 'Portfolio', PieChart],
+  ['transfers', 'Transfers', 'Transfers', ArrowLeftRight],
+  ['agents', 'Agent keys', 'Keys', KeyRound],
+  ['system', 'System', 'System', Activity],
 ];
 
 export function App() {
@@ -78,9 +78,11 @@ function Header({ route }: { route: Route }) {
         <span className="brand-sub">Perpetuals</span>
       </button>
       <nav className="nav" aria-label="Main">
-        {NAV.map(([page, label]) => (
-          <button key={page} type="button" aria-current={route.page === page ? 'page' : undefined} onClick={() => go(page === 'trade' ? { page, symbol } : { page } as Route)}>
-            {label}
+        {NAV.map(([page, label, short, Icon]) => (
+          <button key={page} type="button" aria-current={route.page === page ? 'page' : undefined} aria-label={label} onClick={() => go(page === 'trade' ? { page, symbol } : ({ page } as Route))}>
+            <Icon className="nav-icon" size={18} aria-hidden="true" />
+            <span className="nav-long">{label}</span>
+            <span className="nav-short" aria-hidden="true">{short}</span>
           </button>
         ))}
       </nav>

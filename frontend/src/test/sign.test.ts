@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { forViem, isExitAction, prepare, refusals, signAndSubmit, signatureProblem, valueProblems, type Signer } from '../lib/sign';
-import { compareWithNode, DOMAIN, TYPES, type Message } from '../lib/eip712';
-import { RESTRICTED_GEO, guard, market, markets, NOW, status } from './fixtures';
+import { compareWithNode, domainFor, domainProblem, TYPES, type Message } from '../lib/eip712';
+import { RESTRICTED_GEO, guard, market, markets, NOW, status, TEST_DOMAIN } from './fixtures';
 import published from '../../mock/eip712.json';
 
 const keyA = generatePrivateKey();
@@ -55,12 +55,12 @@ describe('refusals', () => {
   });
   it('an agent key can never sign Withdraw, ApproveAgent or RevokeAgent, nor sign after expiry', () => {
     const agentKey = generatePrivateKey();
-    const agent = localSigner(agentKey, 'agent', NOW / 1000 + 3600);
+    const agent = localSigner(agentKey, 'agent', NOW + 3_600_000);
     const w = { account, nonce: '1', amount: '1000000', recipient: account };
     expect(refusals('Withdraw', w, agent, guard(account)).join()).toMatch(/needs your main wallet/);
     expect(refusals('RevokeAgent', { account, nonce: '1', agent: agent.address }, agent, guard(account)).join()).toMatch(/needs your main wallet/);
     expect(refusals('PlaceOrder', order(), agent, guard(account))).toEqual([]);
-    const expired = localSigner(agentKey, 'agent', NOW / 1000 - 1);
+    const expired = localSigner(agentKey, 'agent', NOW);
     expect(refusals('PlaceOrder', order(), expired, guard(account)).join()).toMatch(/expired/);
   });
   it('restricted or unknown region: only exit actions', () => {
@@ -115,13 +115,16 @@ describe('value refusals', () => {
     expect(valueProblems('Withdraw', { account, nonce: '1', amount: '1', recipient: `0x${'0'.repeat(40)}` }, [], NOW).join()).toMatch(/recipient is not an address/);
   });
   it('agent approvals: not the account, in the future, at most 180 days, a plain name', () => {
-    const s = Math.floor(NOW / 1000);
+    // SPEC 2.3: expiresAt in milliseconds, T < expiresAt <= T + 180 days.
     const agent = privateKeyToAccount(generatePrivateKey()).address.toLowerCase();
-    const a = (over: Partial<Message>) => valueProblems('ApproveAgent', { account, nonce: '1', agent, name: 'bot', expiresAt: String(s + 3600), ...over }, [], NOW).join(' | ');
+    const a = (over: Partial<Message>) => valueProblems('ApproveAgent', { account, nonce: '1', agent, name: 'bot', expiresAt: String(NOW + 3_600_000), ...over }, [], NOW).join(' | ');
     expect(a({})).toBe('');
     expect(a({ agent: account })).toMatch(/not be the account/);
-    expect(a({ expiresAt: String(s - 1) })).toMatch(/future/);
-    expect(a({ expiresAt: String(s + 181 * 86_400) })).toMatch(/180 days/);
+    expect(a({ expiresAt: String(NOW) })).toMatch(/future/);
+    expect(a({ expiresAt: String(NOW + 180 * 86_400_000) })).toBe('');
+    expect(a({ expiresAt: String(NOW + 180 * 86_400_000 + 1) })).toMatch(/180 days/);
+    // A value in seconds (the pre-SPEC unit) is in the past in milliseconds: refused, never read as a far future.
+    expect(a({ expiresAt: String(Math.floor(NOW / 1000) + 3600) })).toMatch(/future/);
     expect(a({ name: 'bot‮' })).toMatch(/plain characters/);
   });
   it('leverage bounds', () => {
@@ -177,29 +180,45 @@ describe('signAndSubmit', () => {
 });
 
 describe('pinned typed data', () => {
-  it('the stand-in mock publishes exactly the pin', () => {
-    expect(compareWithNode(published)).toBeNull();
+  const MOCK_DOMAIN = domainFor(published.domain.verifyingContract)!;
+  it('the stand-in mock publishes exactly the pin (SPEC 0.1.1 section 2)', () => {
+    expect(compareWithNode(published, MOCK_DOMAIN)).toBeNull();
+  });
+  it('no vault in the build: no domain, nothing can be prepared', () => {
+    expect(domainFor(null)).toBeNull();
+    expect(domainFor(`0x${'0'.repeat(40)}`)).toBeNull();
+    expect(compareWithNode(published, null)).toMatch(/no signing domain/);
+    expect(() => prepare('PlaceOrder', order(), localSigner(), guard(account, { domain: null }))).toThrow(/vault is not deployed/);
+  });
+  it('a signature for another deployment (other verifyingContract) is refused at signing time', async () => {
+    const prepared = prepare('PlaceOrder', order(), localSigner(), guard(account));
+    const other = domainFor('0x00000000000000000000000000000000000f0f02');
+    await expect(signAndSubmit(prepared, localSigner(), () => guard(account, { domain: other }), vi.fn())).rejects.toThrow(/verifying contract/);
+    expect(domainProblem({ ...TEST_DOMAIN }, other)).toMatch(/another deployment/);
+    expect(compareWithNode({ ...published, domain: { ...published.domain, verifyingContract: '0x00000000000000000000000000000000000f0f02' } }, MOCK_DOMAIN)).toMatch(/verifying contract/);
   });
   it('one changed field type, an added field, a renamed domain or a verifyingContract is a difference', () => {
     const t = structuredClone(published) as { domain: Record<string, unknown>; types: Record<string, { name: string; type: string }[]> };
     t.types.UpdateMargin = [...t.types.UpdateMargin, { name: 'add', type: 'bool' }];
-    expect(compareWithNode(t)).toMatch(/UpdateMargin differs/);
-    expect(compareWithNode({ ...published, domain: { ...published.domain, chainId: 700770 } })).toMatch(/domain differs/);
-    expect(compareWithNode({ ...published, domain: { ...published.domain, verifyingContract: '0x' } })).toMatch(/does not know/);
+    expect(compareWithNode(t, MOCK_DOMAIN)).toMatch(/UpdateMargin differs/);
+    expect(compareWithNode({ ...published, domain: { ...published.domain, chainId: 7007701 } }, MOCK_DOMAIN)).toMatch(/chain id/);
+    expect(compareWithNode({ ...published, domain: { ...published.domain, salt: '0x' } }, MOCK_DOMAIN)).toMatch(/unexpected domain fields/);
     const u = structuredClone(published) as typeof t;
     u.types.PlaceOrder[6] = { name: 'price', type: 'uint128' };
-    expect(compareWithNode(u)).toMatch(/PlaceOrder differs/);
+    expect(compareWithNode(u, MOCK_DOMAIN)).toMatch(/PlaceOrder differs/);
   });
-  it('the domain is PosternPerps / 1 / 7007701 with no verifying contract', () => {
-    expect(DOMAIN).toEqual({ name: 'PosternPerps', version: '1', chainId: 7007701 });
+  it('the domain is PosternPerps / 1 / 700770 / the vault (SPEC 2.1); UpdateMargin is uint64 + bool', () => {
+    expect(TEST_DOMAIN).toEqual({ name: 'PosternPerps', version: '1', chainId: 700770, verifyingContract: '0x00000000000000000000000000000000000f0f01' });
+    expect(TYPES.UpdateMargin.map((f) => `${f.type} ${f.name}`)).toEqual(['address account', 'uint64 nonce', 'uint32 marketId', 'uint64 amount', 'bool add']);
     expect(Object.keys(TYPES)).toEqual(['PlaceOrder', 'CancelOrder', 'CancelAll', 'UpdateLeverage', 'UpdateMargin', 'Withdraw', 'ApproveAgent', 'RevokeAgent']);
   });
-  it('exit actions are exactly those of docs/API.md section 6', () => {
+  it('exit actions are those of docs/API.md section 6 plus RevokeAgent (397 proposal)', () => {
     expect(isExitAction('CancelOrder', {})).toBe(true);
     expect(isExitAction('Withdraw', {})).toBe(true);
     expect(isExitAction('PlaceOrder', { reduceOnly: true })).toBe(true);
     expect(isExitAction('PlaceOrder', { reduceOnly: false })).toBe(false);
     expect(isExitAction('UpdateMargin', {})).toBe(false);
     expect(isExitAction('ApproveAgent', {})).toBe(false);
+    expect(isExitAction('RevokeAgent', {})).toBe(true);
   });
 });
