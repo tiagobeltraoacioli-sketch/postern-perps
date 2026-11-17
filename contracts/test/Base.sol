@@ -253,7 +253,43 @@ abstract contract Base {
         for (uint256 i; i < ws.length; ++i) h[i] = _wLeaf(ws[i]);
     }
 
+    /// SPEC 8: the account tree starts with PROTOCOL_FEE, INSURANCE, BACKSTOP at indices 0, 1, 2. A list that does not
+    /// start with 0x..01 gets the three prepended with escape value 0; user index i then sits at position i + 3.
+    function _full(address[] memory accts, uint64[] memory bals)
+        internal
+        pure
+        returns (address[] memory A, uint64[] memory B, uint256 off)
+    {
+        if (accts.length != 0 && accts[0] == address(1)) return (accts, bals, 0);
+        A = new address[](accts.length + 3);
+        B = new uint64[](accts.length + 3);
+        A[0] = address(1);
+        A[1] = address(2);
+        A[2] = address(3);
+        for (uint256 i; i < accts.length; ++i) {
+            A[i + 3] = accts[i];
+            B[i + 3] = bals[i];
+        }
+        off = 3;
+    }
+
     function _acct(address[] memory accts, uint64[] memory bals, uint256 i)
+        internal
+        pure
+        returns (PerpsVault.Account memory)
+    {
+        (address[] memory A, uint64[] memory B, uint256 off) = _full(accts, bals);
+        return _acctAt(A, B, i + off);
+    }
+
+    function _proveSys(address[] memory accts, uint64[] memory bals) internal {
+        (address[] memory A, uint64[] memory B,) = _full(accts, bals);
+        vault.proveSystemShares(
+            _acctAt(A, B, 1), Tree.proof(_leavesAt(A, B), 1), _acctAt(A, B, 2), Tree.proof(_leavesAt(A, B), 2)
+        );
+    }
+
+    function _acctAt(address[] memory accts, uint64[] memory bals, uint256 i)
         internal
         pure
         returns (PerpsVault.Account memory a)
@@ -273,9 +309,14 @@ abstract contract Base {
         );
     }
 
-    function _eLeaves(address[] memory accts, uint64[] memory bals) internal pure returns (bytes32[] memory h) {
+    function _leavesAt(address[] memory accts, uint64[] memory bals) internal pure returns (bytes32[] memory h) {
         h = new bytes32[](accts.length);
-        for (uint256 i; i < accts.length; ++i) h[i] = _aLeaf(_acct(accts, bals, i));
+        for (uint256 i; i < accts.length; ++i) h[i] = _aLeaf(_acctAt(accts, bals, i));
+    }
+
+    function _eLeaves(address[] memory accts, uint64[] memory bals) internal pure returns (bytes32[] memory) {
+        (address[] memory A, uint64[] memory B,) = _full(accts, bals);
+        return _leavesAt(A, B);
     }
 
     function _submit(PerpsVault.Checkpoint memory cp) internal {
@@ -287,7 +328,8 @@ abstract contract Base {
     }
 
     function _eProof(address[] memory accts, uint64[] memory bals, uint64 i) internal pure returns (bytes32[] memory) {
-        return Tree.proof(_eLeaves(accts, bals), i);
+        (,, uint256 off) = _full(accts, bals);
+        return Tree.proof(_eLeaves(accts, bals), i + off);
     }
 
     // ------------------------------------------------------------------ assertions

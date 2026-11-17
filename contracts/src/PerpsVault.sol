@@ -165,6 +165,10 @@ contract PerpsVault {
     /// Escape: time it began (0: normal) and the pro-rata numerator `min(pool, totalEscape)` fixed then.
     uint64 public escapeAt;
     uint64 public escapePayable;
+    /// Unscaled pool fixed at the trigger; INSURANCE + BACKSTOP escape values once proven (R395-33).
+    uint64 public escapePool;
+    uint128 public subordinatedTotal;
+    bool public systemSharesProven;
     bool public surplusSwept;
 
     // ------------------------------------------------------------------ types
@@ -677,9 +681,46 @@ contract PerpsVault {
         if (reason == 0) revert EscapeNotDue();
         uint64 pool = custody() - (latest.withdrawalsTotal - withdrawnTotal)
             - (depositedTotal - depositTotalAt[latest.nextDepositIndex]);
-        escapePayable = pool < latest.totalEscape ? pool : uint64(latest.totalEscape);
+        escapePool = pool;
         escapeAt = uint64(block.timestamp);
-        emit EscapeTriggered(escapeAt, reason, checkpointCount, escapePayable, latest.totalEscape);
+        emit EscapeTriggered(escapeAt, reason, checkpointCount, pool, latest.totalEscape);
+    }
+
+    /// @notice In escape, before any account claims: proves the INSURANCE (0x..02, index 1) and BACKSTOP (0x..03,
+    ///         index 2) leaves of the latest account tree (SPEC 8). Their escape values are subordinated (coordinator
+    ///         decision on R395-33): user (senior) escape values are paid `escapeValue * min(pool, senior) / senior`
+    ///         with `senior = totalEscape - insurance - backstop`; only `min(insurance + backstop, pool - senior paid)`
+    ///         remains for them, payable to `feeRecipient` only `SURPLUS_DELAY` after escape began. Anyone may call.
+    function proveSystemShares(
+        Account calldata insurance,
+        bytes32[] calldata insuranceSiblings,
+        Account calldata backstop,
+        bytes32[] calldata backstopSiblings
+    ) external nonReentrant {
+        if (escapeAt == 0) revert NotEscape();
+        if (systemSharesProven) revert AlreadyRegistered();
+        if (
+            insurance.account != address(2) || insurance.index != 1 || backstop.account != address(3)
+                || backstop.index != 2
+        ) revert InvalidWithdrawal();
+        if (
+            _root(_accountLeaf(insurance), 1, insuranceSiblings) != latest.accountsRoot
+                || _root(_accountLeaf(backstop), 2, backstopSiblings) != latest.accountsRoot
+        ) revert InvalidProof();
+        uint128 sub = uint128(insurance.escapeValue) + backstop.escapeValue;
+        if (sub > latest.totalEscape) revert InvalidProof();
+        uint128 senior = latest.totalEscape - sub;
+        uint64 pool = escapePool;
+        escapePayable = senior < pool ? uint64(senior) : pool;
+        subordinatedTotal = sub;
+        systemSharesProven = true;
+        uint64 rest = pool - escapePayable;
+        uint64 subPaid = sub < rest ? uint64(sub) : rest;
+        if (subPaid != 0) {
+            bytes32 key = escapeKey(address(2));
+            _register(key, feeRecipient, subPaid);
+            payouts[key].readyAt = escapeAt + SURPLUS_DELAY;
+        }
     }
 
     /// @notice In escape: registers the account's pro-rata escape value from the latest checkpoint's account tree and
@@ -693,17 +734,19 @@ contract PerpsVault {
     {
         if (escapeAt == 0) revert NotEscape();
         if (a.escapeValue == 0 || a.account == address(this) || a.account == token) revert InvalidWithdrawal();
-        address recipient = _keyless(a.account) ? feeRecipient : a.account;
-        if (latest.totalEscape == 0) revert InvalidWithdrawal();
+        if (!systemSharesProven) revert NotReady();
+        if (_keyless(a.account) && a.account != PROTOCOL_FEE) revert InvalidWithdrawal();
+        address recipient = a.account == PROTOCOL_FEE ? feeRecipient : a.account;
+        uint256 senior = latest.totalEscape - subordinatedTotal;
+        if (senior == 0) revert InvalidWithdrawal();
         if (_root(_accountLeaf(a), a.index, siblings) != latest.accountsRoot) revert InvalidProof();
         key = escapeKey(a.account);
         if (payouts[key].total != 0) revert AlreadyRegistered();
-        uint64 amount = uint64(uint256(a.escapeValue) * escapePayable / latest.totalEscape);
+        uint64 amount = uint64(uint256(a.escapeValue) * escapePayable / senior);
         if (amount == 0) revert InvalidWithdrawal();
         if (uint256(escapeClaimedTotal) + amount > escapePayable) revert Insolvent();
         escapeClaimedTotal += amount;
         _register(key, recipient, amount);
-        if (_keyless(a.account) && a.account != PROTOCOL_FEE) payouts[key].readyAt = escapeAt + SURPLUS_DELAY;
         _payNow(key, want);
     }
 
@@ -727,7 +770,10 @@ contract PerpsVault {
     ///         escape shares nobody proved, donations) to `feeRecipient`, once. Every amount still claimable stays.
     function sweepEscapeSurplus() external nonReentrant returns (uint64 amount) {
         if (escapeAt == 0) revert NotEscape();
-        if (block.timestamp < uint256(escapeAt) + SURPLUS_DELAY || surplusSwept) revert InvalidSurplus();
+        // Before the system shares are proven the user pool is not fixed: nothing is surplus yet.
+        if (block.timestamp < uint256(escapeAt) + SURPLUS_DELAY || surplusSwept || !systemSharesProven) {
+            revert InvalidSurplus();
+        }
         // Still claimable and not yet registered: escape values, certified withdrawal records, uncredited deposits.
         uint64 unregistered = (escapePayable - escapeClaimedTotal) + (latest.withdrawalsTotal - withdrawnTotal)
             + (depositedTotal - depositTotalAt[latest.nextDepositIndex] - refundedTotal);

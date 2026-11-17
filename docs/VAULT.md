@@ -77,7 +77,8 @@ largeDelay 1 day, forcedDelay 2 days, escapeDelay 7 days (`contracts/deploy/vaul
 | `guardianPause()` | a guardian | Pauses payouts and deposits for `pauseDuration` (chain rules of section 2). |
 | `unpause(uint64 count, uint256 validUntil, bytes[] signatures)` | anyone with `unpauseThreshold` signatures | Ends pause `count` early; guardians then wait `pauseCooldown`. |
 | `triggerEscape()` | anyone | Enters escape (one way) if `escapeReason() != 0`. |
-| `claimEscape(Account a, bytes32[] siblings, uint64 want) returns (bytes32 key)` | anyone, pays the account | `Account = (address account, uint32 index, int128 balance, uint64 escapeValue, bytes32 positionsHash)` (SPEC 0.1.1 leaf). In escape: registers `escapeValue * escapePayable / totalEscape` (rounded down) and pays up to `want` now. Keyless accounts pay `feeRecipient`: PROTOCOL_FEE at once, INSURANCE and BACKSTOP only 90 days after escape began. |
+| `claimEscape(Account a, bytes32[] siblings, uint64 want) returns (bytes32 key)` | anyone, pays the account | `Account = (address account, uint32 index, int128 balance, uint64 escapeValue, bytes32 positionsHash)` (SPEC 0.1.1 leaf). In escape, after `proveSystemShares`: registers `escapeValue * escapePayable / senior` (rounded down; `senior = totalEscape - insurance - backstop`) and pays up to `want` now. PROTOCOL_FEE's share pays `feeRecipient`; INSURANCE and BACKSTOP cannot claim (their remainder is registered by `proveSystemShares`). |
+| `proveSystemShares(Account insurance, bytes32[] s1, Account backstop, bytes32[] s2)` | anyone, once, in escape | Proves INSURANCE (`0x…02`, index 1) and BACKSTOP (`0x…03`, index 2) leaves; fixes the user payout ratio and registers the subordinated remainder to `feeRecipient`, ready 90 days after escape began (R395-33). Required before any `claimEscape` and before the surplus sweep. |
 | `refundDeposit(uint64 index, address account, uint64 amount)` | anyone, pays `account` | In escape: refunds deposit `index >= latest.depositsCredited`, verified against the vault's own chain. No bucket, delay or pause (no committee input). |
 | `sweepEscapeSurplus() returns (uint64)` | anyone, pays `feeRecipient` | In escape, 90 days after it began, once: pays what no claim can reach (rounding, donations). Every amount still claimable (including unproven escape shares) stays. |
 
@@ -224,10 +225,16 @@ credits still exits through a forced request). At the trigger the vault fixes `p
 withdrawnTotal) - (depositedTotal - depositTotalAt[nextDepositIndex])` and `escapePayable = min(pool,
 totalEscape)`. In escape: checkpoints, deposits and forced requests stop; certified withdrawal records stay payable
 in full; deposits with index >= `nextDepositIndex` are refunded in full from the vault's own chain; each account
-claims `floor(escapeValue * escapePayable / totalEscape)` from the latest account tree (SPEC 11's pro-rata rule,
-`min(1, pool / totalEscape)`, with the pool net of what is owed in full, as R395-18 asked); keyless accounts' shares
-pay `feeRecipient` (PROTOCOL_FEE at once, INSURANCE and BACKSTOP after 90 days); after 90 days the surplus
-(rounding, donations) can be swept once to `feeRecipient`. A forced request the engine could not execute must not
+claims from the latest account tree. **Subordination (coordinator decision on R395-33):** the INSURANCE and BACKSTOP
+escape values cover user shortfalls first. Anyone proves their two leaves once (`proveSystemShares`); then
+`senior = totalEscape - insurance - backstop`, `escapePayable = min(pool, senior)`, each user (and PROTOCOL_FEE)
+receives `floor(escapeValue * escapePayable / senior)`, i.e. in full whenever the pool covers the users, pro rata
+only for a shortfall beyond the system shares; the system accounts' remainder `min(insurance + backstop, pool -
+escapePayable)` is one payout to `feeRecipient` that cannot be released before 90 days after escape began. After 90
+days the surplus (rounding, donations, value the tree never assigned) can be swept once to `feeRecipient`; the sweep
+is refused until the system shares are proven, and never touches an unclaimed user value.
+Failing-first demonstration: on `27c1969`, 395's scenario (pool 2,000; users 1,500 + 400; insurance 250, backstop
+50) paid alice 1,363.636363 instead of 1,500 (test run recorded in the commit); the three `R395_33` tests pass now. A forced request the engine could not execute must not
 be counted as processed (coordinator decision on R395-5: not consumed), so it runs into its deadline and opens
 escape; the vault sees only the count and head, so that rule lives in SPEC 14 and the validators (388/389).
 
@@ -271,7 +278,7 @@ signatures); `withdraw` 68,860 (register + pay, depth-32 proof; max 180,810); `r
 
 ## 10. Tests (contracts/, `forge test --offline`)
 
-50 tests: 40 unit/fuzz (`PerpsVault.t.sol`: configuration refusals; deposits and hostile tokens; checkpoint
+53 tests: 40 unit/fuzz, 3 R395-33 subordination (`PerpsVault.t.sol`: configuration refusals; deposits and hostile tokens; checkpoint
 signatures, domain, fields, state-root equation, append-only, solvency, R395-23 pro rata; withdrawals: tamper,
 positions, siblings, depth, old checkpoints, fee account, recipients, large delay, bucket parts; guardians;
 forced requests; escape: overdue, silence rules, claims, refunds, certified records, parts, keyless shares,
@@ -289,6 +296,7 @@ calls, handler with an honest engine model and a colluding committee), 1 escape 
 | R395-24 | silence escape only after a first checkpoint; test `test_escape_after_silence_and_what_stops` |
 | R395-25 | `forcedDelay >= 1 day`, proposal 2 days; finality-based start not measurable on chain (stated) |
 | R395-26 | keyless addresses never paid; shares to `feeRecipient`; keyless deposits refused |
+| R395-33 | insurance and backstop subordinated to users in escape; remainder to `feeRecipient` only after 90 days; tests `test_R395_33_*` |
 | R395-27, R395-30 (vault side) | formats = SPEC 0.1.1; vectors file; node must adopt the event signatures and the 16-field checkpoint |
 
 ## 12. Not done / not proven
