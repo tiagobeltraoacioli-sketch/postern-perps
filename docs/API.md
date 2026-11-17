@@ -1,4 +1,4 @@
-# PosternDEX Perpetuals: public API (v0.1)
+# PosternDEX Perpetuals: public API (v0.2)
 
 UNAUDITED PROTOTYPE. Owned by agent 351 (`node/`). Changes are announced in the cross-area log.
 Machine-readable schemas: `node/api/schema.json` (JSON Schema, one `$defs` entry per type named below) and
@@ -116,7 +116,7 @@ difference).
 
 ```json
 {"name":"postern-perps-node","version":"0.1.0","apiVersion":"0.1","mode":"mock","unaudited":true,
- "network":{"eip712":{"name":"PosternPerps","version":"1","chainId":7007701},
+ "network":{"eip712":{"name":"PosternPerps","version":"1","chainId":700770,"verifyingContract":"0x…vault"},
             "collateralChainId":700770,"vault":"0x0000000000000000000000000000000000000000",
             "collateralToken":"0x0000000000000000000000000000000000000000","collateralSymbol":"bUSDC","collateralDecimals":6},
  "time":1794878412345,
@@ -146,8 +146,10 @@ difference).
  "signatures":[{"validator":"0x…","signature":"0x…(65 bytes r||s||v)"}]}
 ```
 
-`digest` is the value each validator signs: its exact layout is defined in `docs/VAULT.md` (the vault verifies the
-same bytes). Signatures are sorted by validator address ascending, as the vault requires. Anyone can verify a
+`digest` is the value each validator signs: `docs/VAULT.md` 5.2 `Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)`
+under the vault domain; the checkpoint object carries those 13 fields (u64 totals as decimal strings) plus `digest`,
+`threshold`, `final`, `blockHash` and `signatures`. The vault accepts at least `threshold` signatures; the node always
+publishes exactly `threshold`. Signatures are sorted by validator address ascending, as the vault requires. Anyone can verify a
 checkpoint from `GET /v1/committee` plus this object without trusting the API host.
 
 ### 3.3 Input log (published so anyone can replay with the engine CLI)
@@ -273,6 +275,10 @@ for inclusion), `credited` (applied by the engine at `creditedHeight`). A deposi
  "l2TxHash":null,"availableAt":null,"time":1794878200000}
 ```
 
+Certificate (v0.2 of this document, VAULT.md `withdraw` inputs): `{"record":{"index","account","recipient","amount"},
+"proof":{"index","hashes":[…],"sums":[…]},"leaf","digest","checkpoint":Checkpoint,"signatures":[…]}`; `amount` is the
+net amount (gross minus the flat fee, SPEC S-9.2) in USDC units.
+
 `status`: `requested` (action accepted), `included` (debited by the engine), `finalized` (in a finalized
 checkpoint), `certified` (k-of-n signatures collected: anyone may now submit the certificate to the vault; the
 relayer does it by default), `submitted` (L2 transaction seen), `delayed` (the vault holds a large amount until
@@ -288,7 +294,7 @@ agent wallet the main key approved. The typed-data definitions are owned by `doc
 at `GET /v1/eip712` so clients do not hard-code them:
 
 ```json
-{"domain":{"name":"PosternPerps","version":"1","chainId":7007701},
+{"domain":{"name":"PosternPerps","version":"1","chainId":700770,"verifyingContract":"0x…vault"},
  "types":{"PlaceOrder":[{"name":"account","type":"address"}, {"name":"nonce","type":"uint64"}]},
  "actions":["PlaceOrder","CancelOrder","CancelAll","ModifyOrder","UpdateLeverage","UpdateMargin","Withdraw","ApproveAgent","RevokeAgent"],
  "agentAllowed":["PlaceOrder","CancelOrder","CancelAll","ModifyOrder","UpdateLeverage","UpdateMargin"],
@@ -499,3 +505,4 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-11-17 | first version, written before `docs/SPEC.md` exists: action names and typed fields are provisional and follow the spec |
+| 0.2 | 2026-11-17 | follows SPEC 0.1.1 and VAULT.md 0.1: engine domain chainId 700770 + verifyingContract = vault; FIXED scales (price and size 1e-8, USDC 1e-6; per-market decimals are display only); nonce rule SPEC 2.5 (window and 64-set, errors NONCE_WINDOW / NONCE_USED inside `BAD_NONCE` admissions); checkpoint = VAULT 5.2 13 fields; certificate = VAULT `withdraw` inputs (sum-tree proof); block input tags 0x01-0x04 (SPEC 3.2) |

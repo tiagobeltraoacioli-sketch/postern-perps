@@ -1,20 +1,21 @@
-//! Block inputs, block header, block, and their canonical byte encodings.
-//!
-//! PROVISIONAL until `docs/SPEC.md` (agent 388) fixes the envelope: the encodings below are the node's proposal
-//! (cross-area line of 389, 2026-11-17 03:50 UTC); the oracle payload is agent 394's format verbatim
-//! (`node/oracle/README.md` section 4).
+//! Block inputs, block header, block, and their canonical byte encodings: `docs/SPEC.md` v0.1 section 3.2
+//! (agent 388), byte-compatible with `engine/src/codec.rs` (the adapter decodes the node's bytes with the
+//! engine's own decoder, so any divergence is caught at once).
 //!
 //! ```text
 //! inputsEncoded = count:u32be  Input{count}
-//! Input         = kind:u8  len:u32be  payload[len]
-//!   kind 0 oracle   payload = OracleUpdate (394)
-//!   kind 1 deposit  payload = index:u64 account:20 amount:u128 l2Block:u64 l2BlockHash:32 l2TxHash:32 logIndex:u32
-//!   kind 2 forced   payload = index:u64 account:20 kind:u8 deadline:u64 l2Block:u64 l2BlockHash:32 l2TxHash:32 logIndex:u32
-//!   kind 3 action   payload = typeIndex:u8 message(canonical typed encoding) signature:65
+//! Input         = tag:u8  len:u32be  payload[len]
+//!   0x01 oracle   payload = OracleUpdate (agent 394, node/oracle/README.md section 4)
+//!   0x02 deposit  payload = depositIndex:u64 account:20 amount:u64
+//!   0x03 forced   payload = forcedIndex:u64 account:20 kind:u8 deadline:u64 arg:u64
+//!   0x04 action   payload = typeId:u8 (1..8) fields(fixed width, type order) signature:65
 //! ```
-//! Kinds are non-decreasing inside a block (oracle, deposits, forced, actions); every length, count, bool byte and
-//! ordering rule is part of the canonical form, and decoding refuses trailing bytes, so one block has exactly one
-//! encoding and `logHash` commits to it.
+//! Tags are non-decreasing inside a block; every length, count, bool byte and ordering rule is part of the
+//! canonical form, and decoding refuses trailing bytes, so one block has exactly one encoding.
+//!
+//! Deposit and forced events carry L2-side metadata (sender, chain head, block, transaction) that the watcher
+//! verifies but that is NOT part of the engine input; validators compare the consensus fields only
+//! (`consensus_eq`).
 //!
 //! UNAUDITED PROTOTYPE.
 
@@ -28,13 +29,24 @@ pub const MAX_INPUT_BYTES: usize = 16 * 1024;
 pub struct DepositEvent {
     pub index: u64,
     pub account: Address,
-    pub amount: u128,
+    pub amount: u64,
+    // ---- L2 metadata (verified by the watcher; not engine input) ----
+    pub sender: Address,
+    /// the vault's deposit chain head after this deposit (VAULT.md 5.4), recomputed by the watcher
+    pub head: H256,
     pub l2_block: u64,
     pub l2_block_hash: H256,
     pub l2_tx_hash: H256,
     pub log_index: u32,
 }
 
+impl DepositEvent {
+    pub fn consensus_eq(&self, o: &DepositEvent) -> bool {
+        self.index == o.index && self.account == o.account && self.amount == o.amount
+    }
+}
+
+/// SPEC 14 kinds (engine input). The vault's event numbers them 1..3 (VAULT.md): `from_vault` maps them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForcedKind {
     CancelAll = 0,
@@ -51,6 +63,18 @@ impl ForcedKind {
             _ => None,
         }
     }
+    /// VAULT.md: 1 cancel-all, 2 close, 3 withdraw.
+    pub fn from_vault(v: u64) -> Option<ForcedKind> {
+        match v {
+            1 => Some(ForcedKind::CancelAll),
+            2 => Some(ForcedKind::Close),
+            3 => Some(ForcedKind::Withdraw),
+            _ => None,
+        }
+    }
+    pub fn vault_code(&self) -> u64 {
+        *self as u64 + 1
+    }
     pub fn name(&self) -> &'static str {
         match self {
             ForcedKind::CancelAll => "cancelAll",
@@ -65,11 +89,28 @@ pub struct ForcedEvent {
     pub index: u64,
     pub account: Address,
     pub kind: ForcedKind,
+    /// the vault's deadline (VAULT.md: L2 seconds), passed to the engine unchanged
     pub deadline: u64,
+    /// SPEC 14 `arg`: the gross amount for Withdraw (0 = all), the market id for Close (0 = all), 0 for CancelAll
+    pub arg: u64,
+    // ---- L2 metadata ----
+    pub market_id: u32,
+    pub amount: u64,
+    pub head: H256,
     pub l2_block: u64,
     pub l2_block_hash: H256,
     pub l2_tx_hash: H256,
     pub log_index: u32,
+}
+
+impl ForcedEvent {
+    pub fn consensus_eq(&self, o: &ForcedEvent) -> bool {
+        self.index == o.index && self.account == o.account && self.kind == o.kind && self.deadline == o.deadline && self.arg == o.arg
+    }
+    /// Deadline in engine milliseconds (the vault counts L2 seconds).
+    pub fn deadline_ms(&self) -> u64 {
+        self.deadline.saturating_mul(1000)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,10 +153,10 @@ pub enum Input {
 impl Input {
     pub fn kind(&self) -> u8 {
         match self {
-            Input::Oracle(_) => 0,
-            Input::Deposit(_) => 1,
-            Input::Forced(_) => 2,
-            Input::Action(_) => 3,
+            Input::Oracle(_) => 0x01,
+            Input::Deposit(_) => 0x02,
+            Input::Forced(_) => 0x03,
+            Input::Action(_) => 0x04,
         }
     }
 }
@@ -168,24 +209,17 @@ pub fn encode_payload(types: &ActionTypes, inp: &Input) -> Result<Vec<u8>, Strin
             p.extend_from_slice(&d.index.to_be_bytes());
             p.extend_from_slice(&d.account);
             p.extend_from_slice(&d.amount.to_be_bytes());
-            p.extend_from_slice(&d.l2_block.to_be_bytes());
-            p.extend_from_slice(&d.l2_block_hash);
-            p.extend_from_slice(&d.l2_tx_hash);
-            p.extend_from_slice(&d.log_index.to_be_bytes());
         }
         Input::Forced(f) => {
             p.extend_from_slice(&f.index.to_be_bytes());
             p.extend_from_slice(&f.account);
             p.push(f.kind as u8);
             p.extend_from_slice(&f.deadline.to_be_bytes());
-            p.extend_from_slice(&f.l2_block.to_be_bytes());
-            p.extend_from_slice(&f.l2_block_hash);
-            p.extend_from_slice(&f.l2_tx_hash);
-            p.extend_from_slice(&f.log_index.to_be_bytes());
+            p.extend_from_slice(&f.arg.to_be_bytes());
         }
         Input::Action(a) => {
             let name = types.name(a.type_index).ok_or("unknown action type index")?;
-            p.push(a.type_index);
+            p.push(a.type_index + 1);
             types.registry.encode_canonical(name, &a.message, &mut p)?;
             p.extend_from_slice(&a.signature);
         }
@@ -237,39 +271,51 @@ pub fn decode_inputs(types: &ActionTypes, buf: &[u8]) -> Result<Vec<Input>, Stri
         let payload = r.take(len)?;
         let mut pr = Reader::new(payload);
         let inp = match kind {
-            0 => Input::Oracle(decode_oracle(&mut pr)?),
-            1 => Input::Deposit(DepositEvent {
+            0x01 => Input::Oracle(decode_oracle(&mut pr)?),
+            0x02 => Input::Deposit(DepositEvent {
                 index: pr.u64()?,
                 account: pr.addr()?,
-                amount: pr.u128()?,
-                l2_block: pr.u64()?,
-                l2_block_hash: pr.h256()?,
-                l2_tx_hash: pr.h256()?,
-                log_index: pr.u32()?,
+                amount: pr.u64()?,
+                sender: [0u8; 20],
+                head: [0u8; 32],
+                l2_block: 0,
+                l2_block_hash: [0u8; 32],
+                l2_tx_hash: [0u8; 32],
+                log_index: 0,
             }),
-            2 => {
+            0x03 => {
                 let index = pr.u64()?;
                 let account = pr.addr()?;
                 let kind = ForcedKind::from_u8(pr.u8()?).ok_or("unknown forced kind")?;
+                let deadline = pr.u64()?;
+                let arg = pr.u64()?;
                 Input::Forced(ForcedEvent {
                     index,
                     account,
                     kind,
-                    deadline: pr.u64()?,
-                    l2_block: pr.u64()?,
-                    l2_block_hash: pr.h256()?,
-                    l2_tx_hash: pr.h256()?,
-                    log_index: pr.u32()?,
+                    deadline,
+                    arg,
+                    market_id: 0,
+                    amount: 0,
+                    head: [0u8; 32],
+                    l2_block: 0,
+                    l2_block_hash: [0u8; 32],
+                    l2_tx_hash: [0u8; 32],
+                    log_index: 0,
                 })
             }
-            3 => {
-                let type_index = pr.u8()?;
-                let name = types.name(type_index).ok_or("unknown action type index")?;
+            0x04 => {
+                let type_id = pr.u8()?;
+                if type_id == 0 {
+                    return Err("action type id 0".into());
+                }
+                let type_index = type_id - 1;
+                let name = types.name(type_index).ok_or("unknown action type id")?;
                 let message = types.registry.decode_canonical(name, &mut pr)?;
                 let signature: [u8; 65] = pr.take(65)?.try_into().unwrap();
                 Input::Action(SignedAction { type_index, message, signature })
             }
-            _ => return Err(format!("unknown input kind {kind}")),
+            _ => return Err(format!("unknown input tag {kind}")),
         };
         pr.expect_done()?;
         out.push(inp);
@@ -363,6 +409,7 @@ impl Block {
 pub fn deposit_json(d: &DepositEvent) -> serde_json::Value {
     serde_json::json!({
         "index": d.index.to_string(), "account": to_hex(&d.account), "amount": d.amount.to_string(),
+        "sender": to_hex(&d.sender), "head": to_hex(&d.head),
         "l2Block": d.l2_block, "l2BlockHash": to_hex(&d.l2_block_hash), "l2TxHash": to_hex(&d.l2_tx_hash), "logIndex": d.log_index
     })
 }
@@ -370,6 +417,7 @@ pub fn deposit_json(d: &DepositEvent) -> serde_json::Value {
 pub fn forced_json(f: &ForcedEvent) -> serde_json::Value {
     serde_json::json!({
         "index": f.index.to_string(), "account": to_hex(&f.account), "kind": f.kind.name(), "deadline": f.deadline,
+        "arg": f.arg.to_string(), "marketId": f.market_id, "amount": f.amount.to_string(), "head": to_hex(&f.head),
         "l2Block": f.l2_block, "l2BlockHash": to_hex(&f.l2_block_hash), "l2TxHash": to_hex(&f.l2_tx_hash), "logIndex": f.log_index
     })
 }

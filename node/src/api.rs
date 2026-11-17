@@ -25,7 +25,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const API_VERSION: &str = "0.1";
+pub const API_VERSION: &str = "0.2";
 
 type Q = Query<HashMap<String, String>>;
 

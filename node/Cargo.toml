@@ -34,6 +34,7 @@ k256 = { version = "=0.13.4", features = ["ecdsa", "std"] }
 sha3 = "=0.10.9"
 hex = "0.4.3"
 anyhow = "1"
+postern-perps-engine = { path = "../engine" }
 
 [dev-dependencies]
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect"] }

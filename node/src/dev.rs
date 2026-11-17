@@ -60,3 +60,14 @@ pub fn dev_genesis(seed: &str, n: usize, threshold: usize, checkpoint_interval: 
     .expect("dev genesis");
     (Arc::new(g), k)
 }
+
+/// Dev genesis for the REAL engine (agent 388's): the node genesis with `logHash(0)` taken from the engine,
+/// plus the engine's checked genesis. THROWAWAY keys only.
+pub fn dev_genesis_real(seed: &str, n: usize, threshold: usize, checkpoint_interval: u64, genesis_time: u64) -> (Arc<Genesis>, DevKeys, postern_perps_engine::genesis::Checked) {
+    let (g, k) = dev_genesis(seed, n, threshold, checkpoint_interval, genesis_time);
+    let checked = crate::engine::real::dev_engine_genesis(&g).expect("dev engine genesis");
+    let probe = crate::engine::real::RealEngine::new(g.clone(), checked.clone()).expect("engine and node genesis agree");
+    use crate::engine::Engine;
+    let g2 = (*g).clone().with_log_hash0(probe.genesis_log_hash());
+    (Arc::new(g2), k, checked)
+}

@@ -11,10 +11,11 @@
 //! 5. Events are decoded strictly; deposit and forced indices must continue the previous ones without gap.
 //! Any failure leaves the view unchanged (fail closed: a deposit is credited late, never on one endpoint's word).
 //!
-//! PROVISIONAL event signatures (proposal B of 389, until agent 390's `docs/VAULT.md` fixes them):
-//! `Deposit(uint64 indexed index, address indexed account, uint256 amount)`,
-//! `ForcedRequest(uint64 indexed index, address indexed account, uint8 kind, uint64 deadline)`.
-//! They are configuration (`WatcherConfig`), so VAULT.md's final strings need no code change.
+//! Events of `docs/VAULT.md` v0.1 (agent 390):
+//! `Deposit(uint64 indexed index, address indexed account, address indexed sender, uint64 amount, bytes32 head)`,
+//! `ForcedRequest(uint64 indexed index, address indexed account, uint8 kind, uint32 marketId, uint64 amount, uint64 deadline, bytes32 head)`.
+//! 6. Every event's `head` must equal the chain head the watcher computes itself (VAULT.md 5.4) from the previous
+//!    head (`head0` = keccak256(abi.encode(bytes32 tag, chainid, vault))): a log that does not chain is refused.
 //!
 //! Transport: plain HTTP/1.1 (loopback, or a local TLS-terminating proxy for a remote endpoint): no TLS client is
 //! linked in this prototype (stated gap).
@@ -22,6 +23,7 @@
 //! UNAUDITED PROTOTYPE.
 
 use crate::types::{DepositEvent, ForcedEvent, ForcedKind};
+use crate::vaultfmt::{deposit_head0, deposit_head_next, forced_head0, forced_head_next};
 use crate::util::{keccak, parse_hex_fixed, parse_hex_vec, to_hex, Address, H256};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -47,8 +49,8 @@ impl WatcherConfig {
         WatcherConfig {
             endpoints,
             vault,
-            deposit_sig: "Deposit(uint64,address,uint256)".into(),
-            forced_sig: "ForcedRequest(uint64,address,uint8,uint64)".into(),
+            deposit_sig: "Deposit(uint64,address,address,uint64,bytes32)".into(),
+            forced_sig: "ForcedRequest(uint64,address,uint8,uint32,uint64,uint64,bytes32)".into(),
             poll_ms: 1000,
             max_range: 2000,
             start_block: 0,
@@ -247,34 +249,45 @@ pub enum Event {
 
 pub fn decode_event(cfg: &WatcherConfig, l: &RawLog) -> Result<Event, String> {
     let t0 = *l.topics.first().ok_or("log without topic")?;
+    let h = |w: &[u8]| -> H256 { w.try_into().unwrap() };
     if t0 == keccak(cfg.deposit_sig.as_bytes()) {
-        if l.topics.len() != 3 || l.data.len() != 32 {
+        if l.topics.len() != 4 || l.data.len() != 64 {
             return Err("Deposit log shape".into());
-        }
-        let amount_w = &l.data[..32];
-        if amount_w[..16].iter().any(|b| *b != 0) {
-            return Err("deposit amount above u128".into());
         }
         Ok(Event::Deposit(DepositEvent {
             index: word_to_u64(&l.topics[1])?,
             account: word_to_addr(&l.topics[2])?,
-            amount: u128::from_be_bytes(amount_w[16..].try_into().unwrap()),
+            sender: word_to_addr(&l.topics[3])?,
+            amount: word_to_u64(&l.data[..32])?,
+            head: h(&l.data[32..64]),
             l2_block: l.block_number,
             l2_block_hash: l.block_hash,
             l2_tx_hash: l.tx_hash,
             log_index: l.log_index,
         }))
     } else if t0 == keccak(cfg.forced_sig.as_bytes()) {
-        if l.topics.len() != 3 || l.data.len() != 64 {
+        if l.topics.len() != 3 || l.data.len() != 160 {
             return Err("ForcedRequest log shape".into());
         }
         let k = word_to_u64(&l.data[..32])?;
-        let kind = ForcedKind::from_u8(u8::try_from(k).map_err(|_| "forced kind")?).ok_or("unknown forced kind")?;
+        let kind = ForcedKind::from_vault(k).ok_or("unknown forced kind")?;
+        let market_id = u32::try_from(word_to_u64(&l.data[32..64])?).map_err(|_| "forced marketId")?;
+        let amount = word_to_u64(&l.data[64..96])?;
+        let deadline = word_to_u64(&l.data[96..128])?;
+        let arg = match kind {
+            ForcedKind::CancelAll => 0,
+            ForcedKind::Close => market_id as u64,
+            ForcedKind::Withdraw => amount,
+        };
         Ok(Event::Forced(ForcedEvent {
             index: word_to_u64(&l.topics[1])?,
             account: word_to_addr(&l.topics[2])?,
             kind,
-            deadline: word_to_u64(&l.data[32..64])?,
+            deadline,
+            arg,
+            market_id,
+            amount,
+            head: h(&l.data[128..160]),
             l2_block: l.block_number,
             l2_block_hash: l.block_hash,
             l2_tx_hash: l.tx_hash,
@@ -323,7 +336,11 @@ async fn poll_inner(cfg: &WatcherConfig, view: &SharedView) -> Result<bool, Stri
     let (next, prev_dep, prev_forced) = {
         let v = view.lock().unwrap();
         let next = if v.scanned_to == 0 && v.deposits.is_empty() && v.forced.is_empty() { cfg.start_block } else { v.scanned_to + 1 };
-        (next, v.deposits.keys().next_back().copied(), v.forced.keys().next_back().copied())
+        (
+            next,
+            v.deposits.values().next_back().map(|d| (d.index, d.head)),
+            v.forced.values().next_back().map(|f| (f.index, f.head)),
+        )
     };
     if f < next {
         let mut v = view.lock().unwrap();
@@ -367,8 +384,10 @@ async fn poll_inner(cfg: &WatcherConfig, view: &SharedView) -> Result<bool, Stri
     }
     let mut deps = Vec::new();
     let mut forced = Vec::new();
-    let mut nd = prev_dep.map(|x| x + 1).unwrap_or(0);
-    let mut nf = prev_forced.map(|x| x + 1).unwrap_or(0);
+    let mut nd = prev_dep.map(|x| x.0 + 1).unwrap_or(0);
+    let mut dh = prev_dep.map(|x| x.1).unwrap_or_else(|| deposit_head0(L2_CHAIN_ID, &cfg.vault));
+    let mut nf = prev_forced.map(|x| x.0 + 1).unwrap_or(0);
+    let mut fh = prev_forced.map(|x| x.1).unwrap_or_else(|| forced_head0(L2_CHAIN_ID, &cfg.vault));
     for l in &la {
         match decode_event(cfg, l)? {
             Event::Deposit(d) => {
@@ -378,6 +397,11 @@ async fn poll_inner(cfg: &WatcherConfig, view: &SharedView) -> Result<bool, Stri
                 if d.amount == 0 || d.account == [0u8; 20] {
                     return Err("deposit with zero amount or account".into());
                 }
+                let want = deposit_head_next(&dh, d.index, &d.account, d.amount);
+                if want != d.head {
+                    return Err(format!("deposit {}: event head does not chain (VAULT.md 5.4)", d.index));
+                }
+                dh = want;
                 nd += 1;
                 deps.push(d);
             }
@@ -385,6 +409,11 @@ async fn poll_inner(cfg: &WatcherConfig, view: &SharedView) -> Result<bool, Stri
                 if x.index != nf {
                     return Err(format!("forced index {} where {nf} expected: stop", x.index));
                 }
+                let want = forced_head_next(&fh, x.index, &x.account, x.kind.vault_code(), x.market_id, x.amount, x.deadline);
+                if want != x.head {
+                    return Err(format!("forced request {}: event head does not chain", x.index));
+                }
+                fh = want;
                 nf += 1;
                 forced.push(x);
             }

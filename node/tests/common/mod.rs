@@ -45,15 +45,25 @@ pub struct Net {
 
 pub fn net(name: &str, ci: u64) -> Net {
     let (g, keys) = dev_genesis(&format!("test-{name}"), 7, 5, ci, 0);
+    net_with(name, g, keys, &|g| Box::new(StubEngine::new(g.clone())))
+}
+
+/// The same network over agent 388's engine.
+pub fn net_real(name: &str, ci: u64) -> Net {
+    let (g, keys, checked) = perps_node::dev::dev_genesis_real(&format!("test-{name}"), 7, 5, ci, 0);
+    net_with(name, g, keys, &move |g| Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked.clone()).unwrap()))
+}
+
+pub fn net_with(name: &str, g: Arc<Genesis>, keys: DevKeys, mk: &dyn Fn(&Arc<Genesis>) -> Box<dyn Engine>) -> Net {
     let dir = tmpdir(name);
     let seq_view = view();
-    let seq = Sequencer::open(g.clone(), keys.sequencer.clone(), Box::new(StubEngine::new(g.clone())), dir.clone(), seq_view.clone()).unwrap();
+    let seq = Sequencer::open(g.clone(), keys.sequencer.clone(), mk(&g), dir.clone(), seq_view.clone()).unwrap();
     let mut vals = Vec::new();
     let mut val_views = Vec::new();
     for k in &keys.validators {
         let v = view();
         val_views.push(v.clone());
-        vals.push(Validator::new(g.clone(), k.clone(), Box::new(StubEngine::new(g.clone())), v, Some(dir.join(format!("val-{}", to_hex(&key_address(k)))))).unwrap());
+        vals.push(Validator::new(g.clone(), k.clone(), mk(&g), v, Some(dir.join(format!("val-{}", to_hex(&key_address(k)))))).unwrap());
     }
     Net { g, keys, seq, vals, seq_view, val_views, dir }
 }
@@ -87,11 +97,15 @@ pub fn user(i: u64) -> SigningKey {
     throwaway_key("test-user", i)
 }
 
-pub fn deposit(index: u64, account: Address, amount: u128) -> DepositEvent {
+/// A deposit event with its vault chain head computed from the previous one (the test chain starts at index 0
+/// for the given vault, so heads are only correct for consecutive calls via `deposits`).
+pub fn deposit(index: u64, account: Address, amount: u64) -> DepositEvent {
     DepositEvent {
         index,
         account,
         amount,
+        sender: account,
+        head: keccak(&[b"test-head".as_slice(), &index.to_be_bytes()].concat()),
         l2_block: 100 + index,
         l2_block_hash: keccak(&index.to_be_bytes()),
         l2_tx_hash: keccak(&[index as u8, 1]),
@@ -122,7 +136,7 @@ pub fn place_order(g: &Genesis, key: &SigningKey, account: Address, nonce: u64, 
     )
 }
 
-pub fn withdraw(g: &Genesis, key: &SigningKey, account: Address, nonce: u64, amount: u128, recipient: Address) -> SignedAction {
+pub fn withdraw(g: &Genesis, key: &SigningKey, account: Address, nonce: u64, amount: u64, recipient: Address) -> SignedAction {
     signed(g, key, "Withdraw", serde_json::json!({"account": to_hex(&account), "nonce": nonce.to_string(), "amount": amount.to_string(), "recipient": to_hex(&recipient)}))
 }
 

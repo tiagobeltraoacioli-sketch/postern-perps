@@ -9,14 +9,14 @@
 //!
 //! UNAUDITED PROTOTYPE.
 
-use super::{merkle_proof, merkle_root, AuthorityError, BlockOutcome, Engine, InputOutcome, WithdrawalRecord};
+use super::{AuthorityError, BlockOutcome, Engine, InputOutcome, WithdrawalRecord};
 use crate::actions::{field_addr, field_bool, field_u, verify_signed_action, ActionError};
 use crate::eip712::{digest, Domain, Reader, Registry, Val};
 use crate::genesis::{Genesis, NONCE_FUTURE_MS, NONCE_PAST_MS};
 use crate::sig::recover;
 use crate::types::{ForcedKind, Input, OracleUpdate};
 use crate::util::{keccak_parts, scaled_to_decimal, to_hex, Address, H256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +36,8 @@ pub struct StubEngine {
     height: u64,
     time: u64,
     collateral: BTreeMap<Address, u128>,
-    nonces: BTreeMap<Address, u64>,
+    /// SPEC S-2.5: per signer the (at most NONCE_SET) highest applied nonces
+    nonces: BTreeMap<Address, BTreeSet<u64>>,
     /// (account, agent) -> (expiresAt, approvedAt)
     agents: BTreeMap<(Address, Address), (u64, u64)>,
     orders: BTreeMap<u64, Order>,
@@ -46,8 +47,25 @@ pub struct StubEngine {
     next_forced: u64,
     oracle_round: u64,
     prices: BTreeMap<u32, u64>,
-    /// cached withdrawal leaves (derived, not state)
-    leaves: Vec<H256>,
+}
+
+/// SPEC S-2.5.
+pub const NONCE_SET: usize = 64;
+
+/// SPEC S-2.5 rule over a set of used nonces.
+pub fn nonce_rule(used: Option<&BTreeSet<u64>>, x: u64, time: u64) -> Result<(), &'static str> {
+    if x.saturating_add(NONCE_PAST_MS) < time || x > time.saturating_add(NONCE_FUTURE_MS) {
+        return Err("NONCE_WINDOW");
+    }
+    if let Some(u) = used {
+        if u.contains(&x) {
+            return Err("NONCE_USED");
+        }
+        if u.len() >= NONCE_SET && u.first().is_some_and(|m| x <= *m) {
+            return Err("NONCE_USED");
+        }
+    }
+    Ok(())
 }
 
 pub fn oracle_registry() -> &'static Registry {
@@ -103,13 +121,15 @@ impl StubEngine {
             next_forced: 0,
             oracle_round: 0,
             prices: BTreeMap::new(),
-            leaves: Vec::new(),
         };
         e.time = e.g.genesis_time;
         e
     }
 
     fn credit(&mut self, a: &Address, v: u128) -> Result<(), &'static str> {
+        if v > (1u128 << 62) {
+            return Err("OVERFLOW");
+        }
         let c = self.collateral.entry(*a).or_insert(0);
         *c = c.checked_add(v).ok_or("OVERFLOW")?;
         Ok(())
@@ -126,23 +146,22 @@ impl StubEngine {
         Ok(())
     }
 
-    fn withdraw(&mut self, account: Address, recipient: Address, amount: u128, out: &mut BlockOutcome) -> Result<u64, &'static str> {
-        if amount == 0 {
-            return Err("ZERO_AMOUNT");
-        }
+    /// SPEC S-9.2: `gross` is debited; the flat fee goes to the fee account; the record carries `gross - fee`.
+    fn withdraw(&mut self, account: Address, recipient: Address, gross: u128, out: &mut BlockOutcome) -> Result<u64, &'static str> {
         if recipient == [0u8; 20] {
-            return Err("BAD_RECIPIENT");
+            return Err("MALFORMED");
         }
         let fee = self.g.withdrawal_fee;
-        let total = amount.checked_add(fee).ok_or("OVERFLOW")?;
-        self.debit(&account, total)?;
+        if gross <= fee || gross > u64::MAX as u128 {
+            return Err("WITHDRAW_TOO_SMALL");
+        }
+        self.debit(&account, gross)?;
         if fee > 0 {
             let fr = self.g.fee_recipient;
             self.credit(&fr, fee)?;
         }
         let id = self.withdrawals.len() as u64;
-        let rec = WithdrawalRecord { id, account, recipient, amount, fee, height: self.height };
-        self.leaves.push(rec.leaf());
+        let rec = WithdrawalRecord { id, account, recipient, amount: (gross - fee) as u64, fee: fee as u64, height: self.height };
         out.events.push(serde_json::json!({"type": "withdrawal", "withdrawal": rec.to_json()}));
         self.withdrawals.push(rec);
         out.withdrawals.push(id);
@@ -224,16 +243,17 @@ impl StubEngine {
         if let Err(e) = self.authority(&v.account, &v.signer, &v.primary, time) {
             return fail(if e == AuthorityError::UnknownSigner { "UNKNOWN_SIGNER" } else { "AGENT_NOT_ALLOWED" }, ah);
         }
-        let hi = self.nonces.get(&v.signer).copied();
-        if hi.is_some_and(|h| v.nonce <= h) {
-            return fail("BAD_NONCE", ah);
-        }
-        if v.nonce.saturating_add(NONCE_PAST_MS) < time || v.nonce > time.saturating_add(NONCE_FUTURE_MS) {
-            return fail("NONCE_OUTSIDE_WINDOW", ah);
+        if let Err(code) = nonce_rule(self.nonces.get(&v.signer), v.nonce, time) {
+            return fail(code, ah);
         }
         // The nonce is consumed by every authentic, authorised action, whatever the business outcome:
         // a refused action can never be replayed later when it would succeed.
-        self.nonces.insert(v.signer, v.nonce);
+        let set = self.nonces.entry(v.signer).or_default();
+        set.insert(v.nonce);
+        while set.len() > NONCE_SET {
+            let m = *set.first().unwrap();
+            set.remove(&m);
+        }
         let p = v.primary.as_str();
         let msg = &a.message;
         let r = match p {
@@ -324,9 +344,12 @@ impl StubEngine {
             b.extend_from_slice(&v.to_be_bytes());
         }
         b.extend_from_slice(&(self.nonces.len() as u64).to_be_bytes());
-        for (a, v) in &self.nonces {
+        for (a, set) in &self.nonces {
             b.extend_from_slice(a);
-            b.extend_from_slice(&v.to_be_bytes());
+            b.extend_from_slice(&(set.len() as u16).to_be_bytes());
+            for v in set {
+                b.extend_from_slice(&v.to_be_bytes());
+            }
         }
         b.extend_from_slice(&(self.agents.len() as u64).to_be_bytes());
         for ((a, ag), (e, t)) in &self.agents {
@@ -396,7 +419,15 @@ impl StubEngine {
                 return Err("nonce keys not ascending".into());
             }
             last2 = Some(a);
-            e.nonces.insert(a, r.u64()?);
+            let n = r.u16()? as usize;
+            if n == 0 || n > NONCE_SET {
+                return Err("nonce set size".into());
+            }
+            let mut set = BTreeSet::new();
+            for _ in 0..n {
+                set.insert(r.u64()?);
+            }
+            e.nonces.insert(a, set);
         }
         let mut last3: Option<(Address, Address)> = None;
         for _ in 0..bound(r.u64()?)? {
@@ -427,11 +458,10 @@ impl StubEngine {
         }
         e.next_order_id = r.u64()?;
         for i in 0..bound(r.u64()?)? {
-            let w = WithdrawalRecord { id: r.u64()?, account: r.addr()?, recipient: r.addr()?, amount: r.u128()?, fee: r.u128()?, height: r.u64()? };
+            let w = WithdrawalRecord { id: r.u64()?, account: r.addr()?, recipient: r.addr()?, amount: r.u64()?, fee: r.u64()?, height: r.u64()? };
             if w.id != i {
                 return Err("withdrawal ids not consecutive".into());
             }
-            e.leaves.push(w.leaf());
             e.withdrawals.push(w);
         }
         e.next_deposit = r.u64()?;
@@ -508,7 +538,7 @@ impl Engine for StubEngine {
                 Input::Oracle(u) => self.apply_oracle(u, time),
                 Input::Deposit(d) => {
                     self.next_deposit += 1;
-                    match self.credit(&d.account, d.amount) {
+                    match self.credit(&d.account, d.amount as u128) {
                         Ok(()) => {
                             out.events.push(serde_json::json!({"type": "deposit", "index": d.index.to_string(), "account": to_hex(&d.account), "amount": d.amount.to_string()}));
                             ok(serde_json::json!({"depositId": d.index.to_string(), "status": "credited"}), None)
@@ -524,13 +554,11 @@ impl Engine for StubEngine {
                             Ok(serde_json::json!({"forcedId": f.index.to_string(), "canceled": n}))
                         }
                         ForcedKind::Withdraw => {
+                            // SPEC 14: arg = gross amount (0 = everything); recipient = the account itself
                             let bal = self.collateral.get(&f.account).copied().unwrap_or(0);
-                            if bal > self.g.withdrawal_fee {
-                                self.withdraw(f.account, f.account, bal - self.g.withdrawal_fee, &mut out)
-                                    .map(|id| serde_json::json!({"forcedId": f.index.to_string(), "withdrawalId": id.to_string()}))
-                            } else {
-                                Ok(serde_json::json!({"forcedId": f.index.to_string(), "withdrawalId": null, "reason": "balance not above the withdrawal fee"}))
-                            }
+                            let gross = if f.arg == 0 { bal } else { f.arg as u128 };
+                            self.withdraw(f.account, f.account, gross, &mut out)
+                                .map(|id| serde_json::json!({"forcedId": f.index.to_string(), "withdrawalId": id.to_string()}))
                         }
                     };
                     match r {
@@ -585,28 +613,23 @@ impl Engine for StubEngine {
         }
     }
     fn highest_nonce(&self, signer: &Address) -> Option<u64> {
-        self.nonces.get(signer).copied()
+        self.nonces.get(signer).and_then(|s| s.last().copied())
+    }
+    fn genesis_log_hash(&self) -> H256 {
+        self.g.genesis_log_hash()
     }
     fn withdrawal_count(&self) -> u64 {
         self.withdrawals.len() as u64
     }
-    fn withdrawals_root(&self) -> H256 {
-        merkle_root(&self.leaves)
-    }
     fn withdrawal(&self, id: u64) -> Option<WithdrawalRecord> {
         self.withdrawals.get(id as usize).cloned()
     }
-    fn withdrawals_root_at(&self, count: u64) -> Option<H256> {
-        if count as usize > self.leaves.len() {
-            return None;
-        }
-        Some(merkle_root(&self.leaves[..count as usize]))
+    fn escape_entries(&self) -> Vec<(Address, u64)> {
+        // stub: no positions, so what an account is owed is its balance (bounded by 2^62 at credit)
+        self.collateral.iter().map(|(a, v)| (*a, *v as u64)).collect()
     }
-    fn withdrawal_proof(&self, id: u64, count: u64) -> Option<Vec<H256>> {
-        if count as usize > self.leaves.len() {
-            return None;
-        }
-        merkle_proof(&self.leaves[..count as usize], id as usize)
+    fn nonce_ok(&self, signer: &Address, nonce: u64, time: u64) -> Result<(), &'static str> {
+        nonce_rule(self.nonces.get(signer), nonce, time)
     }
     fn account_json(&self, a: &Address) -> serde_json::Value {
         let c = self.collateral.get(a).copied().unwrap_or(0);

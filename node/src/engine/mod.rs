@@ -16,6 +16,7 @@
 //!
 //! UNAUDITED PROTOTYPE.
 
+pub mod real;
 pub mod stub;
 
 use crate::types::Input;
@@ -42,35 +43,24 @@ pub struct WithdrawalRecord {
     pub id: u64,
     pub account: Address,
     pub recipient: Address,
-    pub amount: u128,
-    pub fee: u128,
+    /// net amount paid by the vault (SPEC S-9.2: gross minus the flat fee)
+    pub amount: u64,
+    pub fee: u64,
     pub height: u64,
 }
 
 impl WithdrawalRecord {
-    /// PROPOSED leaf (for agent 390's `docs/VAULT.md`):
-    /// `keccak256(0x00 || abi.encode(uint64 id, address account, address recipient, uint256 amount, uint256 fee, uint64 height))`.
-    /// The 0x00 / 0x01 prefixes separate leaves from interior nodes (no second-preimage across levels).
+    /// VAULT.md 5.5 withdrawal leaf.
     pub fn leaf(&self) -> H256 {
-        use crate::util::{word_address, word_u128};
-        keccak_parts(&[
-            &[0x00],
-            &word_u128(self.id as u128),
-            &word_address(&self.account),
-            &word_address(&self.recipient),
-            &word_u128(self.amount),
-            &word_u128(self.fee),
-            &word_u128(self.height as u128),
-        ])
+        crate::vaultfmt::withdrawal_leaf(self.id, &self.account, &self.recipient, self.amount)
     }
 
     pub fn to_json(&self) -> serde_json::Value {
         use crate::util::{scaled_to_decimal, to_hex};
         serde_json::json!({
-            "id": self.id.to_string(), "account": to_hex(&self.account), "recipient": to_hex(&self.recipient),
-            "amount": scaled_to_decimal(self.amount, 6), "fee": scaled_to_decimal(self.fee, 6),
-            "amountRaw": self.amount.to_string(), "feeRaw": self.fee.to_string(), "height": self.height,
-            "leaf": to_hex(&self.leaf()),
+            "index": self.id.to_string(), "account": to_hex(&self.account), "recipient": to_hex(&self.recipient),
+            "amount": scaled_to_decimal(self.amount as u128, 6), "fee": scaled_to_decimal(self.fee as u128, 6),
+            "amountRaw": self.amount.to_string(), "height": self.height, "leaf": to_hex(&self.leaf()),
         })
     }
 }
@@ -168,13 +158,15 @@ pub trait Engine: Send + Sync {
     /// Admission pre-filter: may `signer` act for `account` with action `primary` at engine time `time`?
     fn authority(&self, account: &Address, signer: &Address, primary: &str, time: u64) -> Result<(), AuthorityError>;
     fn highest_nonce(&self, signer: &Address) -> Option<u64>;
+    /// The genesis `logHash(0)` this engine starts from.
+    fn genesis_log_hash(&self) -> H256;
     fn withdrawal_count(&self) -> u64;
-    fn withdrawals_root(&self) -> H256;
-    /// Root over the first `count` withdrawals (the root a past checkpoint committed to; the list is append-only).
-    fn withdrawals_root_at(&self, count: u64) -> Option<H256>;
     fn withdrawal(&self, id: u64) -> Option<WithdrawalRecord>;
-    /// Proof of withdrawal `id` in the tree of the first `count` withdrawals.
-    fn withdrawal_proof(&self, id: u64, count: u64) -> Option<Vec<H256>>;
+    /// Per account (engine order), what it receives if escape starts at this state (VAULT.md 5.5 escape tree);
+    /// accounts owed 0 are omitted.
+    fn escape_entries(&self) -> Vec<(Address, u64)>;
+    /// SPEC S-2.5 nonce rule against the applied state (admission adds its own pending set).
+    fn nonce_ok(&self, signer: &Address, nonce: u64, time: u64) -> Result<(), &'static str>;
     fn account_json(&self, a: &Address) -> serde_json::Value;
     fn orders_json(&self, a: &Address) -> serde_json::Value;
     fn agents_json(&self, a: &Address) -> serde_json::Value;

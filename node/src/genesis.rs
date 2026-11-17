@@ -43,7 +43,13 @@ pub struct Genesis {
     pub withdrawal_fee: u128,
     pub genesis_time: u64,
     pub checkpoint_interval: u64,
+    /// `logHash(0)`: by default keccak256 of `encode()`; an engine with its own genesis encoding (388's, SPEC 3.1)
+    /// sets it with `with_log_hash0` so the node's chain starts where the engine's does.
+    pub log_hash0: H256,
 }
+
+/// SPEC 3.2 action type ids 1..8 are the positions of this list (+1).
+pub const SPEC_ACTIONS: [&str; 8] = ["PlaceOrder", "CancelOrder", "CancelAll", "UpdateLeverage", "UpdateMargin", "Withdraw", "ApproveAgent", "RevokeAgent"];
 
 impl Genesis {
     /// Builds and validates the genesis. `typed_data_bytes` and `markets_bytes` are the exact files (their keccak
@@ -68,8 +74,8 @@ impl Genesis {
             .map_err(|e| format!("actions: {e}"))?;
         let agent_allowed: Vec<String> = serde_json::from_value(td.get("agentAllowed").cloned().ok_or("typed data without agentAllowed")?)
             .map_err(|e| format!("agentAllowed: {e}"))?;
-        if actions.is_empty() || actions.len() > 255 {
-            return Err("action list size".into());
+        if actions.iter().map(|s| s.as_str()).collect::<Vec<_>>() != SPEC_ACTIONS {
+            return Err("action list must be SPEC 3.2's, in its order (type ids 1..8)".into());
         }
         let mut seen = BTreeSet::new();
         for a in &actions {
@@ -96,14 +102,21 @@ impl Genesis {
             }
         }
         let dom = td.get("domain").ok_or("typed data without domain")?;
+        // SPEC 2.1: {PosternPerps, 1, 700770, verifyingContract = the vault}; the file may name the vault or leave
+        // it to the genesis, never a different one
         let engine_domain = Domain {
             name: dom.get("name").and_then(|v| v.as_str()).ok_or("domain.name")?.to_string(),
             version: dom.get("version").and_then(|v| v.as_str()).ok_or("domain.version")?.to_string(),
             chain_id: dom.get("chainId").and_then(|v| v.as_u64()).ok_or("domain.chainId")?,
-            verifying_contract: None,
+            verifying_contract: Some(vault),
         };
-        if engine_domain.name != "PosternPerps" || engine_domain.version != "1" || engine_domain.chain_id != 7_007_701 {
-            return Err("engine domain must be PosternPerps / 1 / 7007701 (BRIEF-PERPS)".into());
+        if engine_domain.name != "PosternPerps" || engine_domain.version != "1" || engine_domain.chain_id != 700_770 {
+            return Err("engine domain must be PosternPerps / 1 / 700770 + the vault (SPEC 2.1)".into());
+        }
+        if let Some(vc) = dom.get("verifyingContract").and_then(|v| v.as_str()) {
+            if parse_address(vc)? != vault {
+                return Err("typed-data verifyingContract differs from the genesis vault".into());
+            }
         }
 
         let mj: serde_json::Value = serde_json::from_slice(markets_bytes).map_err(|e| format!("markets: {e}"))?;
@@ -141,7 +154,7 @@ impl Genesis {
             return Err("checkpoint interval must be at least 1".into());
         }
         let vault_domain = Domain { name: "PosternPerpsVault".into(), version: "1".into(), chain_id: 700_770, verifying_contract: Some(vault) };
-        Ok(Genesis {
+        let mut g = Genesis {
             engine_domain,
             vault_domain,
             types: ActionTypes { registry, actions, agent_allowed },
@@ -160,7 +173,15 @@ impl Genesis {
             withdrawal_fee,
             genesis_time,
             checkpoint_interval,
-        })
+            log_hash0: [0u8; 32],
+        };
+        g.log_hash0 = keccak(&g.encode());
+        Ok(g)
+    }
+
+    pub fn with_log_hash0(mut self, h: H256) -> Genesis {
+        self.log_hash0 = h;
+        self
     }
 
     /// The canonical encoding of the genesis; `logHash(0) = keccak256(encoding)`.
@@ -191,7 +212,7 @@ impl Genesis {
     }
 
     pub fn genesis_log_hash(&self) -> H256 {
-        keccak(&self.encode())
+        self.log_hash0
     }
 
     pub fn committee_set_hash(&self) -> H256 {

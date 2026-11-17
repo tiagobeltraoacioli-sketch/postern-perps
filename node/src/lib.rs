@@ -17,4 +17,5 @@ pub mod sig;
 pub mod types;
 pub mod util;
 pub mod validator;
+pub mod vaultfmt;
 pub mod watcher;

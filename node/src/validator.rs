@@ -25,7 +25,8 @@ use crate::log::check_block_link;
 use crate::sig::key_address;
 use crate::types::{decode_inputs, Block, Input};
 use crate::util::{parse_hex_fixed, to_hex, Address, H256};
-use crate::watcher::SharedView;
+use crate::vaultfmt::{deposit_head0, escape_leaf, forced_head0, sum_root};
+use crate::watcher::{L2View, SharedView};
 use k256::ecdsa::SigningKey;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -49,17 +50,46 @@ pub fn is_checkpoint_height(g: &Genesis, height: u64, inputs: &[Input], created_
     height % g.checkpoint_interval == 0 || created_withdrawals || inputs.iter().any(|i| matches!(i, Input::Forced(_)))
 }
 
-pub fn checkpoint_body(e: &dyn Engine, b: &Block) -> CheckpointBody {
-    CheckpointBody {
+/// The checkpoint body of VAULT.md 5.2 for the state after block `b`: engine counters and roots, the vault's
+/// chain heads after the credited deposits / processed forced requests (from the L2 view, whose events were
+/// checked against their own chain), and the withdrawal and escape sum trees (VAULT.md 5.5).
+pub fn checkpoint_body(g: &Genesis, e: &dyn Engine, b: &Block, view: &L2View) -> Result<CheckpointBody, String> {
+    let dc = e.next_deposit_index();
+    let fp = e.next_forced_index();
+    let deposits_head = if dc == 0 {
+        deposit_head0(700_770, &g.vault)
+    } else {
+        view.deposits.get(&(dc - 1)).map(|d| d.head).ok_or("deposit chain head not in the L2 view")?
+    };
+    let forced_head = if fp == 0 {
+        forced_head0(700_770, &g.vault)
+    } else {
+        view.forced.get(&(fp - 1)).map(|f| f.head).ok_or("forced chain head not in the L2 view")?
+    };
+    let n = e.withdrawal_count();
+    let mut wl = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let w = e.withdrawal(i).ok_or("withdrawal record missing")?;
+        wl.push((w.leaf(), w.amount));
+    }
+    let (withdrawals_root, withdrawals_total) = sum_root(&wl).ok_or("withdrawals total above u64")?;
+    let el: Vec<(H256, u64)> = e.escape_entries().into_iter().filter(|(_, v)| *v > 0).map(|(a, v)| (escape_leaf(&a, v), v)).collect();
+    let (escape_root, escape_total) = sum_root(&el).ok_or("escape total above u64")?;
+    Ok(CheckpointBody {
         height: b.header.height,
         time: b.header.time,
         state_root: b.header.state_root,
         log_hash: b.header.log_hash,
-        withdrawals_root: e.withdrawals_root(),
-        withdrawal_count: e.withdrawal_count(),
-        deposits_credited: e.next_deposit_index(),
-        forced_processed: e.next_forced_index(),
-    }
+        deposits_credited: dc,
+        deposits_head,
+        forced_processed: fp,
+        forced_head,
+        withdrawal_count: n,
+        withdrawals_total,
+        withdrawals_root,
+        escape_total,
+        escape_root,
+    })
 }
 
 pub struct Validator {
@@ -147,7 +177,7 @@ impl Validator {
                 match inp {
                     Input::Deposit(d) => match v.deposits.get(&d.index) {
                         None => return VResult::Wait(format!("deposit {} not yet seen finalized by this validator", d.index)),
-                        Some(mine) if mine != d => {
+                        Some(mine) if !mine.consensus_eq(d) => {
                             let r = format!("block {}: deposit {} differs from the L2-finalized event", b.header.height, d.index);
                             drop(v);
                             return self.latch(r);
@@ -156,7 +186,7 @@ impl Validator {
                     },
                     Input::Forced(f) => match v.forced.get(&f.index) {
                         None => return VResult::Wait(format!("forced request {} not yet seen finalized", f.index)),
-                        Some(mine) if mine != f => {
+                        Some(mine) if !mine.consensus_eq(f) => {
                             let r = format!("block {}: forced request {} differs from the L2 event", b.header.height, f.index);
                             drop(v);
                             return self.latch(r);
@@ -186,17 +216,21 @@ impl Validator {
         if !is_checkpoint_height(&self.g, b.header.height, &inputs, !out.withdrawals.is_empty()) {
             return VResult::Applied { checkpoint: None };
         }
-        // forced-inclusion rule
-        {
+        // forced-inclusion rule (the vault's acceptance rule 4, judged at the block time; the vault uses its own
+        // L2 timestamp, so this is the validator's best local view)
+        let body = {
             let v = self.view.lock().unwrap();
             let next = self.engine.next_forced_index();
             if let Some((i, f)) = v.forced.range(next..).next() {
-                if f.deadline <= b.header.time {
+                if f.deadline_ms() <= b.header.time {
                     return VResult::AppliedNotSigned(format!("forced request {i} is past its deadline and not processed: not signing"));
                 }
             }
-        }
-        let body = checkpoint_body(self.engine.as_ref(), b);
+            match checkpoint_body(&self.g, self.engine.as_ref(), b, &v) {
+                Ok(body) => body,
+                Err(e) => return VResult::AppliedNotSigned(format!("cannot build the checkpoint body: {e}")),
+            }
+        };
         let digest = body.digest(&self.g.vault_domain);
         if let Some(prev) = self.signed.get(&body.height) {
             if *prev != digest {

@@ -17,7 +17,7 @@
 use crate::actions::{parse_request, verify_signed_action, ActionError};
 use crate::checkpoint::{verify_checkpoint_json, Aggregator, CheckpointBody};
 use crate::engine::{AuthorityError, BlockOutcome, Engine};
-use crate::genesis::{Genesis, NONCE_FUTURE_MS, NONCE_PAST_MS};
+use crate::genesis::Genesis;
 use crate::log::{block_digest, list_snapshots, read_snapshot, write_snapshot, InputLog, SnapshotMeta};
 use crate::sig::{key_address, sign};
 use crate::types::{decode_inputs, encode_inputs, log_hash, Block, BlockHeader, Input, OracleUpdate, SignedAction};
@@ -118,7 +118,7 @@ pub struct Sequencer {
     pub log: InputLog,
     pub data_dir: PathBuf,
     mempool: VecDeque<(SignedAction, H256)>,
-    pending_nonce: HashMap<Address, u64>,
+    pending_nonce: HashMap<Address, std::collections::BTreeSet<u64>>,
     pending_oracle: BTreeMap<u64, OracleUpdate>,
     pub acks: HashMap<H256, Ack>,
     ack_order: VecDeque<H256>,
@@ -154,11 +154,21 @@ impl Sequencer {
         if key_address(&key) != g.sequencer {
             return Err("sequencer key does not match the genesis sequencer address".into());
         }
+        if engine.genesis_log_hash() != g.genesis_log_hash() {
+            return Err("engine genesis logHash(0) differs from the node genesis: refusing to start".into());
+        }
         let (log, rep) = InputLog::open(&data_dir, &g)?;
         let mut recovered = RecoveryReport { torn_tail_bytes: rep.torn_tail_bytes, ..Default::default() };
         // choose the newest snapshot consistent with the log
         let mut snaps = list_snapshots(&data_dir);
         snaps.sort();
+        // a snapshot above the log means durable blocks were lost from the log (a damaged record taken for a
+        // torn tail, or a truncated file): refuse to start rather than re-produce those heights
+        if let Some((h, _)) = snaps.last() {
+            if *h > log.last_height {
+                return Err(format!("snapshot at height {h} is above the log's last block {}: refusing to start", log.last_height));
+            }
+        }
         let mut start = 0u64;
         for (h, p) in snaps.iter().rev() {
             if *h > log.last_height || *h == 0 {
@@ -253,8 +263,14 @@ impl Sequencer {
             }
         }
         if is_checkpoint_height(&self.g, h, inputs, !out.withdrawals.is_empty()) {
-            let body = checkpoint_body(self.engine.as_ref(), b);
-            self.aggregator.expect(&self.g, body);
+            let v = self.view.lock().unwrap();
+            match checkpoint_body(&self.g, self.engine.as_ref(), b, &v) {
+                Ok(body) => {
+                    drop(v);
+                    self.aggregator.expect(&self.g, body);
+                }
+                Err(e) => eprintln!("checkpoint body at {h} not built: {e}"),
+            }
         }
         for (i, (inp, o)) in inputs.iter().zip(&out.outcomes).enumerate() {
             if let (Input::Action(_), Some(ah)) = (inp, o.action_hash) {
@@ -297,20 +313,20 @@ impl Sequencer {
             AuthorityError::UnknownSigner => adm(403, "UNKNOWN_SIGNER", "signer is neither the account nor an approved, unexpired agent"),
             AuthorityError::AgentNotAllowed => adm(403, "AGENT_NOT_ALLOWED", format!("{} requires the main key", v.primary)),
         })?;
-        let hi = self.pending_nonce.get(&v.signer).copied().max(self.engine.highest_nonce(&v.signer));
-        if hi.is_some_and(|h| v.nonce <= h) {
-            return Err(adm(400, "BAD_NONCE", "nonce not above the signer's highest used or pending"));
+        // SPEC S-2.5 against the applied state, plus nonces admitted but not yet applied (single use)
+        if self.pending_nonce.get(&v.signer).is_some_and(|p| p.contains(&v.nonce)) {
+            return Err(adm(400, "BAD_NONCE", "nonce already pending for this signer"));
         }
-        if v.nonce.saturating_add(NONCE_PAST_MS) < now_ms || v.nonce > now_ms.saturating_add(NONCE_FUTURE_MS) {
-            return Err(adm(400, "BAD_NONCE", "nonce outside the window (milliseconds clock: now - 120 s .. now + 30 s)"));
-        }
+        self.engine.nonce_ok(&v.signer, v.nonce, now_ms.max(self.engine.time())).map_err(|c| {
+            adm(400, "BAD_NONCE", format!("{c}: nonce = milliseconds clock in now-120 s..now+30 s, single use, above the 64th highest used"))
+        })?;
         if !self.rate.allow(&v.account, now_ms) {
             return Err(adm(429, "RATE_LIMITED", "per-account action rate"));
         }
         if self.mempool.len() >= MAX_MEMPOOL {
             return Err(adm(503, "SEQUENCER_UNAVAILABLE", "mempool full"));
         }
-        self.pending_nonce.insert(v.signer, v.nonce);
+        self.pending_nonce.entry(v.signer).or_default().insert(v.nonce);
         self.mempool.push_back((a, v.action_hash));
         let ack = Ack { action_hash: v.action_hash, received_at: now_ms, status: "accepted", height: None, index: None, result: None, signer: v.signer, account: v.account };
         self.acks.insert(v.action_hash, ack.clone());
@@ -396,13 +412,16 @@ impl Sequencer {
         // pending nonces that are now in the engine can be forgotten
         for (a, _) in &actions {
             if let Ok(v) = verify_signed_action(&self.g, a) {
-                if self.pending_nonce.get(&v.signer) == Some(&v.nonce) {
-                    self.pending_nonce.remove(&v.signer);
+                if let Some(set) = self.pending_nonce.get_mut(&v.signer) {
+                    set.remove(&v.nonce);
+                    if set.is_empty() {
+                        self.pending_nonce.remove(&v.signer);
+                    }
                 }
             }
         }
         self.after_apply(&b, &inputs, &out);
-        if self.snapshot_every > 0 && height % self.snapshot_every == 0 {
+        if self.snapshot_every > 0 && height % self.snapshot_every == 0 && !self.engine.snapshot().is_empty() {
             let meta = SnapshotMeta { height, time, log_hash: lh, state_root: b.header.state_root };
             if let Err(e) = write_snapshot(&self.data_dir, &meta, self.engine.name(), &self.engine.snapshot(), 2) {
                 eprintln!("snapshot at {height} failed (log is intact, recovery replays further): {e}");
@@ -444,22 +463,27 @@ impl Sequencer {
         self.log.read(height)
     }
 
-    /// The withdrawal certificate: record, Merkle proof against the withdrawals root of the newest final
-    /// checkpoint at or above the withdrawal's height, and exactly `threshold` ascending signatures.
+    /// The withdrawal certificate (VAULT.md `withdraw`): the record, its sum-tree proof against the newest final
+    /// checkpoint that contains it, and that checkpoint with exactly `threshold` ascending signatures.
     pub fn certificate(&self, id: u64) -> Option<serde_json::Value> {
         let rec = self.engine.withdrawal(id)?;
-        let cp_h = self.aggregator.latest_final.filter(|h| *h >= rec.height)?;
+        let cp_h = self.aggregator.latest_final?;
         let c = self.aggregator.by_height.get(&cp_h)?;
         if id >= c.body.withdrawal_count {
             return None;
         }
-        let proof = self.engine.withdrawal_proof(id, c.body.withdrawal_count)?;
+        let mut wl = Vec::with_capacity(c.body.withdrawal_count as usize);
+        for i in 0..c.body.withdrawal_count {
+            let w = self.engine.withdrawal(i)?;
+            wl.push((w.leaf(), w.amount));
+        }
+        let (hashes, sums) = crate::vaultfmt::sum_proof(&wl, id as usize)?;
         let cp = self.aggregator.checkpoint_json(&self.g, cp_h, None)?;
         Some(serde_json::json!({
             "digest": to_hex(&c.digest),
-            "record": rec.to_json(),
-            "index": id.to_string(),
-            "proof": proof.iter().map(|p| to_hex(p)).collect::<Vec<_>>(),
+            "record": {"index": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient), "amount": rec.amount.to_string()},
+            "proof": {"index": id.to_string(), "hashes": hashes.iter().map(|p| to_hex(p)).collect::<Vec<_>>(), "sums": sums.iter().map(|x| x.to_string()).collect::<Vec<_>>()},
+            "leaf": to_hex(&rec.leaf()),
             "checkpoint": cp,
             "signatures": cp["signatures"].clone(),
         }))

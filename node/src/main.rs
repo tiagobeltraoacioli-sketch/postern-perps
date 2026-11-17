@@ -53,7 +53,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [--seed dev] [--validators 7] [--threshold 5] [--block-ms 200] [--checkpoint-interval 10] [--snapshot-every 1000] [--l2 http://A,http://B] [--geoblock FILE] [--ip-rate 50] [--account-rate 20]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [--seed dev] [--validators 7] [--threshold 5] [--block-ms 200] [--checkpoint-interval 10] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--geoblock FILE] [--ip-rate 50] [--account-rate 20]");
             eprintln!("       postern-perps-node verify-log --data DIR [--seed dev] [--validators 7] [--threshold 5] [--checkpoint-interval 10] [--genesis-time MS]");
             std::process::exit(2);
         }
@@ -87,7 +87,20 @@ async fn dev(a: HashMap<String, String>) {
     let th: usize = get(&a, "threshold", 5);
     let ci: u64 = get(&a, "checkpoint-interval", 10);
     let gt: u64 = get(&a, "genesis-time", 0);
-    let (g, keys) = dev_genesis(&seed, n, th, ci, gt);
+    let real = a.get("engine").map(|s| s.as_str()).unwrap_or("real") == "real";
+    let (g, keys, checked) = if real {
+        let (g, k, c) = perps_node::dev::dev_genesis_real(&seed, n, th, ci, gt);
+        (g, k, Some(c))
+    } else {
+        let (g, k) = dev_genesis(&seed, n, th, ci, gt);
+        (g, k, None)
+    };
+    let mk_engine = |g: &Arc<perps_node::genesis::Genesis>| -> Box<dyn Engine> {
+        match &checked {
+            Some(c) => Box::new(perps_node::engine::real::RealEngine::new(g.clone(), c.clone()).expect("engine")),
+            None => Box::new(StubEngine::new(g.clone())),
+        }
+    };
     let data = PathBuf::from(a.get("data").cloned().unwrap_or_else(|| "./perps-dev-data".into()));
     let listen: SocketAddr = get(&a, "listen", "127.0.0.1:48900".parse().unwrap());
     if !listen.ip().is_loopback() {
@@ -122,7 +135,7 @@ async fn dev(a: HashMap<String, String>) {
             tokio::spawn(watcher::run(cfg.clone(), v.clone(), stop_rx.clone()));
         }
     }
-    let mut seq = match Sequencer::open(g.clone(), keys.sequencer.clone(), Box::new(StubEngine::new(g.clone())), data.clone(), seq_view.clone()) {
+    let mut seq = match Sequencer::open(g.clone(), keys.sequencer.clone(), mk_engine(&g), data.clone(), seq_view.clone()) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("recovery refused: {e}");
@@ -134,7 +147,7 @@ async fn dev(a: HashMap<String, String>) {
     eprintln!("recovered: {:?}", seq.recovered);
     let app = App::new(g.clone(), seq, geo, Mode::Dev, seq_view, get(&a, "block-ms", 200), l2.is_some());
     *app.ip_rate.lock().unwrap() = RateLimit::new(get(&a, "ip-rate", 50.0), get(&a, "ip-rate", 50.0) * 2.0);
-    let engines: Vec<Box<dyn Engine>> = (0..n).map(|_| Box::new(StubEngine::new(g.clone())) as Box<dyn Engine>).collect();
+    let engines: Vec<Box<dyn Engine>> = (0..n).map(|_| mk_engine(&g)).collect();
     spawn_local_validators(&app, keys.validators.clone(), engines, val_views, &stop_rx).expect("validators");
     tokio::spawn(run_producer(app.clone(), stop_rx.clone()));
     let listener = tokio::net::TcpListener::bind(listen).await.expect("bind");

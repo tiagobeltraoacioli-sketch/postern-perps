@@ -89,19 +89,12 @@ pub fn verify_signed_action(g: &Genesis, a: &SignedAction) -> Result<VerifiedAct
     Ok(VerifiedAction { primary, account, signer, nonce, digest: d, action_hash })
 }
 
-/// Fields given in human units in a request without `"wire":true`, and the scale each one uses.
-/// PROVISIONAL (fixture typed data); follows `docs/SPEC.md` when it fixes the names.
-fn human_scale(g: &Genesis, primary: &str, name: &str, msg: &serde_json::Value) -> Result<Option<u32>, String> {
-    let market_dec = |price: bool| -> Result<Option<u32>, String> {
-        let mid = msg.get("marketId").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
-        let mid = mid.ok_or("marketId required to scale a price or size")?;
-        let m = g.market(mid as u32).ok_or("unknown marketId")?;
-        Ok(Some(if price { m.price_decimals } else { m.size_decimals }))
-    };
+/// Fields given in human units in a request without `"wire":true`, and the scale each one uses: the FIXED scales of
+/// SPEC 1 (price and size 1e-8 for every market, USDC 1e-6). Per-market `priceDecimals` are display only.
+fn human_scale(_g: &Genesis, primary: &str, name: &str, _msg: &serde_json::Value) -> Result<Option<u32>, String> {
     Ok(match (primary, name) {
-        ("PlaceOrder", "price") | ("PlaceOrder", "triggerPrice") | ("ModifyOrder", "price") | ("ModifyOrder", "triggerPrice") => market_dec(true)?,
-        ("PlaceOrder", "size") | ("ModifyOrder", "size") => market_dec(false)?,
-        ("Withdraw", "amount") | ("UpdateMargin", "amount") => Some(g.collateral_decimals),
+        ("PlaceOrder", "price") | ("PlaceOrder", "triggerPrice") | ("PlaceOrder", "size") => Some(8),
+        ("Withdraw", "amount") | ("UpdateMargin", "amount") => Some(6),
         _ => None,
     })
 }

@@ -2,12 +2,11 @@
 //! what the vault does (bridge `_checkSignatures` pattern: exactly `threshold` 65-byte signatures, strictly
 //! ascending signer addresses, each a committee member, low-s, v in {27, 28}).
 //!
-//! PROPOSED digest (for agent 390's `docs/VAULT.md`; extends the 03:50 UTC proposal (B) with `withdrawalCount`,
-//! which the Merkle verifier needs): EIP-712 under the VAULT domain
+//! Digest: `docs/VAULT.md` v0.1 section 5.2 (agent 390): EIP-712 under the VAULT domain
 //! `{name "PosternPerpsVault", version "1", chainId 700770, verifyingContract vault}`, primary type
-//! `Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,bytes32 withdrawalsRoot,uint64 withdrawalCount,uint64 depositsCredited,uint64 forcedProcessed)`.
-//! The engine's user-action domain (`PosternPerps`, chain 7007701, no contract) is a different domain separator,
-//! so no user signature can ever be a checkpoint signature and vice versa.
+//! `Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)`.
+//! The engine's user-action domain has another `name` (`PosternPerps`), hence another separator: no user
+//! signature can be a checkpoint signature and vice versa.
 //!
 //! UNAUDITED PROTOTYPE.
 
@@ -18,8 +17,7 @@ use crate::util::{keccak, parse_hex_fixed, to_hex, word_u128, Address, H256};
 use k256::ecdsa::SigningKey;
 use std::collections::BTreeMap;
 
-pub const CHECKPOINT_TYPE: &str =
-    "Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,bytes32 withdrawalsRoot,uint64 withdrawalCount,uint64 depositsCredited,uint64 forcedProcessed)";
+pub const CHECKPOINT_TYPE: &str = "Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointBody {
@@ -27,24 +25,34 @@ pub struct CheckpointBody {
     pub time: u64,
     pub state_root: H256,
     pub log_hash: H256,
-    pub withdrawals_root: H256,
-    pub withdrawal_count: u64,
     pub deposits_credited: u64,
+    pub deposits_head: H256,
     pub forced_processed: u64,
+    pub forced_head: H256,
+    pub withdrawal_count: u64,
+    pub withdrawals_total: u64,
+    pub withdrawals_root: H256,
+    pub escape_total: u64,
+    pub escape_root: H256,
 }
 
 impl CheckpointBody {
     pub fn struct_hash(&self) -> H256 {
-        let mut b = Vec::with_capacity(32 * 9);
+        let mut b = Vec::with_capacity(32 * 14);
         b.extend_from_slice(&keccak(CHECKPOINT_TYPE.as_bytes()));
         b.extend_from_slice(&word_u128(self.height as u128));
         b.extend_from_slice(&word_u128(self.time as u128));
         b.extend_from_slice(&self.state_root);
         b.extend_from_slice(&self.log_hash);
-        b.extend_from_slice(&self.withdrawals_root);
-        b.extend_from_slice(&word_u128(self.withdrawal_count as u128));
         b.extend_from_slice(&word_u128(self.deposits_credited as u128));
+        b.extend_from_slice(&self.deposits_head);
         b.extend_from_slice(&word_u128(self.forced_processed as u128));
+        b.extend_from_slice(&self.forced_head);
+        b.extend_from_slice(&word_u128(self.withdrawal_count as u128));
+        b.extend_from_slice(&word_u128(self.withdrawals_total as u128));
+        b.extend_from_slice(&self.withdrawals_root);
+        b.extend_from_slice(&word_u128(self.escape_total as u128));
+        b.extend_from_slice(&self.escape_root);
         keccak(&b)
     }
 
@@ -55,23 +63,33 @@ impl CheckpointBody {
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "height": self.height, "time": self.time, "stateRoot": to_hex(&self.state_root), "logHash": to_hex(&self.log_hash),
-            "withdrawalsRoot": to_hex(&self.withdrawals_root), "withdrawalCount": self.withdrawal_count,
-            "depositsCredited": self.deposits_credited, "forcedProcessed": self.forced_processed
+            "depositsCredited": self.deposits_credited, "depositsHead": to_hex(&self.deposits_head),
+            "forcedProcessed": self.forced_processed, "forcedHead": to_hex(&self.forced_head),
+            "withdrawalCount": self.withdrawal_count, "withdrawalsTotal": self.withdrawals_total.to_string(), "withdrawalsRoot": to_hex(&self.withdrawals_root),
+            "escapeTotal": self.escape_total.to_string(), "escapeRoot": to_hex(&self.escape_root)
         })
     }
 
     pub fn from_json(j: &serde_json::Value) -> Result<CheckpointBody, String> {
-        let u = |k: &str| j.get(k).and_then(|v| v.as_u64()).ok_or_else(|| format!("checkpoint.{k}"));
+        let u = |k: &str| -> Result<u64, String> {
+            let v = j.get(k).ok_or_else(|| format!("checkpoint.{k}"))?;
+            v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())).ok_or_else(|| format!("checkpoint.{k}"))
+        };
         let h = |k: &str| -> Result<H256, String> { parse_hex_fixed::<32>(j.get(k).and_then(|v| v.as_str()).ok_or_else(|| format!("checkpoint.{k}"))?) };
         Ok(CheckpointBody {
             height: u("height")?,
             time: u("time")?,
             state_root: h("stateRoot")?,
             log_hash: h("logHash")?,
-            withdrawals_root: h("withdrawalsRoot")?,
-            withdrawal_count: u("withdrawalCount")?,
             deposits_credited: u("depositsCredited")?,
+            deposits_head: h("depositsHead")?,
             forced_processed: u("forcedProcessed")?,
+            forced_head: h("forcedHead")?,
+            withdrawal_count: u("withdrawalCount")?,
+            withdrawals_total: u("withdrawalsTotal")?,
+            withdrawals_root: h("withdrawalsRoot")?,
+            escape_total: u("escapeTotal")?,
+            escape_root: h("escapeRoot")?,
         })
     }
 }
@@ -91,7 +109,7 @@ pub enum CertError {
 impl std::fmt::Display for CertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CertError::Count { got, need } => write!(f, "exactly {need} signatures required, got {got}"),
+            CertError::Count { got, need } => write!(f, "at least {need} signatures required, got {got}"),
             CertError::NotAscending => write!(f, "signers not strictly ascending"),
             CertError::NotMember(a) => write!(f, "signer {} is not in the committee", to_hex(a)),
             CertError::Signature(e) => write!(f, "bad signature: {e}"),
@@ -99,9 +117,10 @@ impl std::fmt::Display for CertError {
     }
 }
 
-/// The vault's check, reproduced: exactly `threshold` signatures, recovered signers strictly ascending and members.
+/// The vault's check, reproduced: at least `threshold` signatures (the node itself always publishes exactly
+/// `threshold`), recovered signers strictly ascending and committee members.
 pub fn verify_signatures(committee: &[Address], threshold: usize, d: &H256, sigs: &[[u8; 65]]) -> Result<Vec<Address>, CertError> {
-    if sigs.len() != threshold {
+    if sigs.len() < threshold || sigs.len() > committee.len() {
         return Err(CertError::Count { got: sigs.len(), need: threshold });
     }
     let mut out = Vec::with_capacity(sigs.len());
