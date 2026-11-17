@@ -1,0 +1,181 @@
+//! Wiring: the shared application state, the block-production loop, in-process validators (dev mode), the
+//! remote validator client, and the L2 watcher tasks.
+//!
+//! UNAUDITED PROTOTYPE.
+
+use crate::engine::Engine;
+use crate::genesis::Genesis;
+use crate::geo::GeoPolicy;
+use crate::sequencer::{BlockInfo, RateLimit, Sequencer};
+use crate::validator::{VResult, Validator};
+use crate::watcher::SharedView;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{broadcast, Notify};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Dev,
+    Live,
+}
+
+impl Mode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Mode::Dev => "dev",
+            Mode::Live => "live",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ValidatorStatus {
+    pub address: String,
+    pub height: u64,
+    pub signed: u64,
+    pub last: String,
+    pub latched: Option<String>,
+}
+
+pub struct App {
+    pub g: Arc<Genesis>,
+    pub seq: Mutex<Sequencer>,
+    pub geo: GeoPolicy,
+    pub mode: Mode,
+    pub view: SharedView,
+    pub new_block: Notify,
+    pub blocks_tx: broadcast::Sender<Arc<BlockInfo>>,
+    pub ip_rate: Mutex<RateLimit>,
+    pub validators: Mutex<BTreeMap<String, ValidatorStatus>>,
+    pub block_interval_ms: u64,
+    pub started_ms: u64,
+    pub l2_configured: bool,
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+pub fn ip_key(ip: IpAddr) -> [u8; 20] {
+    let mut k = [0u8; 20];
+    match ip {
+        IpAddr::V4(v) => k[..4].copy_from_slice(&v.octets()),
+        IpAddr::V6(v) => k[..16].copy_from_slice(&v.octets()),
+    }
+    k[19] = 0xee;
+    k
+}
+
+impl App {
+    pub fn new(g: Arc<Genesis>, seq: Sequencer, geo: GeoPolicy, mode: Mode, view: SharedView, block_interval_ms: u64, l2_configured: bool) -> Arc<App> {
+        let (tx, _) = broadcast::channel(4096);
+        Arc::new(App {
+            g,
+            seq: Mutex::new(seq),
+            geo,
+            mode,
+            view,
+            new_block: Notify::new(),
+            blocks_tx: tx,
+            ip_rate: Mutex::new(RateLimit::new(50.0, 100.0)),
+            validators: Mutex::new(BTreeMap::new()),
+            block_interval_ms,
+            started_ms: now_ms(),
+            l2_configured,
+        })
+    }
+
+    /// One production step (also used directly by tests).
+    pub fn produce_once(&self) -> Result<Option<Arc<BlockInfo>>, String> {
+        let r = self.seq.lock().unwrap().produce(now_ms());
+        if let Ok(Some(info)) = &r {
+            let _ = self.blocks_tx.send(info.clone());
+            self.new_block.notify_waiters();
+        }
+        r
+    }
+}
+
+pub async fn run_producer(app: Arc<App>, mut stop: tokio::sync::watch::Receiver<bool>) {
+    let mut iv = tokio::time::interval(Duration::from_millis(app.block_interval_ms));
+    iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = iv.tick() => {}
+            _ = stop.changed() => return,
+        }
+        if let Err(e) = app.produce_once() {
+            eprintln!("producer: {e}");
+        }
+    }
+}
+
+/// An in-process validator (dev mode): own engine, own L2 view, reads blocks from the sequencer's log.
+pub async fn run_local_validator(app: Arc<App>, mut v: Validator, mut stop: tokio::sync::watch::Receiver<bool>) {
+    let name = crate::util::to_hex(&v.address);
+    loop {
+        if *stop.borrow() {
+            return;
+        }
+        let next = v.height + 1;
+        let b = app.seq.lock().unwrap().block(next);
+        let b = match b {
+            Ok(Some(b)) => b,
+            _ => {
+                tokio::select! {
+                    _ = app.new_block.notified() => {}
+                    _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                    _ = stop.changed() => return,
+                }
+                continue;
+            }
+        };
+        let r = v.process(&b, now_ms());
+        let last = match &r {
+            VResult::Applied { checkpoint: Some((body, sig)) } => {
+                let res = app.seq.lock().unwrap().add_signature(body.height, *sig);
+                match res {
+                    Ok(_) => format!("signed {}", body.height),
+                    Err(e) => format!("signature at {} not accepted: {e}", body.height),
+                }
+            }
+            VResult::Applied { checkpoint: None } => format!("applied {next}"),
+            VResult::AppliedNotSigned(s) => s.clone(),
+            VResult::Wait(s) => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                s.clone()
+            }
+            VResult::Refused { reason, .. } => reason.clone(),
+        };
+        {
+            let mut st = app.validators.lock().unwrap();
+            st.insert(
+                name.clone(),
+                ValidatorStatus { address: name.clone(), height: v.height, signed: v.signed_count, last, latched: v.latched.clone() },
+            );
+        }
+        if let VResult::Refused { latched: true, .. } = r {
+            // latched: stay alive for status, sign nothing
+            let _ = stop.changed().await;
+            return;
+        }
+    }
+}
+
+/// Spawns `n` in-process validators with keys from `keys`, each with its own engine and the given views.
+pub fn spawn_local_validators(
+    app: &Arc<App>,
+    keys: Vec<k256::ecdsa::SigningKey>,
+    engines: Vec<Box<dyn Engine>>,
+    views: Vec<SharedView>,
+    stop: &tokio::sync::watch::Receiver<bool>,
+) -> Result<Vec<tokio::task::JoinHandle<()>>, String> {
+    let mut hs = Vec::new();
+    for ((k, e), view) in keys.into_iter().zip(engines).zip(views) {
+        let v = Validator::new(app.g.clone(), k, e, view, None)?;
+        hs.push(tokio::spawn(run_local_validator(app.clone(), v, stop.clone())));
+    }
+    Ok(hs)
+}
