@@ -1,6 +1,6 @@
 {
   "schema": "postern-perps/risk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "date": "2026-11-17",
   "status": "UNAUDITED prototype. Global risk and fee parameters proposed by agent 392; reasons and sources in docs/MARKETS.md. Values marked TBD-owner need the owner's money or decision.",
   "global": {
@@ -31,7 +31,7 @@
     "inflows": ["liquidation fees (liquidationFeePpm of liquidated notional, from remaining equity, never below 0)", "rounding dust (SPEC S-0.3)", "seed deposit"],
     "outflows": ["deficits of accounts liquidated past bankruptcy (SPEC 6.3 step 5)", "isolated-margin funding shortfalls (SPEC S-7.3)"],
     "seedRequired": "60000",
-    "seedUnit": "USDC; formula and per-market terms in docs/MARKETS.md section 5; computed 57241 by compliance/tools/check_params.py at the oiCap values of markets.json 0.2.0 and the 2026-11-17 reference prices, rounded up to the next 5000 for price drift",
+    "seedUnit": "USDC; formula and per-market terms in docs/MARKETS.md section 5; computed 57241 by compliance/tools/check_params.py at the oiCap values of markets.json 0.2.1 (oiCap unchanged since 0.2.0) and the 2026-11-17 reference prices, rounded up to the next 5000 for price drift",
     "seedFunder": "TBD-owner",
     "withdrawals": "none: the insurance fund has no key and no withdrawal path in v0.2 (a change needs a new genesis)",
     "launchGate": "trading does not open (markets stay halted) until INSURANCE.balance >= seedRequired and BACKSTOP equity >= its seed (go/no-go item; engine enforcement is a request to 388)",

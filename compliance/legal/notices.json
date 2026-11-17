@@ -1,6 +1,6 @@
 {
   "schema": "postern-perps/notices",
-  "version": "NOTICES-0.1-20261117",
+  "version": "NOTICES-0.2-20261117",
   "status": "DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype. Texts for the Interface (agent 391); this file is generated with the hashes of every document by compliance/tools/build_notices.py.",
   "operatorLine": "PosternDEX Perpetuals by Bloch Inc. This interface is operated by Bloch Inc (Panama).",
   "prototypeLine": "Unaudited prototype. Not live: no real funds. Nothing here is an offer or advice.",
@@ -29,12 +29,12 @@
     "terms": {
       "path": "compliance/legal/terms-of-use.md",
       "id": "TOU-0.1-20261117",
-      "sha256": "5839b5dc3e9c521ac7cf6cf0e0cca5bb63ba79a51e0c1b3da4f33db003be68c0"
+      "sha256": "6ed3a18ea3332b709b9d5e436c2c364e7c1d6e05130c59253916d841e65205e5"
     },
     "risk": {
       "path": "compliance/legal/risk-disclosure.md",
-      "id": "RISK-0.1-20261117",
-      "sha256": "4e9d6ec4b299017a4679ca8a32fa1a157984480adf3699e42d29632b52c36dfe"
+      "id": "RISK-0.2-20261117",
+      "sha256": "42c25e647676c9b3c067c75e2deb2e8f6533c73955fcaca5b2cd1a345ee3f3af"
     },
     "privacy": {
       "path": "compliance/legal/privacy-notice.md",

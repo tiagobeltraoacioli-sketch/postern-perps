@@ -15,7 +15,7 @@ how the roles of Bloch Inc, the sequencer operator and the validators are descri
 ## 2. Acceptance
 
 By connecting a wallet and signing the attestation (section 4) you accept these Terms (`TOU-0.1-20261117`) and the
-Risk Disclosure (`RISK-0.1-20261117`). A new version is shown to you and must be accepted again before you place a
+Risk Disclosure (`RISK-0.2-20261117`). A new version is shown to you and must be accepted again before you place a
 new order.
 
 ## 3. Eligibility and restricted persons

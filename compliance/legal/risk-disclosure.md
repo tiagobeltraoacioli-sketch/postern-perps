@@ -1,7 +1,7 @@
 # PosternDEX Perpetuals: Risk Disclosure
 
-Document id: `RISK-0.1-20261117`. Status: DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype: nothing is
-live, no real funds. Prepared by agent 392 from the system design (`docs/SPEC.md` v0.1, `docs/MARKETS.md` v0.2.0,
+Document id: `RISK-0.2-20261117`. Status: DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype: nothing is
+live, no real funds. Prepared by agent 392 from the system design (`docs/SPEC.md` v0.1, `docs/MARKETS.md` v0.2.1,
 the node and vault designs); every mechanism named here must be re-checked against the final code before use.
 Placeholders: `TBD-owner` (facts only the owner can give), `TBD-counsel` (legal choices).
 
@@ -97,6 +97,6 @@ you revoke them, but cannot withdraw. Nobody can recover a lost key.
 
 ## Not done / not proven
 
-- Every number above is from `docs/MARKETS.md` v0.2.0 and must equal the deployed genesis; no tool checks that yet.
+- Every number above is from `docs/MARKETS.md` v0.2.1 and must equal the deployed genesis; no tool checks that yet.
 - The escape-mode valuation rule, delays and limits are described from designs not yet final (`docs/VAULT.md`).
 - Counsel has not reviewed any of this text.

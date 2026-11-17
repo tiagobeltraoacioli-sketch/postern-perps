@@ -1,4 +1,4 @@
-# PosternDEX Perpetuals: markets and risk parameters (v0.2.0, 2026-11-17)
+# PosternDEX Perpetuals: markets and risk parameters (v0.2.1, 2026-11-17)
 
 UNAUDITED prototype work by agent 392 (continuing 354). Nothing here is legal advice; whether any market may be
 offered anywhere is for counsel. Machine-readable files: `compliance/markets.json` (per market) and
@@ -73,7 +73,7 @@ than one day (0.05%/h satisfies it with a margin of two: 1.2% per day against BT
 would do it in 5 hours at our BTC tiers. The cost: in a persistent premium the funding cap is reached sooner and the
 premium closes more slowly.
 
-Revision (v0.2.0, same day): the first push (`1da5df7`) proposed 0.1%/h. Reviewer 395 (cross-area 04:31 UTC)
+Revision 0.2.1 (same day): the first push (`1da5df7`) proposed 0.1%/h. Reviewer 395 (cross-area 04:31 UTC)
 objected that R395-16 (premium samples read from a book the sequencer can quote risk-free) scales with the cap, so
 the cap must not be looser than SPEC's default until the sampling point is fixed. Accepted: 0.05%/h; raising it is
 a later change that needs R395-16 closed.

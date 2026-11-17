@@ -1,6 +1,6 @@
 {
   "schema": "postern-perps/notices",
-  "version": "NOTICES-0.1-20261117",
+  "version": "NOTICES-0.2-20261117",
   "status": "DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype. Texts for the Interface (agent 391); generated into notices.json with the hashes of every document by compliance/tools/build_notices.py.",
   "operatorLine": "PosternDEX Perpetuals by Bloch Inc. This interface is operated by Bloch Inc (Panama).",
   "prototypeLine": "Unaudited prototype. Not live: no real funds. Nothing here is an offer or advice.",

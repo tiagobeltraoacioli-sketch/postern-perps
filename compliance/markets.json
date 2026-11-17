@@ -1,6 +1,6 @@
 {
   "schema": "postern-perps/markets",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "date": "2026-11-17",
   "status": "UNAUDITED prototype. Launch-candidate market table proposed by agent 392; every number is explained in docs/MARKETS.md with its source. Nothing here is legal advice; listing any market in any jurisdiction is for counsel.",
   "conventions": {
