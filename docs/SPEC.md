@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: engine specification (`docs/SPEC.md`)
 
-**UNAUDITED PROTOTYPE. Version 0.1, 2026-11-17. Owner: agent 388 (continues 350).** Nothing here is deployed.
+**UNAUDITED PROTOTYPE. Version 0.1.1, 2026-11-17. Owner: agent 388 (continues 350).** Nothing here is deployed.
 The perpetuals are not to be deployed before an external audit and a legal review.
 
 This document is normative for `engine/` (the deterministic state machine), and is the interface that `node/`
@@ -55,8 +55,8 @@ step (checked at genesis).
 - S-1.1 Conversion notional -> USDC: `usdc = notional / 10^10` (`NOTIONAL_SCALE / USDC_SCALE`), rounded per S-0.3.
 - S-1.2 Human decimal strings (API, `markets.json`) are converted with exact decimal parsing: a value that is not
   exactly representable in the scale (more fractional digits than the scale) is REJECTED, never rounded.
-- S-1.3 Worked bound: `MAX_PRICE * MAX_SIZE = 10^30 < 2^127 ~ 1.7e38`; times a rate `<= 10^9` it may exceed i128,
-  so funding (section 7) multiplies by the rate in `I256` and divides before narrowing.
+- S-1.3 Worked bound: `MAX_PRICE * MAX_SIZE = 10^30 < 2^127 ~ 1.7e38`; genesis bounds `maxFundingRate <= 10^7`
+  (1% per interval), so funding's `size * mark * rate <= 10^37` also fits i128 (section 7).
 
 ## 2. Signing: EIP-712 domain and action types
 
@@ -143,7 +143,9 @@ and (c) if `used` is full, `x > min(used)`. On success `x` is inserted (evicting
 Reasons: (a) bounds the sequencer's power to hold a signed order and execute it later to two minutes; (b)+(c) make
 every signature single-use while allowing up to 64 actions in flight to arrive out of order (a strictly increasing
 rule would reject a valid order merely overtaken by the next one). A client that uses `max(clock_ms, last + 1)`
-(391's rule) always satisfies the rule. Errors: `NONCE_WINDOW`, `NONCE_USED`.
+(391's rule) always satisfies the rule. Errors: `NONCE_WINDOW`, `NONCE_USED`. The nonce is CONSUMED as soon as
+the signature and the nonce are valid, whatever the action's outcome (a failed order cannot be re-played later by
+the sequencer when it would succeed).
 
 ## 3. Blocks, inputs and the log
 
@@ -245,7 +247,8 @@ block: it is recorded as a failed outcome with its error and has no other effect
 
 ### 6.1 State
 
-`Account { index: u32 (0 to 2 the system accounts of section 8; users from 3, assigned in order of first credit), address, balance: u64 (USDC units, cross collateral),
+`Account { index: u32 (0 to 2 the system accounts of section 8; users from 3, assigned in order of first credit),
+address, balance: i128 (USDC units, cross collateral; signed: a negative balance is bad debt, section 8),
 positions: map marketId -> Position (iterated in ascending marketId), orders, triggers, agents, nonce sets }`.
 
 `Position { size: i64 (long > 0), openNotional: i128 (signed, notional units: sum of signed size x price of the
@@ -259,8 +262,11 @@ open part), leverage: u32, isolated: bool, isoMargin: u64, lastFundingIndex: i12
 - Maintenance `MR = sum over cross positions of mmr(|size| * mark)` with the CONTINUOUS piecewise schedule
   `mmr(n) = sum over tiers t of (part of n inside [floor_t, floor_{t+1})) * mmf_t / 10^6`, rounded UP. (Decided:
   continuous, so the requirement never jumps when a position crosses a tier floor.)
-- Initial `IR` the same with `imf_t' = max(imf_t, 10^6 / leverage)`, rounded up, and including resting orders:
-  per market `max(n(size + bids), n(size - asks))` where `n(x) = |x| * max(mark, worst order price on that side)`.
+- Initial `IR` the same with `imf_t' = max(imf_t, ceil(10^6 / leverage))`, rounded up, and including resting
+  orders: per market on `max(|size| * mark, n_buy, n_sell)` with `n_buy = |size + bids| * max(mark, highest bid
+  price)` and `n_sell = |size - asks| * max(mark, highest ask price)`. Reduce-only orders and untriggered trigger
+  orders reserve nothing (a trigger is margin-checked when it fires). `leverage` is the account's setting for the
+  market, default the market's genesis `defaultLeverage`.
 - Liquidatable: `E < MR` (strict). A withdrawal, or a margin move out of the cross balance, of `a` USDC units is
   allowed only if `balance >= a` and, after the debit, `E >= IR` (unrealised profit counts toward `E` but can never
   be withdrawn beyond `balance`).
@@ -269,15 +275,17 @@ open part), leverage: u32, isolated: bool, isoMargin: u64, lastFundingIndex: i12
 ### 6.3 Liquidation (order, normative for v0.1)
 
 For a liquidatable cross account (accounts in ascending `index`; isolated positions are liquidated alone the same
-way):
+way). v0.1: an account with a position in a HALTED market is not liquidated until the market resumes (fail closed:
+no liquidation on a price the oracle rules do not stand behind; the insurance fund carries the gap). Liquidation
+fills pay no taker fee (step 4's fee replaces it); makers pay their normal fee.
 
 1. Cancel all its resting orders and triggers (all markets).
 2. For each position (ascending market id): bankruptcy price `bp` = the price at which `E` would be 0 holding the
    other positions at mark (rounded toward the account: up for a long, down for a short). Send a reduce-only IOC
    to the book for the whole position with limit `bp` (never fills worse than bankruptcy) and with the S-4.3
    slippage bound waived.
-3. The remainder is taken by the backstop vault (system account `BACKSTOP`) at `bp` if the backstop's equity after
-   it covers its own maintenance requirement; else by auto-deleveraging (6.4).
+3. The remainder is taken by the backstop vault (system account `BACKSTOP`) at `bp` if the backstop has a positive
+   balance and its equity after it covers its own maintenance requirement; else by auto-deleveraging (6.4).
 4. Liquidation fee: `liquidationFeePpm` of the liquidated notional, taken from what equity remains (never below 0),
    credited to the insurance fund (`INSURANCE`).
 5. If `E < 0` at the start (a gap: the oracle moved past bankruptcy), the position is closed at mark through steps
@@ -302,7 +310,8 @@ accounts.
   -maxFundingRate, +maxFundingRate)`. v0.1 defaults (392's `risk.json` supersedes): `interest = 12500`
   (0.00125% per hour in `RATE_SCALE`, i.e. 0.01% per 8 h), `c = 500000` (0.05%), `maxFundingRate = 500000`
   (0.05% per hour).
-- S-7.3 Payment per position: `f = size * mark * rate / RATE_SCALE` in notional units, computed in I256; a long pays
+- S-7.3 Payment per position: `f = size * mark * rate / RATE_SCALE` in notional units, computed in checked i128
+  (S-1.3; an overflow anyway halts the market with `ARITHMETIC`); a long pays
   when `rate > 0`. Payers' amounts rounded up, receivers' down (S-0.3); converted to USDC per S-1.1 with the same
   direction; the sum of the residuals goes to dust. Funding is settled into the balance (cross) or `isoMargin`
   (isolated) immediately; an isolated margin that would go below 0 is floored at 0 and the shortfall is a loss of
@@ -313,6 +322,9 @@ accounts.
 - System accounts (no key, never sign): `PROTOCOL_FEE` (address `0x…0001`), `INSURANCE` (`0x…0002`), `BACKSTOP`
   (`0x…0003`). They have `index` 0, 1, 2 in the account tree. `INSURANCE` also holds `dust: u128` in notional units;
   whenever `dust >= 10^10`, `floor(dust / 10^10)` moves into its balance.
+- Bad debt: after the system passes, an account with no position and a negative balance is paid up to zero by
+  `INSURANCE` as far as its balance goes; the rest stays as the account's negative balance and is reported as a
+  `BadDebt` event (never hidden; I-2 stays exact because it counts signed balances).
 - I-1 (size balance): for every market, the sum of `size` over all positions is 0.
 - I-2 (conservation): `10^10 * (sum of all balances + all isoMargins) + dust - sum of all openNotional
   == 10^10 * (credited deposits - withdrawal records)` exactly, at every height.
@@ -338,13 +350,15 @@ accounts.
 
 ## 10. Genesis
 
-`Genesis { specVersion "0.1", verifyingContract, feeRecipient, oracleSigners[n], oracleQuorum, checkpoint
-committee is NOT engine state (vault and node), markets[] }` with per market `{marketId, symbol, tick, step,
-minSize, maxSize, oiCap, maxLeverage, tiers[{floor (USDC units), imfPpm, mmfPpm}], takerFeePpm, makerFeePpm,
-liquidationFeePpm, markBandBps, marketSlippageBps, impactNotional, fundingIntervalMs, interest, maxFundingRate,
-oracle{minSources, agreeBps, jumpBps, maxStalenessMs, confirmRounds}}` and global `{withdrawalFee, minFeeSweep,
-maxFutureMs, maxAgeMs}`. `genesisEncoding` = the canonical JSON (keys sorted, no whitespace, integers as decimal
-strings) of this object. The engine reads 392's `markets.json`/`risk.json` through a converter that applies S-1.2
+The reference is `engine/src/genesis.rs` (`deny_unknown_fields`, every integer a decimal string without leading
+zeros, in engine units): `{specVersion "0.1", chainId "700770", verifyingContract, feeRecipient (MUST be
+0x775a…0544), oracleSigners[n], oracleQuorum (odd, strict majority), oracleMaxFutureMs, oracleMaxAgeMs,
+withdrawalFee, minFeeSweep, markets[]}`, per market `{marketId (ascending, 1..255), symbol, tick, step, minSize,
+maxSize, oiCap, maxLeverage, defaultLeverage, tiers[{floor (USDC units), imfPpm, mmfPpm}], takerFeePpm,
+makerFeePpm, liquidationFeePpm, markBandBps, marketSlippageBps, impactNotional (USDC units), fundingIntervalMs,
+interest, interestClamp, maxFundingRate, oracle{minSources, agreeBps, jumpBps, maxStalenessMs, confirmRounds}}`.
+The checkpoint committee is NOT engine state (vault and node). `genesisEncoding` = the engine's serialization of
+this object (fields in the order above, no whitespace, integers as decimal strings). The engine reads 392's `markets.json`/`risk.json` through a converter that applies S-1.2
 and refuses any inconsistency (display decimals vs tick, MMF `<=` markBand, tiers not ascending, IMF `<` MMF).
 
 ## 11. State root and proofs (what the vault verifies)
@@ -354,17 +368,21 @@ leaves and nodes). Empty subtree of height 0 is `bytes32(0)`; `Z(i+1) = H(0x01 |
 
 - Account tree: fixed depth 32, leaf position = account `index`. Account leaf data (abi.encodePacked, all
   big-endian):
-  `"PPv1acct" (8 bytes) || address:20 || be32(index) || be64(balance) || be64(escapeValue) || positionsHash:32 ||
-  be64(height)` where `escapeValue` = `max(0, floor((E + sum of isolated (isoMargin*10^10 + U)) / 10^10))` at the
+  `"PPv1acct" (8 bytes) || address:20 || be32(index) || be128(balance, two's complement) || be64(escapeValue) ||
+  positionsHash:32` where `escapeValue` = `max(0, floor((E + sum of isolated (isoMargin*10^10 + U)) / 10^10))` at the
   block's mark prices (USDC units: what the account is owed if every position is closed at mark) and
-  `positionsHash = H(be32(count) || [be32(marketId) || be64(size as two's complement) || be128(openNotional) ||
-  be64(isoMargin) || u8(isolated)]...)` in ascending market id.
+  `positionsHash = keccak256(be32(count) || [be32(marketId) || be64(size, two's complement) ||
+  be128(openNotional, two's complement) || be64(isoMargin) || u8(isolated)]...)` in ascending market id.
 - Market tree: depth 8, leaf position = marketId; data `"PPv1mrkt" || be32(marketId) || be64(index) || be64(mark) ||
   be64(longOI) || i128 fundingIndex || u8 status`.
 - Withdrawal tree: depth 32, leaf position = `withdrawalId`, append-only over the whole history; data
   `"PPv1wdrl" || be64(withdrawalId) || account:20 || recipient:20 || be64(amount) || be64(height)`.
-- `systemHash = H("PPv1sys" || be64(nextDepositIndex) || be64(nextForcedIndex) || be64(nextOrderId) ||
-  be64(totalEscape) || be128(dust))`, `totalEscape` = sum of all `escapeValue`.
+- `systemHash = keccak256("PPv1sys" || be64(nextDepositIndex) || be64(nextForcedIndex) || be64(nextOrderId) ||
+  be128(totalEscape) || be128(dust) || auxHash)`, `totalEscape` = sum of all `escapeValue`; `auxHash` = keccak256
+  of every remaining piece of state (orders and book queues, triggers, oracle internals, last trade, premium
+  accumulators, leverage settings, agents, nonce sets, last oracle round) in the fixed order of
+  `Engine::aux_hash` (engine/src/engine.rs), so that validators agree on the WHOLE state, not only on balances.
+  These hashes (all but the three tree roots) are plain keccak256 without the leaf/node prefix.
 - `stateRoot = H("PosternPerps/state/v1" || be64(height) || be64(time) || accountsRoot || marketsRoot ||
   withdrawalsRoot || systemHash)`.
 - Proof: `{leafData, index, siblings[depth]}`; sibling order bottom-up; bit `i` of `index` = 1 means the node is a
@@ -392,7 +410,8 @@ orders, market); `account_proof(address)`, `withdrawal_proof(id)`. CLI: `engine 
 [--expect-root <hex> --at <height>]` prints the root per height.
 
 Error names (the API passes them through): `BAD_SIGNATURE`, `AGENT_NOT_ALLOWED`, `AGENT_INVALID`,
-`NONCE_WINDOW`, `NONCE_USED`, `MALFORMED`, `UNKNOWN_MARKET`, `MARKET_HALTED`, `TICK`, `STEP`, `SIZE_BOUNDS`,
+`NONCE_WINDOW`, `NONCE_USED`, `UNKNOWN_ACCOUNT` (actions only from addresses with a ledger entry, created by a
+deposit), `SELF_TRADE`, `CANCELLED`, `ISOLATED_UNSUPPORTED`, `MALFORMED`, `UNKNOWN_MARKET`, `MARKET_HALTED`, `TICK`, `STEP`, `SIZE_BOUNDS`,
 `WOULD_CROSS`, `REDUCE_ONLY`, `INSUFFICIENT_MARGIN`, `TOO_MANY_ORDERS`, `OI_CAP`, `NO_LIQUIDITY`, `SELF_TRADE`,
 `ORDER_NOT_FOUND`, `LEVERAGE`, `NOT_ISOLATED`, `WITHDRAW_TOO_SMALL`, `POSITION_IN_HALTED_MARKET`, `OVERFLOW`,
 `DEPOSIT_ORDER`, `FORCED_ORDER`, oracle errors of 394 (`ORACLE_ROUND_NOT_NEW`, `ORACLE_MALFORMED`,
@@ -422,15 +441,24 @@ generated by the engine and checked by an independent Python implementation.
   never signs, so nothing is withdrawable from it in v0.1; who funds it and with how much is an owner input).
 - O-4 Volume fee tiers (392's table).
 - O-5 The checkpoint digest and escape rule (390, VAULT.md).
+- O-6 Isolated margin is specified (6.2) but NOT implemented in engine 0.1: `UpdateLeverage{isolated:true}` returns
+  `ISOLATED_UNSUPPORTED` and `UpdateMargin` returns `NOT_ISOLATED`; leaves carry `isoMargin = 0, isolated = 0`.
+- O-7 Oracle signing domain: the engine verifies `OracleObservation` under the engine domain of 2.1 (chainId
+  700770 + vault); 394's README v0.1 says 7007701 without `verifyingContract`: one of the two must change (asked
+  in the cross-area log; the engine follows 2.1 until agreed).
+- O-8 `snapshot()/restore()` of section 13: not implemented in 0.1 (recovery = replay of the log from genesis).
 
 ## Version history
 
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-11-17 | first version (388): scales, domain (700770 + vault), types, nonces, blocks, matching, mark, margin, liquidation, funding, conservation, genesis, state root and proofs |
+| 0.1.1 | 2026-11-17 | aligned with engine 0.1 (`647a401`): signed balance (be128) in the account leaf and no height in it; `auxHash` in `systemHash`; nonce consumed on valid signature; IR formula exact; halted-market liquidation rule; bad debt; funding bound; genesis fields; O-6 to O-8 |
 
 ## Not done / not proven
 
-Everything in this document is a design; no engine code implements it yet at v0.1. Not proven: the liquidation
+`engine/` 0.1 implements this document except O-6 (isolated margin) and O-8 (snapshots); its tests check the
+invariants of section 8 after every block of random and adversarial sequences, but tests are not proofs. Not
+proven: the liquidation
 order's solvency under gaps, the ADL ranking's fairness, the funding formula against benchmarks, the mark band
 against manipulation, gas of the vault's proofs. UNAUDITED.
