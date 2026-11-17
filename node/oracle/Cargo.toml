@@ -1,0 +1,23 @@
+# PosternDEX Perpetuals price oracle (UNAUDITED PROTOTYPE). Own workspace so that it builds alone and the engine
+# (388) and the node (389) can depend on `core` by path without pulling the feeder's network stack.
+[workspace]
+resolver = "2"
+members = ["core", "feeder"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+license = "UNLICENSED"
+publish = false
+
+[profile.release]
+overflow-checks = true
+
+[profile.test]
+overflow-checks = true
+
+# Optimise dependencies (k256) in test builds only for speed; our own crates keep debug assertions and overflow
+# checks. No effect on results: the arithmetic is integer and deterministic.
+[profile.dev.package."*"]
+opt-level = 2
