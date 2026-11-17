@@ -1,0 +1,226 @@
+{
+  "_note": "Typed data of docs/SPEC.md v0.1 section 2 (agent 388): domain {PosternPerps, 1, 700770, verifyingContract = the PerpsVault of the deployment (set by the genesis; dev: a throwaway address)}. Prices and sizes are the FIXED scales of SPEC 1 (1e-8), USDC 1e-6; `message` holds those scaled integers as decimal strings. UNAUDITED prototype.",
+  "specVersion": "0.1",
+  "domain": {
+    "name": "PosternPerps",
+    "version": "1",
+    "chainId": 700770
+  },
+  "types": {
+    "PlaceOrder": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "marketId",
+        "type": "uint32"
+      },
+      {
+        "name": "isBuy",
+        "type": "bool"
+      },
+      {
+        "name": "orderType",
+        "type": "uint8"
+      },
+      {
+        "name": "timeInForce",
+        "type": "uint8"
+      },
+      {
+        "name": "price",
+        "type": "uint64"
+      },
+      {
+        "name": "size",
+        "type": "uint64"
+      },
+      {
+        "name": "reduceOnly",
+        "type": "bool"
+      },
+      {
+        "name": "triggerPrice",
+        "type": "uint64"
+      },
+      {
+        "name": "clientOrderId",
+        "type": "bytes32"
+      }
+    ],
+    "CancelOrder": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "marketId",
+        "type": "uint32"
+      },
+      {
+        "name": "orderId",
+        "type": "uint64"
+      }
+    ],
+    "CancelAll": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "marketId",
+        "type": "uint32"
+      }
+    ],
+    "UpdateLeverage": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "marketId",
+        "type": "uint32"
+      },
+      {
+        "name": "leverage",
+        "type": "uint32"
+      },
+      {
+        "name": "isolated",
+        "type": "bool"
+      }
+    ],
+    "UpdateMargin": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "marketId",
+        "type": "uint32"
+      },
+      {
+        "name": "amount",
+        "type": "uint64"
+      },
+      {
+        "name": "add",
+        "type": "bool"
+      }
+    ],
+    "Withdraw": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "amount",
+        "type": "uint64"
+      },
+      {
+        "name": "recipient",
+        "type": "address"
+      }
+    ],
+    "ApproveAgent": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "agent",
+        "type": "address"
+      },
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint64"
+      }
+    ],
+    "RevokeAgent": [
+      {
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64"
+      },
+      {
+        "name": "agent",
+        "type": "address"
+      }
+    ]
+  },
+  "actions": [
+    "PlaceOrder",
+    "CancelOrder",
+    "CancelAll",
+    "UpdateLeverage",
+    "UpdateMargin",
+    "Withdraw",
+    "ApproveAgent",
+    "RevokeAgent"
+  ],
+  "agentAllowed": [
+    "PlaceOrder",
+    "CancelOrder",
+    "CancelAll",
+    "UpdateLeverage",
+    "UpdateMargin"
+  ],
+  "enums": {
+    "orderType": {
+      "limit": 0,
+      "market": 1,
+      "stopMarket": 2,
+      "stopLimit": 3,
+      "takeProfitMarket": 4,
+      "takeProfitLimit": 5
+    },
+    "timeInForce": {
+      "GTC": 0,
+      "IOC": 1,
+      "POST_ONLY": 2
+    }
+  },
+  "notes": {
+    "CancelAll.marketId": "0 = every market",
+    "PlaceOrder.price": "MANDATORY >= 1: the limit price, or the WORST price of a market order (0 = MALFORMED)",
+    "PlaceOrder.triggerPrice": "0 for limit and market types",
+    "expiresAt": "Unix milliseconds, engine time, <= T + 180 days",
+    "nonce": "Unix milliseconds in [T-120 s, T+30 s], single use (SPEC 2.5)"
+  }
+}
