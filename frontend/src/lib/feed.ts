@@ -42,7 +42,7 @@ type Frame = (cb: () => void) => void;
 const nextFrame: Frame = (cb) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 16));
 
 /** Frame statistics of the feed itself (work per flush), read by the performance page and the harness. */
-export const feedStats = { messages: 0, flushes: 0, maxBatch: 0, flushMs: [] as number[] };
+export const feedStats = { messages: 0, flushes: 0, maxBatch: 0, malformed: 0, flushMs: [] as number[] };
 
 export class Feed {
   readonly connection = new Store<Connection>({ state: 'connecting', latencyMs: null, lastMessageAt: null, attempts: 0 });
@@ -265,7 +265,11 @@ export class Feed {
         latency = Math.round(performance.now() - this.pingSentAt);
         continue;
       }
+      // Acknowledgements (`subscribed`, `unsubscribed`, `error`) carry a channel but no data: not state.
+      if (m.op !== undefined || m.data === undefined || m.data === null) continue;
       const data = m.data as never;
+      // One malformed message must not drop the rest of the batch: it is counted and skipped.
+      try {
       switch (m.channel) {
         case 'ticker': {
           tickers ??= new Map(this.tickers.get());
@@ -338,6 +342,9 @@ export class Feed {
         case 'status':
           if (this.status.get()) status = { ...(status ?? this.status.get()!), ...(data as Partial<T.WireStatus>) };
           break;
+      }
+      } catch {
+        feedStats.malformed++;
       }
     }
     if (tickers) this.tickers.set(tickers);

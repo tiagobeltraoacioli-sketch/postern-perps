@@ -13,7 +13,7 @@
  *  - Market orders are immediate-or-cancel; post-only exists only for limit orders.
  *  - A trigger already crossed by the mark is reported (it would trigger at once).
  */
-import { PX_DECIMALS, SZ_DECIMALS, mulDiv, parseFixed, toTick } from '../lib/fixed';
+import { PX_DECIMALS, SZ_DECIMALS, mulDiv, parseFixed, toDecimalString, toTick } from '../lib/fixed';
 import { ORDER_TYPES, TIFS, triggerCondition, type Message } from '../lib/eip712';
 import type { Market, OrderType, TimeInForce } from '../lib/types';
 import { estimateMarketFill, type Level } from '../lib/calc';
@@ -184,4 +184,15 @@ export function newClientOrderId(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** The exact text of a price at the market's decimals, first rounded to the tick as named. */
+export function priceText(px: bigint, market: Market, rounding: 'floor' | 'ceil'): string {
+  const ticked = toTick(px, market.tick, rounding);
+  return toDecimalString(ticked / 10n ** BigInt(PX_DECIMALS - market.priceDecimals), market.priceDecimals);
+}
+/** The exact text of a size at the market's decimals (cut to the step, toward zero). */
+export function sizeText(size: bigint, market: Market): string {
+  const a = size < 0n ? -size : size;
+  return toDecimalString((a - (a % market.step)) / 10n ** BigInt(SZ_DECIMALS - market.sizeDecimals), market.sizeDecimals);
 }

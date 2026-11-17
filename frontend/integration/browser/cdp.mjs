@@ -96,7 +96,7 @@ window.__h = {
   },
   field(label) {
     const l = [...document.querySelectorAll('label')].find((x) => x.textContent.trim().startsWith(label));
-    return l ? l.querySelector('input,select') : null;
+    return l ? (l.control ?? l.querySelector('input,select')) : null;
   },
   set(el, value) {
     const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
