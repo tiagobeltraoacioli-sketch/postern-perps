@@ -309,7 +309,9 @@ contract PerpsVaultTest is Base {
                 cp.nextOrderId,
                 cp.totalEscape,
                 cp.dust,
-                cp.auxHash
+                cp.auxHash,
+                cp.withdrawalCount,
+                cp.withdrawalsTotal
             )
         );
         bytes32 expected = keccak256(

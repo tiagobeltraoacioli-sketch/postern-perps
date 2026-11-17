@@ -61,7 +61,7 @@ contract PerpsVaultVectors is Base {
         assertEq(wl, 0xe9166baba646062a6c6d061b7bd43516cf74f9893efb8dc38fe32d02a0b77bd9, "pinned withdrawal leaf");
         assertEq(al, 0xa2ea3a54aca1e1783d55a91764b89cd23991312c8e5b29ae07641a7b9264c61e, "pinned account leaf");
         assertEq(Tree.root(leaves), 0x8fbe559c6533a8a7b143ff5aeb5a68f790da1a04469c65f6b7a3a8895fa97d89, "pinned root");
-        assertEq(v.stateRootOf(cp), 0xe72601eaf3f450e42a4936525576728e24a4c75301e50dc379caca768cbfec22, "pinned stateRoot");
+        assertEq(v.stateRootOf(cp), 0xa37422a49ce13023aba96c4eb9989223238fc85e408d8bbf083d645d79dba9ac, "pinned stateRoot (SPEC 0.1.5)");
         assertEq(v.checkpointDigest(cp), 0xedbdd9a9ebd4e2e3767ec12a7c2e2fa499fd328953513ff27eb7ad385e3163f9, "pinned digest");
         // independent recomputation of the struct hash with one abi.encode call
         bytes32 sh = keccak256(
