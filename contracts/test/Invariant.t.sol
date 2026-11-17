@@ -2,7 +2,7 @@
 pragma solidity 0.8.24;
 
 import {PerpsVault} from "../src/PerpsVault.sol";
-import {Base, MockUSDC, SumTree} from "./Base.sol";
+import {Base, MockUSDC, Tree} from "./Base.sol";
 
 /// An honest engine model (zero-sum trades, fees to the fee account, withdrawal records) plus a colluding committee
 /// that signs arbitrary escape totals, driven against one vault. The invariants must hold in both cases: the vault's
@@ -28,10 +28,11 @@ contract Handler is Base {
             vaddrs.push(va[i]);
         }
         for (uint256 i; i < ga.length; ++i) gaddrs.push(ga[i]);
-        accts.push(address(0x1001));
-        accts.push(address(0x1002));
-        accts.push(address(0x1003));
-        accts.push(FEE);
+        accts.push(address(uint160(uint256(keccak256("user1")))));
+        accts.push(address(uint160(uint256(keccak256("user2")))));
+        accts.push(address(uint160(uint256(keccak256("user3")))));
+        accts.push(PROTOCOL_FEE);
+        accts.push(address(2)); // INSURANCE
     }
 
     function _a(uint256 i) internal view returns (address) {
@@ -51,7 +52,7 @@ contract Handler is Base {
 
     function forced(uint256 i, uint8 kind) external {
         vm.prank(_a(i));
-        try vault.requestForced(uint8(kind % 3) + 1, 0, 0) {} catch {}
+        try vault.requestForced(uint8(kind % 2), 0) {} catch {}
     }
 
     // ---------------------------------------------------------------- engine (honest)
@@ -65,16 +66,17 @@ contract Handler is Base {
         uint64 fee = x / 50;
         uint64 ins = x / 100;
         bal[b] += x - fee - ins;
-        bal[FEE] += fee;
+        bal[PROTOCOL_FEE] += fee;
+        bal[address(2)] += ins;
         insurance += ins;
     }
 
     function requestWithdraw(uint256 i, uint64 amount, bool toFee) external {
-        address a = toFee ? FEE : _a(i);
+        address a = toFee ? PROTOCOL_FEE : _a(i);
         if (bal[a] == 0) return;
         uint64 x = amount % bal[a] + 1;
         bal[a] -= x;
-        records.push(PerpsVault.Withdrawal(uint64(records.length), a, toFee ? FEE : a, x));
+        records.push(PerpsVault.Withdrawal(uint64(records.length), a, toFee ? FEE : a, x, height));
     }
 
     function checkpoint() external {
@@ -102,8 +104,8 @@ contract Handler is Base {
         uint64[] memory amt = new uint64[](1);
         one[0] = address(0xBAD);
         amt[0] = claimed % (vault.custody() + 2) + 1;
-        (bytes32[] memory h, uint64[] memory s) = _eLeaves(one, amt);
-        (cp.escapeRoot, cp.escapeTotal) = SumTree.root(h, s);
+        cp.accountsRoot = Tree.root(_eLeaves(one, amt));
+        cp.totalEscape = amt[0];
         try vault.submitCheckpoint(cp, _sign(vault.checkpointDigest(cp), K)) {
             colluded = true;
         } catch {}
@@ -153,15 +155,15 @@ contract Handler is Base {
         if (!vault.inEscape() || vault.checkpointCount() == 0 || colluded) return;
         // the tree of the latest accepted honest checkpoint is rebuilt from the model at that checkpoint; the model
         // only changes through `trade`/`requestWithdraw` between checkpoints, so use the snapshot taken at submission
-        address a = accts[i % 4];
-        uint256 at = _snapIndex(a);
-        if (at == type(uint256).max) return;
-        uint256 before = usdc.balanceOf(a);
-        try vault.claimEscape(a, snapBal[at], SumTree.proof(snapH, snapS, uint64(at)), type(uint64).max) returns (
-            bytes32 key
-        ) {
+        uint256 at = i % (snapA.length + 1);
+        if (at == snapA.length) return;
+        address a = snapA[at];
+        address r = uint160(a) <= 0xffff ? FEE : a;
+        uint256 before = usdc.balanceOf(r);
+        try vault.claimEscape(_acct(snapA, snapBal, at), Tree.proof(_eLeaves(snapA, snapBal), at), type(uint64).max)
+        returns (bytes32 key) {
             _track(key);
-            paidOut += usdc.balanceOf(a) - before;
+            paidOut += usdc.balanceOf(r) - before;
         } catch {}
     }
 
@@ -185,45 +187,35 @@ contract Handler is Base {
     }
 
     // ---------------------------------------------------------------- helpers
-    bytes32[] internal snapH;
-    uint64[] internal snapS;
     address[] internal snapA;
     uint64[] internal snapBal;
 
     function _honest() internal returns (PerpsVault.Checkpoint memory cp) {
         cp.height = height;
         cp.time = height * 1000;
-        cp.stateRoot = keccak256(abi.encode("state", height));
         cp.logHash = keccak256(abi.encode("log", height));
-        cp.depositsCredited = credited;
+        cp.marketsRoot = keccak256(abi.encode("markets", height));
+        cp.nextDepositIndex = credited;
         cp.depositsHead = vault.depositHead(credited);
-        cp.forcedProcessed = vault.forcedCount();
-        cp.forcedHead = vault.forcedHead(cp.forcedProcessed);
-        if (records.length != 0) {
-            PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](records.length);
-            for (uint256 i; i < records.length; ++i) ws[i] = records[i];
-            (bytes32[] memory h, uint64[] memory s) = _wLeaves(ws);
-            (cp.withdrawalsRoot, cp.withdrawalsTotal) = SumTree.root(h, s);
-            cp.withdrawalCount = uint64(records.length);
+        cp.nextForcedIndex = vault.forcedCount();
+        cp.forcedHead = vault.forcedHead(cp.nextForcedIndex);
+        PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](records.length);
+        for (uint256 i; i < records.length; ++i) {
+            ws[i] = records[i];
+            cp.withdrawalsTotal += records[i].amount;
         }
-        delete snapH;
-        delete snapS;
+        cp.withdrawalsRoot = Tree.root(_wLeaves(ws));
+        cp.withdrawalCount = uint64(records.length);
         delete snapA;
         delete snapBal;
-        for (uint256 i; i < 4; ++i) {
+        for (uint256 i; i < accts.length; ++i) {
             address a = accts[i];
             if (bal[a] == 0) continue;
             snapA.push(a);
             snapBal.push(bal[a]);
-            snapH.push(keccak256(abi.encode(bytes32("PosternPerps.escape.v1"), a, uint256(bal[a]))));
-            snapS.push(bal[a]);
+            cp.totalEscape += bal[a];
         }
-        if (snapA.length != 0) (cp.escapeRoot, cp.escapeTotal) = SumTree.root(snapH, snapS);
-    }
-
-    function _snapIndex(address a) internal view returns (uint256) {
-        for (uint256 i; i < snapA.length; ++i) if (snapA[i] == a) return i;
-        return type(uint256).max;
+        cp.accountsRoot = Tree.root(_eLeaves(snapA, snapBal));
     }
 
     /// Deposits are recorded in this handler as they happen through `Deposit` replay: here read back by trying the
@@ -280,8 +272,8 @@ contract PerpsVaultInvariant is Base {
     /// Everything the latest checkpoint still makes claimable fits in custody (the solvency check's invariant).
     function invariant_latest_checkpoint_claims_fit_custody() public view {
         if (vault.checkpointCount() == 0) return;
-        (,, uint64 credited,,, uint64 wTotal, uint64 eTotal,,,) = vault.latest();
-        uint256 owed = uint256(eTotal - vault.escapeClaimedTotal()) + (wTotal - vault.withdrawnTotal())
+        (,, uint64 credited,,, uint64 wTotal,,,) = vault.latest();
+        uint256 owed = uint256(vault.escapePayable() - vault.escapeClaimedTotal()) + (wTotal - vault.withdrawnTotal())
             + (vault.depositedTotal() - vault.depositTotalAt(credited) - vault.refundedTotal());
         assertTrue(owed <= vault.custody(), "owed <= custody");
     }
@@ -331,7 +323,7 @@ contract PerpsVaultEscapeEndToEnd is Base {
         assertTrue(late >= 10 * USDC, "late deposit made");
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        for (uint256 i; i < 4; ++i) h.claim(i);
+        for (uint256 i; i < 6; ++i) h.claim(i);
         uint64 n = vault.depositCount();
         for (uint64 i; i < n; ++i) h.refund(i);
         uint64 wc = vault.withdrawalCountAt(vault.checkpointCount());
@@ -341,17 +333,20 @@ contract PerpsVaultEscapeEndToEnd is Base {
             vm.warp(block.timestamp + 1 days);
             for (uint256 k; k < h.keyCount(); ++k) h.release(k);
         }
+        // keyless INSURANCE's share is payable to the fee address only after the surplus delay
+        vm.warp(block.timestamp + 90 days);
+        for (uint256 k; k < h.keyCount(); ++k) h.release(k);
         assertEq(vault.reserved(), 0, "all registered payouts paid");
-        (,,,,, uint64 wTotal, uint64 eTotal,,,) = vault.latest();
+        (,,,,, uint64 wTotal, uint64 eTotal,,) = vault.latest();
+        assertEq(vault.escapePayable(), eTotal, "honest engine: the pool covers every escape value");
         assertEq(vault.escapeClaimedTotal(), eTotal, "every escape balance claimed");
         assertEq(vault.withdrawnTotal(), wTotal, "every certified record paid");
         assertEq(vault.refundedTotal(), late, "the uncredited deposit refunded");
         assertTrue(eTotal + wTotal > 0 || before == 0, "non-vacuous: something was claimable");
         uint256 left = usdc.balanceOf(address(vault));
-        vm.warp(block.timestamp + 90 days);
         if (left != 0) {
             vault.sweepEscapeSurplus();
-            assertEq(usdc.balanceOf(address(vault)), 0, "only the insurance fund was left");
+            assertEq(usdc.balanceOf(address(vault)), 0, "only rounding was left");
         }
         assertEq(h.paidOut() + left, vault.depositedTotal(), "conservation");
     }

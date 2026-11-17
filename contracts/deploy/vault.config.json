@@ -17,6 +17,6 @@
   "windowSeconds": 86400,
   "largeThreshold": 50000000000,
   "largeDelay": 86400,
-  "forcedDelay": 86400,
+  "forcedDelay": 172800,
   "escapeDelay": 604800
 }

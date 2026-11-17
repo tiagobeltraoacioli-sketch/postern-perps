@@ -2,32 +2,31 @@
 pragma solidity 0.8.24;
 
 /// @title PerpsVault: collateral custody of PosternDEX Perpetuals on the Bloch L2 (chain 700770)
-/// @notice STATUS: PROTOTYPE, UNAUDITED. Not for deployment. Specification: docs/VAULT.md.
+/// @notice STATUS: PROTOTYPE, UNAUDITED. Not for deployment. Specification: docs/VAULT.md (v0.2), with docs/SPEC.md
+///         section 11 (state root and proofs) as the engine side.
 ///
 /// The vault holds the collateral token (bUSDC, 6 decimals) for the off-chain exchange engine. It never trusts the
 /// sequencer: funds leave only against a checkpoint signed by `threshold` of a validator committee fixed at deployment,
 /// within limits fixed at deployment. There is no owner, no admin, no upgrade, no setter, no rescue.
 ///
-/// - Deposits: anyone deposits for an engine account. Every deposit extends a hash chain (`depositHead`) and a
-///   cumulative total; a checkpoint must name exactly the vault's chain head after the deposits it credited.
+/// - Deposits: anyone deposits for an engine account; every deposit extends a hash chain and a cumulative total; a
+///   checkpoint must name the vault's own chain head after the deposits it credited (R395-1).
 /// - Checkpoints (EIP-712, domain "PosternPerpsVault"/"1"/chainid/this): k-of-n signatures, strictly ascending signer
-///   addresses, low-s, v 27/28 (the bridge's `_checkCertificate`). Each one commits the engine state, the deposits and
-///   forced requests it processed (by count and chain head), an append-only Merkle sum tree of withdrawal records and
-///   a Merkle sum tree of escape balances. The vault accepts it only if everything it commits is payable from custody
-///   (`_checkSolvency`), so every claim it admits can be paid.
-/// - Withdrawals: anyone submits a record with its sum-tree proof against any accepted checkpoint; the recipient is
-///   paid, in parts if the window limit requires, through a token bucket (`windowLimit` per `windowSeconds`); a
-///   record of at least `largeThreshold` waits `largeDelay` first. Records of the fee account (`feeRecipient`) pay
-///   `feeRecipient` only.
-/// - Guardians (fixed, disjoint from validators) can only pause payouts and deposits, once per guardian per chain of
-///   pauses, `pauseDuration` each (the bridge vault's pause chain); `unpauseThreshold` validators end a pause early.
-///   A pause never stops checkpoints, forced requests, the escape trigger or refunds of uncredited deposits.
-/// - Forced requests: an account that deposited posts cancel-all / close / withdraw on the L2; a checkpoint must not be
-///   accepted while an earlier request is past its deadline and unprocessed.
-/// - Escape (one way): if no checkpoint is accepted for `escapeDelay`, or a forced request is overdue, anyone triggers
-///   escape. Then deposits, forced requests and checkpoints stop; each account claims its escape balance from the last
-///   accepted checkpoint by a sum-tree proof, deposits after that checkpoint's credited count are refunded from the
-///   vault's own chain, and certified withdrawals stay payable.
+///   addresses, low-s, v 27/28 (the bridge's `_checkCertificate`). The vault recomputes the engine's `stateRoot` from
+///   the signed components (SPEC 11), so the withdrawal and account roots it pays against are the ones inside the
+///   state root the validators replayed. Accepted only if every withdrawal record and every uncredited deposit fits in
+///   custody.
+/// - Withdrawals: a record of the engine's withdrawal tree, proven against any accepted checkpoint, is paid to its
+///   recipient through a token bucket, in parts if needed; a record of at least `largeThreshold` waits `largeDelay`.
+///   Records of the engine's PROTOCOL_FEE account (0x..01) pay only `feeRecipient`.
+/// - Guardians can only pause payouts and deposits (the bridge vault's bounded pause chain); `unpauseThreshold`
+///   validators end a pause early. A pause never stops checkpoints, forced requests, escape or refunds.
+/// - Forced requests: an account that deposited posts cancel-all / close-all / withdraw on the L2; no checkpoint is
+///   accepted while one is past its deadline unprocessed, and anyone may then trigger escape.
+/// - Escape (one way): after a forced request goes overdue, or after `escapeDelay` without a checkpoint once one was
+///   accepted, anyone triggers escape. Each account then claims its `escapeValue` from the latest checkpoint's account
+///   tree, scaled down pro rata if the escape pool is smaller than `totalEscape`; deposits that checkpoint did not
+///   credit are refunded from the vault's own chain; certified withdrawal records stay payable.
 contract PerpsVault {
     // ------------------------------------------------------------------ constants
     uint8 public constant decimals = 6;
@@ -35,34 +34,40 @@ contract PerpsVault {
     uint256 internal constant MAX_GUARDIANS = 7;
     uint64 internal constant MAX_PAUSE_DURATION = 14 days;
     uint64 internal constant MAX_LARGE_DELAY = 14 days;
-    uint64 internal constant MIN_FORCED_DELAY = 1 hours;
+    /// A forced request is processed by the engine only after L2 finality: its deadline must cover the worst L2
+    /// finality lag the venue accepts (R395-25). One day is the floor; the launch proposal is two days.
+    uint64 internal constant MIN_FORCED_DELAY = 1 days;
     uint64 internal constant MAX_FORCED_DELAY = 7 days;
-    uint64 internal constant MIN_ESCAPE_DELAY = 1 days;
     uint64 internal constant MAX_ESCAPE_DELAY = 30 days;
     /// Escape surplus (custody nobody can claim) becomes sweepable to `feeRecipient` this long after escape.
     uint64 public constant SURPLUS_DELAY = 90 days;
-    /// Deepest sum-tree proof accepted (2^48 leaves).
-    uint256 internal constant MAX_PROOF_DEPTH = 48;
+    /// SPEC 11: account and withdrawal trees have fixed depth 32.
+    uint256 internal constant TREE_DEPTH = 32;
 
-    uint8 internal constant FORCED_CANCEL_ALL = 1;
-    uint8 internal constant FORCED_CLOSE = 2;
-    uint8 internal constant FORCED_WITHDRAW = 3;
+    /// SPEC 14 forced kinds.
+    uint8 internal constant FORCED_CANCEL_ALL = 0;
+    uint8 internal constant FORCED_CLOSE_ALL = 1;
+    uint8 internal constant FORCED_WITHDRAW = 2;
+
+    /// SPEC 8 system accounts (no key). Only PROTOCOL_FEE is ever paid, and only to `feeRecipient`.
+    address internal constant PROTOCOL_FEE = address(1);
+    /// Addresses at or below this are keyless (system accounts, precompiles): never a payout recipient (R395-26).
+    uint160 internal constant KEYLESS_MAX = 0xffff;
 
     bytes32 internal constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 internal constant NAME_HASH = keccak256("PosternPerpsVault");
     bytes32 internal constant VERSION_HASH = keccak256("1");
     bytes32 public constant CHECKPOINT_TYPEHASH = keccak256(
-        "Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,"
-        "bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,"
-        "uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)"
+        "Checkpoint(uint64 height,uint64 time,bytes32 logHash,bytes32 accountsRoot,bytes32 marketsRoot,"
+        "bytes32 withdrawalsRoot,uint64 nextDepositIndex,uint64 nextForcedIndex,uint64 nextOrderId,"
+        "uint64 totalEscape,uint128 dust,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,"
+        "uint64 withdrawalsTotal)"
     );
     bytes32 public constant UNPAUSE_TYPEHASH = keccak256("Unpause(uint64 pauseCount,uint256 validUntil)");
 
     bytes32 internal constant DEPOSIT_CHAIN_TAG = bytes32("PosternPerps.deposit.v1");
     bytes32 internal constant FORCED_CHAIN_TAG = bytes32("PosternPerps.forced.v1");
-    bytes32 internal constant WITHDRAWAL_LEAF_TAG = bytes32("PosternPerps.withdrawal.v1");
-    bytes32 internal constant ESCAPE_LEAF_TAG = bytes32("PosternPerps.escape.v1");
     bytes32 private constant WITHDRAWAL_KEY = bytes32("W");
     bytes32 private constant ESCAPE_KEY = bytes32("E");
 
@@ -70,7 +75,7 @@ contract PerpsVault {
 
     // ------------------------------------------------------------------ immutables (fixed at deployment)
     address public immutable token;
-    /// The protocol fee address: the engine's fee account is this address, and its records pay only here.
+    /// The owner's protocol fee address; the engine's PROTOCOL_FEE records and escape share pay only here.
     address public immutable feeRecipient;
     uint8 public immutable threshold;
     uint8 public immutable unpauseThreshold;
@@ -85,7 +90,6 @@ contract PerpsVault {
     uint64 public immutable escapeDelay;
     uint64 public immutable pauseDuration;
     uint64 public immutable pauseCooldown;
-    uint64 public immutable deployedAt;
 
     address[] public validators;
     mapping(address => bool) public isValidator;
@@ -95,46 +99,44 @@ contract PerpsVault {
     // ------------------------------------------------------------------ state
     bool private entered;
 
-    /// Deposits: count, chain head after n deposits (n = 0: `depositChainGenesis()`), cumulative amount after n.
+    /// Deposits: count, chain head after n deposits (n = 0: genesis), cumulative amount after n.
     uint64 public depositCount;
     mapping(uint64 => bytes32) private depositHeadAt;
     mapping(uint64 => uint64) public depositTotalAt;
     mapping(address => bool) public hasDeposited;
 
-    /// Forced requests: count, chain head after n, deadline of request i, and the last request of each account (+1).
+    /// Forced requests: count, chain head after n, deadline (L2 seconds) of request i, last request of an account + 1.
     uint64 public forcedCount;
     mapping(uint64 => bytes32) private forcedHeadAt;
     mapping(uint64 => uint64) public forcedDeadline;
     mapping(address => uint64) public lastForcedPlusOne;
 
-    /// Accepted checkpoints. `checkpointCount` = number accepted; `latest` = the newest.
+    /// The newest accepted checkpoint, as the vault needs it.
     struct Stored {
         uint64 height;
         uint64 time;
-        uint64 depositsCredited;
-        uint64 forcedProcessed;
+        uint64 nextDepositIndex;
+        uint64 nextForcedIndex;
         uint64 withdrawalCount;
         uint64 withdrawalsTotal;
-        uint64 escapeTotal;
-        bytes32 withdrawalsRoot;
-        bytes32 escapeRoot;
+        uint64 totalEscape;
+        bytes32 accountsRoot;
         bytes32 stateRoot;
     }
 
     uint64 public checkpointCount;
     Stored public latest;
+    /// L2 time of the newest acceptance (0 before the first: escape by silence needs one accepted checkpoint, R395-24).
     uint64 public lastCheckpointAt;
-    /// Withdrawal root and leaf count of accepted checkpoint s (1-based).
+    /// Withdrawal root and record count of accepted checkpoint s (1-based).
     mapping(uint64 => bytes32) public withdrawalsRootAt;
     mapping(uint64 => uint64) public withdrawalCountAt;
-    mapping(uint64 => uint64) public withdrawalsTotalAt;
 
-    /// Payout accounting. `committedOut`: every amount a payout was registered for, plus refunds. `reserved`:
+    /// Payout accounting. `committedOut`: every registered payout plus refunds and the surplus sweep. `reserved`:
     /// registered and not yet transferred. Invariant: token balance >= custody() + reserved.
     uint64 public depositedTotal;
     uint64 public committedOut;
     uint64 public reserved;
-    /// Amounts registered against withdrawal records, escape leaves, and refunded deposits.
     uint64 public withdrawnTotal;
     uint64 public escapeClaimedTotal;
     uint64 public refundedTotal;
@@ -160,8 +162,9 @@ contract PerpsVault {
     uint64 public guardianBlockedUntil;
     mapping(address => uint64) public guardianLastChain;
 
-    /// Escape mode: zero while normal; the time it was triggered.
+    /// Escape: time it began (0: normal) and the pro-rata numerator `min(pool, totalEscape)` fixed then.
     uint64 public escapeAt;
+    uint64 public escapePayable;
     bool public surplusSwept;
 
     // ------------------------------------------------------------------ types
@@ -184,56 +187,56 @@ contract PerpsVault {
         uint64 pauseCooldown;
     }
 
+    /// The components of SPEC 11's `stateRoot` the vault needs, plus the chain heads and withdrawal totals.
     struct Checkpoint {
         uint64 height;
         uint64 time;
-        bytes32 stateRoot;
         bytes32 logHash;
-        uint64 depositsCredited;
+        bytes32 accountsRoot;
+        bytes32 marketsRoot;
+        bytes32 withdrawalsRoot;
+        uint64 nextDepositIndex;
+        uint64 nextForcedIndex;
+        uint64 nextOrderId;
+        uint64 totalEscape;
+        uint128 dust;
         bytes32 depositsHead;
-        uint64 forcedProcessed;
         bytes32 forcedHead;
         uint64 withdrawalCount;
         uint64 withdrawalsTotal;
-        bytes32 withdrawalsRoot;
-        uint64 escapeTotal;
-        bytes32 escapeRoot;
     }
 
+    /// SPEC 11 withdrawal leaf data.
     struct Withdrawal {
-        uint64 index;
+        uint64 withdrawalId;
         address account;
         address recipient;
         uint64 amount;
+        uint64 height;
     }
 
-    /// Merkle sum-tree proof: `index` gives the side at each level (bit i = 1: the node is the right child at level i).
-    struct SumProof {
-        uint64 index;
-        bytes32[] hashes;
-        uint64[] sums;
+    /// SPEC 11 account leaf data.
+    struct Account {
+        address account;
+        uint32 index;
+        uint64 balance;
+        uint64 escapeValue;
+        bytes32 positionsHash;
+        uint64 height;
     }
 
     // ------------------------------------------------------------------ events
     event Deposit(uint64 indexed index, address indexed account, address indexed sender, uint64 amount, bytes32 head);
     event ForcedRequest(
-        uint64 indexed index,
-        address indexed account,
-        uint8 kind,
-        uint32 marketId,
-        uint64 amount,
-        uint64 deadline,
-        bytes32 head
+        uint64 indexed index, address indexed account, uint8 kind, uint64 deadline, uint64 arg, bytes32 head
     );
-    event CheckpointAccepted(
-        uint64 indexed seq, uint64 indexed height, bytes32 stateRoot, bytes32 withdrawalsRoot, bytes32 escapeRoot
-    );
+    event CheckpointAccepted(uint64 indexed seq, uint64 indexed height, bytes32 stateRoot, bytes32 withdrawalsRoot);
     event PayoutRegistered(bytes32 indexed key, address indexed recipient, uint64 total, uint64 readyAt);
     event Paid(bytes32 indexed key, address indexed recipient, uint64 amount);
     event Refunded(uint64 indexed index, address indexed account, uint64 amount);
     event GuardianPaused(address indexed guardian, uint64 indexed pauseCount, uint64 pausedUntil);
     event Unpaused(uint64 indexed pauseCount, uint64 guardianBlockedUntil);
-    event EscapeTriggered(uint64 at, uint8 reason, uint64 checkpointSeq);
+    event EscapeTriggered(uint64 at, uint8 reason, uint64 checkpointSeq, uint64 payable_, uint64 totalEscape);
     event SurplusSwept(address indexed recipient, uint64 amount);
 
     // ------------------------------------------------------------------ errors
@@ -264,15 +267,14 @@ contract PerpsVault {
     constructor(Config memory c) {
         uint256 n = c.validators.length;
         if (
-            c.token.code.length == 0 || c.feeRecipient == address(0) || c.feeRecipient == c.token
+            c.token.code.length == 0 || uint160(c.feeRecipient) <= KEYLESS_MAX || c.feeRecipient == c.token
                 || c.feeRecipient == address(this) || n == 0 || n > MAX_VALIDATORS || c.threshold < 2
                 || c.threshold > n || 2 * uint256(c.threshold) <= n || c.unpauseThreshold < c.threshold
                 || c.unpauseThreshold > n || c.cap == 0 || c.minDeposit == 0 || c.minDeposit > c.cap
                 || c.windowLimit == 0 || c.windowLimit > c.cap || c.windowSeconds == 0 || c.largeThreshold == 0
                 || c.largeThreshold > c.windowLimit || c.largeDelay == 0 || c.largeDelay > MAX_LARGE_DELAY
                 || c.forcedDelay < MIN_FORCED_DELAY || c.forcedDelay > MAX_FORCED_DELAY
-                || c.escapeDelay < MIN_ESCAPE_DELAY || c.escapeDelay > MAX_ESCAPE_DELAY
-                || c.escapeDelay < c.forcedDelay
+                || c.escapeDelay < c.forcedDelay || c.escapeDelay > MAX_ESCAPE_DELAY
         ) revert InvalidConfiguration();
         (bool ok, bytes memory data) = c.token.staticcall(abi.encodeWithSignature("decimals()"));
         if (!ok || data.length != 32 || abi.decode(data, (uint256)) != 6) revert InvalidConfiguration();
@@ -314,8 +316,6 @@ contract PerpsVault {
         escapeDelay = c.escapeDelay;
         pauseDuration = c.pauseDuration;
         pauseCooldown = c.pauseCooldown;
-        deployedAt = uint64(block.timestamp);
-        lastCheckpointAt = uint64(block.timestamp);
         bucket = c.windowLimit;
         bucketUpdatedAt = uint64(block.timestamp);
     }
@@ -359,67 +359,62 @@ contract PerpsVault {
         return keccak256(abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this)));
     }
 
-    function depositChainGenesis() internal view returns (bytes32) {
-        return keccak256(abi.encode(DEPOSIT_CHAIN_TAG, block.chainid, address(this)));
-    }
-
-    function forcedChainGenesis() internal view returns (bytes32) {
-        return keccak256(abi.encode(FORCED_CHAIN_TAG, block.chainid, address(this)));
-    }
-
     function depositHead(uint64 count) public view returns (bytes32) {
-        return count == 0 ? depositChainGenesis() : depositHeadAt[count];
+        return count == 0 ? keccak256(abi.encode(DEPOSIT_CHAIN_TAG, block.chainid, address(this))) : depositHeadAt[count];
     }
 
     function forcedHead(uint64 count) public view returns (bytes32) {
-        return count == 0 ? forcedChainGenesis() : forcedHeadAt[count];
-    }
-
-    /// @notice Chain link of deposit `index` (0-based) after `previous`.
-    function depositLink(bytes32 previous, uint64 index, address account, uint64 amount)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encode(previous, uint256(index), account, uint256(amount)));
-    }
-
-    function forcedLink(
-        bytes32 previous,
-        uint64 index,
-        address account,
-        uint8 kind,
-        uint32 marketId,
-        uint64 amount,
-        uint64 deadline
-    ) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                previous, uint256(index), account, uint256(kind), uint256(marketId), uint256(amount), uint256(deadline)
-            )
-        );
+        return count == 0 ? keccak256(abi.encode(FORCED_CHAIN_TAG, block.chainid, address(this))) : forcedHeadAt[count];
     }
 
     function checkpointDigest(Checkpoint calldata cp) public view returns (bytes32) {
+        // abi.encode of static values is their 32-byte words in order: two halves concatenated are the same bytes as
+        // one call (split only to stay within the legacy code generator's stack).
         bytes32 structHash = keccak256(
-            abi.encode(
-                CHECKPOINT_TYPEHASH,
-                cp.height,
-                cp.time,
-                cp.stateRoot,
-                cp.logHash,
-                cp.depositsCredited,
-                cp.depositsHead,
-                cp.forcedProcessed,
-                cp.forcedHead,
-                cp.withdrawalCount,
-                cp.withdrawalsTotal,
-                cp.withdrawalsRoot,
-                cp.escapeTotal,
-                cp.escapeRoot
+            bytes.concat(
+                abi.encode(
+                    CHECKPOINT_TYPEHASH,
+                    cp.height,
+                    cp.time,
+                    cp.logHash,
+                    cp.accountsRoot,
+                    cp.marketsRoot,
+                    cp.withdrawalsRoot,
+                    cp.nextDepositIndex
+                ),
+                abi.encode(
+                    cp.nextForcedIndex,
+                    cp.nextOrderId,
+                    cp.totalEscape,
+                    cp.dust,
+                    cp.depositsHead,
+                    cp.forcedHead,
+                    cp.withdrawalCount,
+                    cp.withdrawalsTotal
+                )
             )
         );
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
+    }
+
+    /// @notice SPEC 11: `stateRoot = H("PosternPerps/state/v1" || be64 height || be64 time || accountsRoot ||
+    ///         marketsRoot || withdrawalsRoot || systemHash)`, `systemHash = H("PPv1sys" || be64 nextDepositIndex ||
+    ///         be64 nextForcedIndex || be64 nextOrderId || be64 totalEscape || be128 dust)`.
+    function stateRootOf(Checkpoint calldata cp) public pure returns (bytes32) {
+        bytes32 systemHash = keccak256(
+            abi.encodePacked("PPv1sys", cp.nextDepositIndex, cp.nextForcedIndex, cp.nextOrderId, cp.totalEscape, cp.dust)
+        );
+        return keccak256(
+            abi.encodePacked(
+                "PosternPerps/state/v1",
+                cp.height,
+                cp.time,
+                cp.accountsRoot,
+                cp.marketsRoot,
+                cp.withdrawalsRoot,
+                systemHash
+            )
+        );
     }
 
     function unpauseDigest(uint64 count, uint256 validUntil) public view returns (bytes32) {
@@ -430,70 +425,61 @@ contract PerpsVault {
         );
     }
 
-    function withdrawalLeaf(Withdrawal calldata w) internal pure returns (bytes32) {
-        return keccak256(abi.encode(WITHDRAWAL_LEAF_TAG, uint256(w.index), w.account, w.recipient, uint256(w.amount)));
+    function withdrawalKey(uint64 withdrawalId) public pure returns (bytes32) {
+        return keccak256(abi.encode(WITHDRAWAL_KEY, uint256(withdrawalId)));
     }
 
-    function escapeLeaf(address account, uint64 amount) internal pure returns (bytes32) {
-        return keccak256(abi.encode(ESCAPE_LEAF_TAG, account, uint256(amount)));
-    }
-
-    /// @notice Parent of two sum-tree nodes: 81 bytes, so never equal to a 128- or 96-byte leaf preimage.
-    function nodeHash(bytes32 leftHash, uint64 leftSum, bytes32 rightHash, uint64 rightSum)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encodePacked(bytes1(0x01), leftHash, leftSum, rightHash, rightSum));
-    }
-
-    /// @notice Root hash and total of the tree a leaf belongs to by `proof`. Reverts on overflow or a malformed proof.
-    function sumRoot(bytes32 leafHash, uint64 leafSum, SumProof calldata proof)
-        internal
-        pure
-        returns (bytes32 h, uint64 s)
-    {
-        uint256 depth = proof.hashes.length;
-        if (depth != proof.sums.length || depth > MAX_PROOF_DEPTH || proof.index >> depth != 0) {
-            revert InvalidProof();
-        }
-        h = leafHash;
-        s = leafSum;
-        for (uint256 i; i < depth; ++i) {
-            bytes32 sh = proof.hashes[i];
-            uint64 ss = proof.sums[i];
-            if ((proof.index >> i) & 1 == 0) h = nodeHash(h, s, sh, ss);
-            else h = nodeHash(sh, ss, h, s);
-            uint256 t = uint256(s) + ss;
-            if (t > type(uint64).max) revert InvalidProof();
-            s = uint64(t);
-        }
-    }
-
-    function withdrawalKey(uint64 index) internal pure returns (bytes32) {
-        return keccak256(abi.encode(WITHDRAWAL_KEY, uint256(index)));
-    }
-
-    function escapeKey(address account) internal pure returns (bytes32) {
+    function escapeKey(address account) public pure returns (bytes32) {
         return keccak256(abi.encode(ESCAPE_KEY, account));
     }
 
-    /// @notice 0: not due; 1: no checkpoint for `escapeDelay`; 2: a forced request is past its deadline unprocessed.
+    /// @notice 0: not due; 1: no checkpoint for `escapeDelay` since the last accepted one; 2: a forced request is past
+    ///         its deadline unprocessed.
     function escapeReason() public view returns (uint8) {
-        if (block.timestamp >= uint256(lastCheckpointAt) + escapeDelay) return 1;
-        uint64 next = latest.forcedProcessed;
+        uint64 next = latest.nextForcedIndex;
         if (next < forcedCount && block.timestamp > forcedDeadline[next]) return 2;
+        if (lastCheckpointAt != 0 && block.timestamp >= uint256(lastCheckpointAt) + escapeDelay) return 1;
         return 0;
     }
 
+    /// @dev SPEC 11 Merkle path: leaf `H(0x00 || data)`, node `H(0x01 || left || right)`, depth 32, bit i of `index` set
+    ///      = right child at level i.
+    function _root(bytes32 leaf, uint64 index, bytes32[] calldata siblings) internal pure returns (bytes32 h) {
+        if (siblings.length != TREE_DEPTH || index >> TREE_DEPTH != 0) revert InvalidProof();
+        h = leaf;
+        for (uint256 i; i < TREE_DEPTH; ++i) {
+            h = (index >> i) & 1 == 0
+                ? keccak256(abi.encodePacked(bytes1(0x01), h, siblings[i]))
+                : keccak256(abi.encodePacked(bytes1(0x01), siblings[i], h));
+        }
+    }
+
+    function _withdrawalLeaf(Withdrawal calldata w) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(bytes1(0x00), "PPv1wdrl", w.withdrawalId, w.account, w.recipient, w.amount, w.height)
+        );
+    }
+
+    function _accountLeaf(Account calldata a) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                bytes1(0x00), "PPv1acct", a.account, a.index, a.balance, a.escapeValue, a.positionsHash, a.height
+            )
+        );
+    }
+
+    function _keyless(address a) internal pure returns (bool) {
+        return uint160(a) <= KEYLESS_MAX;
+    }
+
     // ------------------------------------------------------------------ deposits
-    /// @notice Deposits `amount` for engine account `account`. Credited by the engine after L2 finality.
+    /// @notice Deposits `amount` for engine account `account` (credited by the engine after L2 finality).
     function deposit(uint64 amount, address account) external nonReentrant returns (uint64 index) {
         if (escapeAt != 0) revert EscapeActive();
         if (paused()) revert Paused();
         if (
-            account == address(0) || account == address(this) || account == token || amount < minDeposit
-                || uint256(custody()) + amount > cap || depositCount == type(uint64).max
+            account == address(this) || account == token || amount < minDeposit || _keyless(account)
+                || uint256(custody()) + amount > cap
         ) revert InvalidDeposit();
         uint256 beforeVault = _balance(address(this));
         uint256 beforeSender = _balance(msg.sender);
@@ -502,7 +488,7 @@ contract PerpsVault {
             revert InvalidTransfer();
         }
         index = depositCount;
-        bytes32 head = depositLink(depositHead(index), index, account, amount);
+        bytes32 head = keccak256(abi.encode(depositHead(index), uint256(index), account, uint256(amount)));
         depositCount = index + 1;
         depositHeadAt[index + 1] = head;
         depositTotalAt[index + 1] = depositTotalAt[index] + amount;
@@ -512,26 +498,26 @@ contract PerpsVault {
     }
 
     // ------------------------------------------------------------------ forced requests
-    /// @notice The caller's own request that the engine must process before `forcedDelay` passes. One open request per
-    ///         account; only an account that deposited (anti-spam). `amount` is used by FORCED_WITHDRAW only (0 = all
-    ///         withdrawable); a forced withdrawal always pays the account itself. `marketId` 0 = every market.
-    function requestForced(uint8 kind, uint32 marketId, uint64 amount) external nonReentrant returns (uint64 index) {
+    /// @notice The caller's own request (SPEC 14 kinds: 0 CancelAll, 1 CloseAll, 2 Withdraw `arg` gross to itself),
+    ///         which the engine must process before `forcedDelay` passes. One open request per account; only an account
+    ///         that deposited (anti-spam). `arg` must be 0 except for Withdraw.
+    function requestForced(uint8 kind, uint64 arg) external nonReentrant returns (uint64 index) {
         if (escapeAt != 0) revert EscapeActive();
-        if (
-            kind < FORCED_CANCEL_ALL || kind > FORCED_WITHDRAW || !hasDeposited[msg.sender]
-                || (kind != FORCED_WITHDRAW && amount != 0) || (kind == FORCED_WITHDRAW && marketId != 0)
-                || forcedCount == type(uint64).max
-        ) revert InvalidForced();
+        if (kind > FORCED_WITHDRAW || !hasDeposited[msg.sender] || (kind != FORCED_WITHDRAW && arg != 0)) {
+            revert InvalidForced();
+        }
         uint64 last = lastForcedPlusOne[msg.sender];
-        if (last != 0 && last - 1 >= latest.forcedProcessed) revert InvalidForced();
+        if (last != 0 && last - 1 >= latest.nextForcedIndex) revert InvalidForced();
         index = forcedCount;
         uint64 deadline = uint64(block.timestamp) + forcedDelay;
-        bytes32 head = forcedLink(forcedHead(index), index, msg.sender, kind, marketId, amount, deadline);
+        bytes32 head = keccak256(
+            abi.encode(forcedHead(index), uint256(index), msg.sender, uint256(kind), uint256(deadline), uint256(arg))
+        );
         forcedCount = index + 1;
         forcedHeadAt[index + 1] = head;
         forcedDeadline[index] = deadline;
         lastForcedPlusOne[msg.sender] = index + 1;
-        emit ForcedRequest(index, msg.sender, kind, marketId, amount, deadline, head);
+        emit ForcedRequest(index, msg.sender, kind, deadline, arg, head);
     }
 
     // ------------------------------------------------------------------ checkpoints
@@ -541,73 +527,63 @@ contract PerpsVault {
         uint64 seq = checkpointCount;
         if (
             cp.height == 0 || (seq != 0 && (cp.height <= prev.height || cp.time <= prev.time))
-                || cp.stateRoot == 0 || cp.depositsCredited < prev.depositsCredited
-                || cp.depositsCredited > depositCount || cp.depositsHead != depositHead(cp.depositsCredited)
-                || cp.forcedProcessed < prev.forcedProcessed || cp.forcedProcessed > forcedCount
-                || cp.forcedHead != forcedHead(cp.forcedProcessed) || cp.withdrawalCount < prev.withdrawalCount
-                || cp.withdrawalsTotal < prev.withdrawalsTotal
-                || (cp.withdrawalCount == prev.withdrawalCount
-                    && (cp.withdrawalsTotal != prev.withdrawalsTotal || cp.withdrawalsRoot != prev.withdrawalsRoot))
-                || (cp.withdrawalCount == 0) != (cp.withdrawalsRoot == 0) || (cp.withdrawalCount == 0 && cp.withdrawalsTotal != 0)
-                || (cp.escapeRoot == 0 && cp.escapeTotal != 0)
+                || cp.nextDepositIndex < prev.nextDepositIndex || cp.nextDepositIndex > depositCount
+                || cp.depositsHead != depositHead(cp.nextDepositIndex) || cp.nextForcedIndex < prev.nextForcedIndex
+                || cp.nextForcedIndex > forcedCount || cp.forcedHead != forcedHead(cp.nextForcedIndex)
+                || cp.withdrawalCount < prev.withdrawalCount || cp.withdrawalsTotal < prev.withdrawalsTotal
+                || (seq != 0 && cp.withdrawalCount == prev.withdrawalCount
+                    && (cp.withdrawalsTotal != prev.withdrawalsTotal || cp.withdrawalsRoot != withdrawalsRootAt[seq]))
+                || (cp.withdrawalCount == 0 && cp.withdrawalsTotal != 0)
         ) revert InvalidCheckpoint();
         // A checkpoint may not leave behind a request that is already past its deadline.
-        if (cp.forcedProcessed < forcedCount && block.timestamp > forcedDeadline[cp.forcedProcessed]) {
+        if (cp.nextForcedIndex < forcedCount && block.timestamp > forcedDeadline[cp.nextForcedIndex]) {
             revert InvalidCheckpoint();
         }
-        _checkSolvency(cp.escapeTotal, cp.withdrawalsTotal, cp.depositsCredited);
+        // Every withdrawal record not yet registered and every deposit not yet credited must be payable from custody.
+        // Escape values are not part of this test: they are paid pro rata from what remains (R395-23).
+        if (
+            uint256(cp.withdrawalsTotal - withdrawnTotal) + (depositedTotal - depositTotalAt[cp.nextDepositIndex])
+                > custody()
+        ) revert Insolvent();
         _checkCertificate(checkpointDigest(cp), signatures, threshold);
+        bytes32 stateRoot = stateRootOf(cp);
         seq += 1;
         checkpointCount = seq;
         latest = Stored({
             height: cp.height,
             time: cp.time,
-            depositsCredited: cp.depositsCredited,
-            forcedProcessed: cp.forcedProcessed,
+            nextDepositIndex: cp.nextDepositIndex,
+            nextForcedIndex: cp.nextForcedIndex,
             withdrawalCount: cp.withdrawalCount,
             withdrawalsTotal: cp.withdrawalsTotal,
-            escapeTotal: cp.escapeTotal,
-            withdrawalsRoot: cp.withdrawalsRoot,
-            escapeRoot: cp.escapeRoot,
-            stateRoot: cp.stateRoot
+            totalEscape: cp.totalEscape,
+            accountsRoot: cp.accountsRoot,
+            stateRoot: stateRoot
         });
         withdrawalsRootAt[seq] = cp.withdrawalsRoot;
         withdrawalCountAt[seq] = cp.withdrawalCount;
-        withdrawalsTotalAt[seq] = cp.withdrawalsTotal;
         lastCheckpointAt = uint64(block.timestamp);
-        emit CheckpointAccepted(seq, cp.height, cp.stateRoot, cp.withdrawalsRoot, cp.escapeRoot);
-    }
-
-    /// @dev Everything a checkpoint makes claimable (escape balances, withdrawal records not yet registered, deposits
-    ///      it did not credit) must fit in what the vault holds unclaimed. Payouts and refunds lower both sides by the
-    ///      same amount and deposits raise both, so the inequality holds until the next checkpoint: every claim the
-    ///      latest checkpoint admits is payable.
-    function _checkSolvency(uint64 escapeTotal, uint64 withdrawalsTotal, uint64 credited) private view {
-        uint256 owed = uint256(escapeTotal) + (withdrawalsTotal - withdrawnTotal) + (depositedTotal - depositTotalAt[credited]);
-        if (owed > custody()) revert Insolvent();
+        emit CheckpointAccepted(seq, cp.height, stateRoot, cp.withdrawalsRoot);
     }
 
     // ------------------------------------------------------------------ withdrawals
     /// @notice Registers withdrawal record `w`, proven against accepted checkpoint `seq`, and pays up to `want` now if it
     ///         is ready, not paused and the bucket allows (else it stays registered for `release`).
-    function withdraw(uint64 seq, Withdrawal calldata w, SumProof calldata proof, uint64 want)
+    function withdraw(uint64 seq, Withdrawal calldata w, bytes32[] calldata siblings, uint64 want)
         external
         nonReentrant
         returns (bytes32 key)
     {
-        if (seq == 0 || seq > checkpointCount || w.index >= withdrawalCountAt[seq] || proof.index != w.index) {
-            revert InvalidWithdrawal();
-        }
+        if (seq == 0 || seq > checkpointCount || w.withdrawalId >= withdrawalCountAt[seq]) revert InvalidWithdrawal();
         if (
-            w.amount == 0 || w.recipient == address(0) || w.recipient == address(this) || w.recipient == token
-                || w.account == address(0) || (w.account == feeRecipient && w.recipient != feeRecipient)
+            w.amount == 0 || _keyless(w.recipient) || w.recipient == address(this) || w.recipient == token
+                || (w.account == PROTOCOL_FEE && w.recipient != feeRecipient)
+                || (_keyless(w.account) && w.account != PROTOCOL_FEE)
         ) revert InvalidWithdrawal();
-        (bytes32 root, uint64 total) = sumRoot(withdrawalLeaf(w), w.amount, proof);
-        if (root != withdrawalsRootAt[seq] || total != withdrawalsTotalAt[seq]) revert InvalidProof();
-        key = withdrawalKey(w.index);
+        if (_root(_withdrawalLeaf(w), w.withdrawalId, siblings) != withdrawalsRootAt[seq]) revert InvalidProof();
+        key = withdrawalKey(w.withdrawalId);
         if (payouts[key].total != 0) revert AlreadyRegistered();
-        // Bound by the newest committed total: the sum of all records ever paid never exceeds what the committee
-        // certified (and the sum tree makes every record's amount part of that total).
+        // The sum of all records ever registered never exceeds what the committee certified.
         if (uint256(withdrawnTotal) + w.amount > latest.withdrawalsTotal) revert Insolvent();
         withdrawnTotal += w.amount;
         _register(key, w.recipient, w.amount);
@@ -620,7 +596,6 @@ contract PerpsVault {
     }
 
     function _register(bytes32 key, address recipient, uint64 total) private {
-        if (payouts[key].total != 0) revert AlreadyRegistered();
         uint64 readyAt = uint64(block.timestamp);
         if (total >= largeThreshold) readyAt += largeDelay;
         payouts[key] = Payout({recipient: recipient, total: total, paid: 0, readyAt: readyAt});
@@ -690,32 +665,42 @@ contract PerpsVault {
     }
 
     // ------------------------------------------------------------------ escape
+    /// @notice Enters escape for good. Fixes the escape pool: custody less every certified withdrawal record not yet
+    ///         registered and every deposit the latest checkpoint did not credit (both paid in full). Escape values
+    ///         are then paid `escapeValue * min(pool, totalEscape) / totalEscape`, rounded down.
     function triggerEscape() external nonReentrant {
         if (escapeAt != 0) revert EscapeActive();
         uint8 reason = escapeReason();
         if (reason == 0) revert EscapeNotDue();
+        uint64 pool = custody() - (latest.withdrawalsTotal - withdrawnTotal)
+            - (depositedTotal - depositTotalAt[latest.nextDepositIndex]);
+        escapePayable = pool < latest.totalEscape ? pool : latest.totalEscape;
         escapeAt = uint64(block.timestamp);
-        emit EscapeTriggered(escapeAt, reason, checkpointCount);
+        emit EscapeTriggered(escapeAt, reason, checkpointCount, escapePayable, latest.totalEscape);
     }
 
-    /// @notice In escape: registers `account`'s escape balance from the latest checkpoint and pays up to `want` now.
-    ///         The payout goes to `account` only; anyone may submit it.
-    function claimEscape(address account, uint64 amount, SumProof calldata proof, uint64 want)
+    /// @notice In escape: registers the account's pro-rata escape value from the latest checkpoint's account tree and
+    ///         pays up to `want` now. Anyone may submit; the payout goes to the account. Keyless accounts (SPEC 8) pay
+    ///         `feeRecipient`: PROTOCOL_FEE at once, INSURANCE and BACKSTOP only `SURPLUS_DELAY` after escape began
+    ///         (the same rule as the surplus sweep; an owner decision, VAULT.md section 10).
+    function claimEscape(Account calldata a, bytes32[] calldata siblings, uint64 want)
         external
         nonReentrant
         returns (bytes32 key)
     {
         if (escapeAt == 0) revert NotEscape();
-        if (amount == 0 || account == address(0) || account == address(this) || account == token) {
-            revert InvalidWithdrawal();
-        }
-        (bytes32 root, uint64 total) = sumRoot(escapeLeaf(account, amount), amount, proof);
-        if (root != latest.escapeRoot || total != latest.escapeTotal) revert InvalidProof();
-        key = escapeKey(account);
+        if (a.escapeValue == 0 || a.account == address(this) || a.account == token) revert InvalidWithdrawal();
+        address recipient = _keyless(a.account) ? feeRecipient : a.account;
+        if (latest.totalEscape == 0) revert InvalidWithdrawal();
+        if (_root(_accountLeaf(a), a.index, siblings) != latest.accountsRoot) revert InvalidProof();
+        key = escapeKey(a.account);
         if (payouts[key].total != 0) revert AlreadyRegistered();
-        if (uint256(escapeClaimedTotal) + amount > latest.escapeTotal) revert Insolvent();
+        uint64 amount = uint64(uint256(a.escapeValue) * escapePayable / latest.totalEscape);
+        if (amount == 0) revert InvalidWithdrawal();
+        if (uint256(escapeClaimedTotal) + amount > escapePayable) revert Insolvent();
         escapeClaimedTotal += amount;
-        _register(key, account, amount);
+        _register(key, recipient, amount);
+        if (_keyless(a.account) && a.account != PROTOCOL_FEE) payouts[key].readyAt = escapeAt + SURPLUS_DELAY;
         _payNow(key, want);
     }
 
@@ -724,8 +709,9 @@ contract PerpsVault {
     function refundDeposit(uint64 index, address account, uint64 amount) external nonReentrant {
         if (escapeAt == 0) revert NotEscape();
         if (
-            index < latest.depositsCredited || index >= depositCount || refunded[index]
-                || depositLink(depositHead(index), index, account, amount) != depositHeadAt[index + 1]
+            index < latest.nextDepositIndex || index >= depositCount || refunded[index]
+                || keccak256(abi.encode(depositHead(index), uint256(index), account, uint256(amount)))
+                    != depositHeadAt[index + 1]
         ) revert InvalidRefund();
         refunded[index] = true;
         refundedTotal += amount;
@@ -734,14 +720,14 @@ contract PerpsVault {
         emit Refunded(index, account, amount);
     }
 
-    /// @notice In escape, `SURPLUS_DELAY` after it began: pays what no claim can ever reach (the engine's insurance
-    ///         fund and any rounding or donation) to `feeRecipient`, once. Every amount still claimable stays.
+    /// @notice In escape, `SURPLUS_DELAY` after it began: pays what no claim can ever reach (rounding, the shares of
+    ///         escape shares nobody proved, donations) to `feeRecipient`, once. Every amount still claimable stays.
     function sweepEscapeSurplus() external nonReentrant returns (uint64 amount) {
         if (escapeAt == 0) revert NotEscape();
         if (block.timestamp < uint256(escapeAt) + SURPLUS_DELAY || surplusSwept) revert InvalidSurplus();
-        // Still claimable and not yet registered: escape balances, certified withdrawal records, uncredited deposits.
-        uint64 unregistered = (latest.escapeTotal - escapeClaimedTotal) + (latest.withdrawalsTotal - withdrawnTotal)
-            + (depositedTotal - depositTotalAt[latest.depositsCredited] - refundedTotal);
+        // Still claimable and not yet registered: escape values, certified withdrawal records, uncredited deposits.
+        uint64 unregistered = (escapePayable - escapeClaimedTotal) + (latest.withdrawalsTotal - withdrawnTotal)
+            + (depositedTotal - depositTotalAt[latest.nextDepositIndex] - refundedTotal);
         uint256 balance = _balance(address(this));
         uint256 owed = uint256(unregistered) + reserved;
         if (balance <= owed) revert InvalidSurplus();
@@ -749,8 +735,8 @@ contract PerpsVault {
         if (surplus > type(uint64).max) revert InvalidSurplus();
         amount = uint64(surplus);
         surplusSwept = true;
-        // custody() >= unregistered by the solvency invariant; what custody holds beyond it is the swept surplus, so
-        // after the sweep custody() == unregistered and balance >= custody() + reserved still holds.
+        // custody() >= unregistered by the solvency invariant; what custody holds beyond it is swept, so afterwards
+        // custody() == unregistered and balance >= custody() + reserved still holds.
         committedOut += custody() - unregistered;
         _transferOut(feeRecipient, amount);
         emit SurplusSwept(feeRecipient, amount);

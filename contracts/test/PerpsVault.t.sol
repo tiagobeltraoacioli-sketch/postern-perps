@@ -2,12 +2,12 @@
 pragma solidity 0.8.24;
 
 import {PerpsVault} from "../src/PerpsVault.sol";
-import {Base, MockUSDC, SumTree} from "./Base.sol";
+import {Base, MockUSDC, Tree} from "./Base.sol";
 
 contract PerpsVaultTest is Base {
-    address internal alice = address(0xA11CE);
-    address internal bob = address(0xB0B);
-    address internal carol = address(0xCA201);
+    address internal alice = address(uint160(uint256(keccak256("alice"))));
+    address internal bob = address(uint160(uint256(keccak256("bob"))));
+    address internal carol = address(uint160(uint256(keccak256("carol"))));
 
     VaultHarness internal harness;
 
@@ -161,7 +161,7 @@ contract PerpsVaultTest is Base {
         PerpsVault.Checkpoint memory cp = _basicCheckpoint();
         _submit(cp);
         assertEq(vault.checkpointCount(), 1, "seq");
-        (uint64 h,,,,,,,,,) = vault.latest();
+        (uint64 h,,,,,,,,) = vault.latest();
         assertEq(h, 1, "height");
         assertEq(vault.lastCheckpointAt(), block.timestamp, "time");
     }
@@ -221,8 +221,7 @@ contract PerpsVaultTest is Base {
         vault.submitCheckpoint(cp, eight);
         // signatures over a different field
         PerpsVault.Checkpoint memory other = cp;
-        other.escapeTotal = cp.escapeTotal; // same
-        other.stateRoot = keccak256("other");
+        other.accountsRoot = keccak256("other");
         vm.expectRevert(PerpsVault.InvalidCertificate.selector);
         vault.submitCheckpoint(other, _sign(d, K));
     }
@@ -249,7 +248,7 @@ contract PerpsVaultTest is Base {
         // Another chain id: the digest changes, so the same signatures fail.
         vm.chainId(700771);
         PerpsVault.Checkpoint memory cp2 = cp;
-        cp2.depositsHead = vault.depositHead(cp.depositsCredited);
+        cp2.depositsHead = vault.depositHead(cp.nextDepositIndex);
         cp2.forcedHead = vault.forcedHead(0);
         vm.expectRevert(PerpsVault.InvalidCertificate.selector);
         vault.submitCheckpoint(cp2, s);
@@ -271,12 +270,12 @@ contract PerpsVaultTest is Base {
         _expectCheckpointRevert(n);
         // more deposits credited than exist
         n = _cp(2, w, a, b);
-        n.depositsCredited = 3;
+        n.nextDepositIndex = 3;
         n.depositsHead = vault.depositHead(2);
         _expectCheckpointRevert(n);
         // fewer deposits than the previous checkpoint
         n = _cp(2, w, a, b);
-        n.depositsCredited = 0;
+        n.nextDepositIndex = 0;
         n.depositsHead = vault.depositHead(0);
         _expectCheckpointRevert(n);
         // a head that is not the vault's (a deposit the engine invented or mis-read)
@@ -287,20 +286,40 @@ contract PerpsVaultTest is Base {
         n = _cp(2, w, a, b);
         n.forcedHead = keccak256("x");
         _expectCheckpointRevert(n);
-        // zero state root
+        // total without records; a total that moved while the count did not
         n = _cp(2, w, a, b);
-        n.stateRoot = 0;
+        n.withdrawalsTotal = 1;
         _expectCheckpointRevert(n);
-        // withdrawal root without records, records without root, total without records
+        // a forced count above the vault's
         n = _cp(2, w, a, b);
-        n.withdrawalsRoot = keccak256("r");
+        n.nextForcedIndex = 1;
         _expectCheckpointRevert(n);
-        n = _cp(2, w, a, b);
-        n.withdrawalCount = 1;
-        _expectCheckpointRevert(n);
-        n = _cp(2, w, a, b);
-        n.escapeTotal = 1;
-        _expectCheckpointRevert(n);
+        // a valid one still passes after all those refusals
+        _submit(_cp(2, w, a, b));
+    }
+
+    /// The vault recomputes SPEC 11's state root from the signed components: an independent computation here.
+    function test_state_root_equation() public {
+        PerpsVault.Checkpoint memory cp = _basicCheckpoint();
+        bytes32 sys = keccak256(
+            abi.encodePacked(
+                bytes7("PPv1sys"), cp.nextDepositIndex, cp.nextForcedIndex, cp.nextOrderId, cp.totalEscape, cp.dust
+            )
+        );
+        bytes32 expected = keccak256(
+            abi.encodePacked(
+                bytes21("PosternPerps/state/v1"),
+                cp.height,
+                cp.time,
+                cp.accountsRoot,
+                cp.marketsRoot,
+                cp.withdrawalsRoot,
+                sys
+            )
+        );
+        _submit(cp);
+        (,,,,,,,, bytes32 stored) = vault.latest();
+        assertEq(stored, expected, "stateRoot");
     }
 
     function _expectCheckpointRevert(PerpsVault.Checkpoint memory cp) internal {
@@ -312,12 +331,12 @@ contract PerpsVaultTest is Base {
     function test_checkpoint_withdrawals_append_only_rules() public {
         _deposit(alice, alice, 1000 * USDC);
         PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](1);
-        ws[0] = PerpsVault.Withdrawal(0, alice, alice, 100 * USDC);
+        ws[0] = _w(0, alice, alice, 100 * USDC);
         (, address[] memory a, uint64[] memory b) = _empty();
         _submit(_cp(1, ws, a, b));
         // same count, different root: refused
         PerpsVault.Withdrawal[] memory ws2 = new PerpsVault.Withdrawal[](1);
-        ws2[0] = PerpsVault.Withdrawal(0, alice, bob, 100 * USDC);
+        ws2[0] = _w(0, alice, bob, 100 * USDC);
         _expectCheckpointRevert(_cp(2, ws2, a, b));
         // fewer records: refused
         (PerpsVault.Withdrawal[] memory none,,) = _empty();
@@ -328,41 +347,54 @@ contract PerpsVaultTest is Base {
 
     function test_checkpoint_refused_when_insolvent() public {
         _deposit(alice, alice, 1000 * USDC);
+        (, address[] memory a, uint64[] memory b) = _empty();
+        // Withdrawal records above custody.
+        PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](1);
+        ws[0] = _w(0, alice, alice, 1000 * USDC + 1);
+        PerpsVault.Checkpoint memory cp = _cp(1, ws, a, b);
+        bytes[] memory s = _sign(vault.checkpointDigest(cp), K);
+        vm.expectRevert(PerpsVault.Insolvent.selector);
+        vault.submitCheckpoint(cp, s);
+        // Uncredited deposits count as owed in full: records of 1 with nothing credited exceed custody.
+        ws[0] = _w(0, alice, alice, 1);
+        cp = _cp(1, ws, a, b);
+        cp.nextDepositIndex = 0;
+        cp.depositsHead = vault.depositHead(0);
+        s = _sign(vault.checkpointDigest(cp), K);
+        vm.expectRevert(PerpsVault.Insolvent.selector);
+        vault.submitCheckpoint(cp, s);
+    }
+
+    /// R395-23: an account under water makes sum(max(0, E)) exceed custody. The checkpoint is still accepted (escape
+    /// values are paid pro rata from the pool), so withdrawals keep flowing.
+    function test_R395_23_escape_total_above_custody_accepted_and_paid_pro_rata() public {
+        _deposit(alice, alice, 1000 * USDC);
+        _deposit(bob, bob, 1000 * USDC);
         (PerpsVault.Withdrawal[] memory w,,) = _empty();
         address[] memory a = new address[](2);
         uint64[] memory b = new uint64[](2);
         a[0] = alice;
         a[1] = bob;
-        b[0] = 1000 * USDC;
-        b[1] = 1; // one unit more than custody
-        PerpsVault.Checkpoint memory cp = _cp(1, w, a, b);
-        bytes[] memory s = _sign(vault.checkpointDigest(cp), K);
-        vm.expectRevert(PerpsVault.Insolvent.selector);
-        vault.submitCheckpoint(cp, s);
-        // Uncredited deposits count as owed: crediting none while the tree already holds them is insolvent.
-        b[1] = 0;
-        cp = _cp(1, w, a, b);
-        cp.depositsCredited = 0;
-        cp.depositsHead = vault.depositHead(0);
-        s = _sign(vault.checkpointDigest(cp), K);
-        vm.expectRevert(PerpsVault.Insolvent.selector);
-        vault.submitCheckpoint(cp, s);
-        // Withdrawal records plus escape balances above custody.
-        PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](1);
-        ws[0] = PerpsVault.Withdrawal(0, alice, alice, 1);
-        cp = _cp(1, ws, a, b);
-        s = _sign(vault.checkpointDigest(cp), K);
-        vm.expectRevert(PerpsVault.Insolvent.selector);
-        vault.submitCheckpoint(cp, s);
+        b[0] = 1500 * USDC; // alice's profit
+        b[1] = 1000 * USDC; // bob's escape value floored at zero loss elsewhere: total 2500 > custody 2000
+        _submit(_cp(1, w, a, b));
+        vm.warp(block.timestamp + 7 days);
+        vault.triggerEscape();
+        assertEq(vault.escapePayable(), 2000 * USDC, "pool");
+        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
+        vault.claimEscape(_acct(a, b, 1), _eProof(a, b, 1), type(uint64).max);
+        assertEq(usdc.balanceOf(alice), 1200 * USDC, "1500 * 2000 / 2500");
+        assertEq(usdc.balanceOf(bob), 800 * USDC, "1000 * 2000 / 2500");
+        assertEq(usdc.balanceOf(address(vault)), 0, "pool paid exactly");
     }
 
     // ================================================================== withdrawals
     function _withdrawSetup(uint64 amount) internal returns (PerpsVault.Withdrawal[] memory ws) {
         _deposit(alice, alice, 2_000_000 * USDC);
         ws = new PerpsVault.Withdrawal[](3);
-        ws[0] = PerpsVault.Withdrawal(0, alice, carol, amount);
-        ws[1] = PerpsVault.Withdrawal(1, FEE, FEE, 7 * USDC);
-        ws[2] = PerpsVault.Withdrawal(2, alice, alice, 3 * USDC);
+        ws[0] = _w(0, alice, carol, amount);
+        ws[1] = _w(1, PROTOCOL_FEE, FEE, 7 * USDC);
+        ws[2] = _w(2, alice, alice, 3 * USDC);
         address[] memory a = new address[](1);
         uint64[] memory b = new uint64[](1);
         a[0] = alice;
@@ -376,7 +408,7 @@ contract PerpsVaultTest is Base {
         assertEq(usdc.balanceOf(carol), 500 * USDC, "paid");
         (address r, uint64 total, uint64 paid,) = vault.payouts(key);
         assertTrue(r == carol && total == 500 * USDC && paid == 500 * USDC, "payout record");
-        PerpsVault.SumProof memory p = _wProof(ws, 0);
+        bytes32[] memory p = _wProof(ws, 0);
         vm.expectRevert(PerpsVault.AlreadyRegistered.selector);
         vault.withdraw(1, ws[0], p, 1);
         // the fee account's record pays the fee address
@@ -390,7 +422,7 @@ contract PerpsVaultTest is Base {
         // a second checkpoint with one more record
         PerpsVault.Withdrawal[] memory ws2 = new PerpsVault.Withdrawal[](4);
         for (uint256 i; i < 3; ++i) ws2[i] = ws[i];
-        ws2[3] = PerpsVault.Withdrawal(3, alice, alice, 1 * USDC);
+        ws2[3] = _w(3, alice, alice, 1 * USDC);
         address[] memory a = new address[](1);
         uint64[] memory b = new uint64[](1);
         a[0] = alice;
@@ -398,7 +430,7 @@ contract PerpsVaultTest is Base {
         vm.warp(block.timestamp + 1);
         _submit(_cp(2, ws2, a, b));
         vault.withdraw(1, ws[0], _wProof(ws, 0), type(uint64).max); // proof against checkpoint 1
-        PerpsVault.SumProof memory p = _wProof(ws2, 0);
+        bytes32[] memory p = _wProof(ws2, 0);
         vm.expectRevert(PerpsVault.AlreadyRegistered.selector);
         vault.withdraw(2, ws2[0], p, type(uint64).max);
         // record 3 is not in checkpoint 1
@@ -410,7 +442,7 @@ contract PerpsVaultTest is Base {
 
     function test_withdraw_refusals() public {
         PerpsVault.Withdrawal[] memory ws = _withdrawSetup(500 * USDC);
-        PerpsVault.SumProof memory p = _wProof(ws, 0);
+        bytes32[] memory p = _wProof(ws, 0);
         PerpsVault.Withdrawal memory w = _copyW(ws[0]);
         // tampered amount, recipient, account, index
         w.amount = 501 * USDC;
@@ -425,35 +457,30 @@ contract PerpsVaultTest is Base {
         vm.expectRevert(PerpsVault.InvalidProof.selector);
         vault.withdraw(1, w, p, 1);
         w = _copyW(ws[0]);
-        w.index = 1;
-        vm.expectRevert(PerpsVault.InvalidWithdrawal.selector); // proof index differs
+        w.height = 1; // the record's height is part of the leaf
+        vm.expectRevert(PerpsVault.InvalidProof.selector);
         vault.withdraw(1, w, p, 1);
-        p.index = 1;
-        vm.expectRevert(PerpsVault.InvalidProof.selector); // same leaf moved to another position
+        w = _copyW(ws[0]);
+        w.withdrawalId = 1; // the same leaf data proven at another position
+        vm.expectRevert(PerpsVault.InvalidProof.selector);
         vault.withdraw(1, w, p, 1);
+        // record 1's real proof with record 0's id: position bound
+        bytes32[] memory p1 = _wProof(ws, 1);
+        vm.expectRevert(PerpsVault.InvalidProof.selector);
+        vault.withdraw(1, ws[0], p1, 1);
         // unknown checkpoint
         p = _wProof(ws, 0);
         vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
         vault.withdraw(0, ws[0], p, 1);
         vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
         vault.withdraw(2, ws[0], p, 1);
-        // proof index with bits above the depth
-        p.index = uint64(0) | (uint64(1) << 5);
+        // an id at or above the checkpoint's record count
+        w = _copyW(ws[0]);
+        w.withdrawalId = 3;
         vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
-        vault.withdraw(1, ws[0], p, 1);
-        // truncated proof
-        p = _wProof(ws, 0);
-        bytes32[] memory hs = new bytes32[](1);
-        uint64[] memory ss = new uint64[](1);
-        hs[0] = p.hashes[0];
-        ss[0] = p.sums[0];
-        p.hashes = hs;
-        p.sums = ss;
-        vm.expectRevert(PerpsVault.InvalidProof.selector);
-        vault.withdraw(1, ws[0], p, 1);
-        // mismatched hashes / sums lengths
-        p = _wProof(ws, 0);
-        p.sums = new uint64[](1);
+        vault.withdraw(1, w, p, 1);
+        // a sibling changed
+        p[5] = keccak256("x");
         vm.expectRevert(PerpsVault.InvalidProof.selector);
         vault.withdraw(1, ws[0], p, 1);
     }
@@ -461,10 +488,10 @@ contract PerpsVaultTest is Base {
     function test_fee_account_record_to_other_recipient_refused() public {
         _deposit(alice, alice, 1000 * USDC);
         PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](1);
-        ws[0] = PerpsVault.Withdrawal(0, FEE, bob, 5 * USDC);
+        ws[0] = _w(0, PROTOCOL_FEE, bob, 5 * USDC);
         (, address[] memory a, uint64[] memory b) = _empty();
         _submit(_cp(1, ws, a, b));
-        PerpsVault.SumProof memory p = _wProof(ws, 0);
+        bytes32[] memory p = _wProof(ws, 0);
         vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
         vault.withdraw(1, ws[0], p, 1);
     }
@@ -472,14 +499,14 @@ contract PerpsVaultTest is Base {
     function test_withdraw_recipient_refusals() public {
         _deposit(alice, alice, 1000 * USDC);
         PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](4);
-        ws[0] = PerpsVault.Withdrawal(0, alice, address(0), 1 * USDC);
-        ws[1] = PerpsVault.Withdrawal(1, alice, address(vault), 1 * USDC);
-        ws[2] = PerpsVault.Withdrawal(2, alice, address(usdc), 1 * USDC);
-        ws[3] = PerpsVault.Withdrawal(3, address(0), alice, 1 * USDC);
+        ws[0] = _w(0, alice, address(0), 1 * USDC);
+        ws[1] = _w(1, alice, address(vault), 1 * USDC);
+        ws[2] = _w(2, alice, address(usdc), 1 * USDC);
+        ws[3] = _w(3, address(0), alice, 1 * USDC);
         (, address[] memory a, uint64[] memory b) = _empty();
         _submit(_cp(1, ws, a, b));
         for (uint64 i; i < 4; ++i) {
-            PerpsVault.SumProof memory p = _wProof(ws, i);
+            bytes32[] memory p = _wProof(ws, i);
             vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
             vault.withdraw(1, ws[i], p, 1);
         }
@@ -487,7 +514,7 @@ contract PerpsVaultTest is Base {
 
     function test_large_withdrawal_waits_delay() public {
         PerpsVault.Withdrawal[] memory ws = _withdrawSetup(100_000 * USDC);
-        PerpsVault.SumProof memory p = _wProof(ws, 0);
+        bytes32[] memory p = _wProof(ws, 0);
         bytes32 key = vault.withdraw(1, ws[0], p, type(uint64).max); // registers; not ready, so nothing paid
         assertEq(usdc.balanceOf(carol), 0, "nothing paid before the delay");
         (,, uint64 paid0, uint64 readyAt) = vault.payouts(key);
@@ -514,7 +541,7 @@ contract PerpsVaultTest is Base {
     function test_partial_release_in_bucket_steps() public {
         _deposit(alice, alice, 3_000_000 * USDC);
         PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](1);
-        ws[0] = PerpsVault.Withdrawal(0, alice, alice, 2_500_000 * USDC);
+        ws[0] = _w(0, alice, alice, 2_500_000 * USDC);
         (, address[] memory a, uint64[] memory b) = _empty();
         _submit(_cp(1, ws, a, b));
         bytes32 key = vault.withdraw(1, ws[0], _wProof(ws, 0), 0);
@@ -548,7 +575,7 @@ contract PerpsVaultTest is Base {
         vm.prank(gaddrs[0]);
         vault.guardianPause();
         assertTrue(vault.paused(), "paused");
-        PerpsVault.SumProof memory p = _wProof(ws, 0);
+        bytes32[] memory p = _wProof(ws, 0);
         bytes32 key = vault.withdraw(1, ws[0], p, type(uint64).max); // registers, pays nothing while paused
         assertEq(usdc.balanceOf(carol), 0, "nothing paid while paused");
         vm.expectRevert(PerpsVault.Paused.selector);
@@ -561,7 +588,7 @@ contract PerpsVaultTest is Base {
         vm.stopPrank();
         // checkpoints and forced requests continue
         vm.prank(alice);
-        vault.requestForced(1, 0, 0);
+        vault.requestForced(0, 0);
         (, address[] memory a, uint64[] memory b) = _empty();
         a = new address[](1);
         b = new uint64[](1);
@@ -627,54 +654,54 @@ contract PerpsVaultTest is Base {
     function test_forced_request_rules() public {
         vm.prank(alice);
         vm.expectRevert(PerpsVault.InvalidForced.selector); // never deposited
-        vault.requestForced(1, 0, 0);
+        vault.requestForced(0, 0);
         _deposit(alice, alice, 100 * USDC);
         vm.startPrank(alice);
         vm.expectRevert(PerpsVault.InvalidForced.selector);
-        vault.requestForced(0, 0, 0);
+        vault.requestForced(3, 0); // kind 3 does not exist
         vm.expectRevert(PerpsVault.InvalidForced.selector);
-        vault.requestForced(4, 0, 0);
+        vault.requestForced(255, 0);
         vm.expectRevert(PerpsVault.InvalidForced.selector); // amount only for withdraw
-        vault.requestForced(1, 0, 5);
+        vault.requestForced(0, 5);
         vm.expectRevert(PerpsVault.InvalidForced.selector); // market only for cancel/close
-        vault.requestForced(3, 2, 5);
-        uint64 i = vault.requestForced(3, 0, 50 * USDC);
+        vault.requestForced(1, 5);
+        uint64 i = vault.requestForced(2, 50 * USDC);
         assertEq(i, 0, "index");
         vm.expectRevert(PerpsVault.InvalidForced.selector); // one open request per account
-        vault.requestForced(1, 0, 0);
+        vault.requestForced(0, 0);
         vm.stopPrank();
         bytes32 g = keccak256(abi.encode(bytes32("PosternPerps.forced.v1"), block.chainid, address(vault)));
         bytes32 h1 = keccak256(
-            abi.encode(g, uint256(0), alice, uint256(3), uint256(0), uint256(50 * USDC), uint256(block.timestamp + 1 days))
+            abi.encode(g, uint256(0), alice, uint256(2), uint256(block.timestamp + 2 days), uint256(50 * USDC))
         );
         assertEq(vault.forcedHead(1), h1, "forced chain");
         // processed by a checkpoint: a new request is allowed
         (PerpsVault.Withdrawal[] memory w, address[] memory a, uint64[] memory b) = _empty();
         _submit(_cp(1, w, a, b));
         vm.prank(alice);
-        vault.requestForced(2, 7, 0);
+        vault.requestForced(1, 0);
     }
 
     function test_overdue_forced_request_blocks_checkpoints_and_triggers_escape() public {
         _deposit(alice, alice, 100 * USDC);
         vm.prank(alice);
-        vault.requestForced(2, 0, 0);
+        vault.requestForced(1, 0);
         (PerpsVault.Withdrawal[] memory w, address[] memory a, uint64[] memory b) = _empty();
         PerpsVault.Checkpoint memory skip = _cp(1, w, a, b);
-        skip.forcedProcessed = 0;
+        skip.nextForcedIndex = 0;
         skip.forcedHead = vault.forcedHead(0);
         a = new address[](1);
         b = new uint64[](1);
         a[0] = alice;
         b[0] = 100 * USDC;
-        skip.escapeRoot = _cp(1, w, a, b).escapeRoot;
-        skip.escapeTotal = 100 * USDC;
+        skip.accountsRoot = _cp(1, w, a, b).accountsRoot;
+        skip.totalEscape = 100 * USDC;
         // before the deadline a checkpoint may leave it pending
         _submit(skip);
         assertEq(vault.escapeReason(), 0, "not due");
         vm.expectRevert(PerpsVault.EscapeNotDue.selector);
         vault.triggerEscape();
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         PerpsVault.Checkpoint memory late = skip;
         late.height = 2;
         late.time = skip.time + 1;
@@ -689,8 +716,8 @@ contract PerpsVaultTest is Base {
     function test_overdue_forced_request_processed_late_is_accepted() public {
         _deposit(alice, alice, 100 * USDC);
         vm.prank(alice);
-        vault.requestForced(1, 0, 0);
-        vm.warp(block.timestamp + 2 days);
+        vault.requestForced(0, 0);
+        vm.warp(block.timestamp + 3 days);
         (PerpsVault.Withdrawal[] memory w, address[] memory a, uint64[] memory b) = _empty();
         a = new address[](1);
         b = new uint64[](1);
@@ -702,10 +729,16 @@ contract PerpsVaultTest is Base {
 
     function test_escape_after_silence_and_what_stops() public {
         _deposit(alice, alice, 1000 * USDC);
-        vm.warp(block.timestamp + 7 days - 1);
+        // R395-24: before any checkpoint, silence never makes escape due (a vault deployed early is not bricked)
+        vm.warp(block.timestamp + 30 days);
+        assertEq(vault.escapeReason(), 0, "no silence escape before the first checkpoint");
         vm.expectRevert(PerpsVault.EscapeNotDue.selector);
         vault.triggerEscape();
-        vm.warp(block.timestamp + 1);
+        // ... but a depositor's own forced request still opens the exit if the committee never starts
+        vm.prank(alice);
+        vault.requestForced(2, 0);
+        vm.warp(block.timestamp + 2 days + 1);
+        assertEq(vault.escapeReason(), 2, "overdue forced request");
         vault.triggerEscape();
         vm.expectRevert(PerpsVault.EscapeActive.selector);
         vault.triggerEscape();
@@ -722,7 +755,7 @@ contract PerpsVaultTest is Base {
         vm.stopPrank();
         vm.prank(alice);
         vm.expectRevert(PerpsVault.EscapeActive.selector);
-        vault.requestForced(1, 0, 0);
+        vault.requestForced(0, 0);
         // no checkpoint ever: the deposit is refunded from the vault's own chain, to the credited account
         vm.expectRevert(PerpsVault.InvalidRefund.selector);
         vault.refundDeposit(0, bob, 1000 * USDC);
@@ -738,12 +771,12 @@ contract PerpsVaultTest is Base {
         _deposit(alice, alice, 1000 * USDC);
         _deposit(bob, bob, 600 * USDC);
         PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](1);
-        ws[0] = PerpsVault.Withdrawal(0, bob, bob, 100 * USDC);
+        ws[0] = _w(0, bob, bob, 100 * USDC);
         address[] memory a = new address[](3);
         uint64[] memory b = new uint64[](3);
         a[0] = alice;
         a[1] = bob;
-        a[2] = FEE;
+        a[2] = PROTOCOL_FEE;
         b[0] = 1200 * USDC; // alice won 200 from bob
         b[1] = 290 * USDC;
         b[2] = 10 * USDC;
@@ -751,34 +784,48 @@ contract PerpsVaultTest is Base {
         _deposit(carol, carol, 50 * USDC); // after the checkpoint: uncredited
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        // credited deposits are not refundable
+        assertEq(vault.escapePayable(), 1500 * USDC, "pool = custody - record - uncredited, equal to the total");
+        // credited deposits are not refundable; a tampered refund is refused
         vm.expectRevert(PerpsVault.InvalidRefund.selector);
         vault.refundDeposit(0, alice, 1000 * USDC);
+        vm.expectRevert(PerpsVault.InvalidRefund.selector);
+        vault.refundDeposit(2, bob, 50 * USDC);
         vault.refundDeposit(2, carol, 50 * USDC);
         // escape claims
-        vault.claimEscape(alice, 1200 * USDC, _eProof(a, b, 0), type(uint64).max);
-        PerpsVault.SumProof memory p = _eProof(a, b, 1);
+        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
+        bytes32[] memory p = _eProof(a, b, 1);
+        PerpsVault.Account memory t = _acct(a, b, 1);
+        t.escapeValue = 291 * USDC;
         vm.expectRevert(PerpsVault.InvalidProof.selector);
-        vault.claimEscape(bob, 291 * USDC, p, 1);
+        vault.claimEscape(t, p, 1);
+        t = _acct(a, b, 1);
+        t.account = carol;
         vm.expectRevert(PerpsVault.InvalidProof.selector);
-        vault.claimEscape(carol, 290 * USDC, p, 1);
-        vault.claimEscape(bob, 290 * USDC, p, type(uint64).max);
+        vault.claimEscape(t, p, 1);
+        t = _acct(a, b, 1);
+        t.index = 0; // the leaf moved to another position
+        vm.expectRevert(PerpsVault.InvalidProof.selector);
+        vault.claimEscape(t, p, 1);
+        vault.claimEscape(_acct(a, b, 1), p, type(uint64).max);
         vm.expectRevert(PerpsVault.AlreadyRegistered.selector);
-        vault.claimEscape(bob, 290 * USDC, p, 1);
-        vault.claimEscape(FEE, 10 * USDC, _eProof(a, b, 2), type(uint64).max);
+        vault.claimEscape(_acct(a, b, 1), p, 1);
+        // PROTOCOL_FEE's share pays the owner's fee address, never the keyless account
+        vault.claimEscape(_acct(a, b, 2), _eProof(a, b, 2), type(uint64).max);
         // the certified withdrawal stays payable
         vault.withdraw(1, ws[0], _wProof(ws, 0), type(uint64).max);
         assertEq(usdc.balanceOf(alice), 1200 * USDC, "alice");
         assertEq(usdc.balanceOf(bob), 390 * USDC, "bob");
         assertEq(usdc.balanceOf(carol), 50 * USDC, "carol");
         assertEq(usdc.balanceOf(FEE), 10 * USDC, "fee");
+        assertEq(usdc.balanceOf(PROTOCOL_FEE), 0, "nothing burned at 0x..01");
         assertEq(usdc.balanceOf(address(vault)), 0, "every unit paid, none left");
     }
 
     function test_escape_claim_not_in_normal_mode() public {
-        PerpsVault.SumProof memory p;
+        bytes32[] memory p;
+        PerpsVault.Account memory acc;
         vm.expectRevert(PerpsVault.NotEscape.selector);
-        vault.claimEscape(alice, 1, p, 1);
+        vault.claimEscape(acc, p, 1);
         vm.expectRevert(PerpsVault.NotEscape.selector);
         vault.refundDeposit(0, alice, 1);
         vm.expectRevert(PerpsVault.NotEscape.selector);
@@ -795,7 +842,7 @@ contract PerpsVaultTest is Base {
         _submit(_cp(1, w, a, b));
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        bytes32 key = vault.claimEscape(alice, b[0], _eProof(a, b, 0), 0);
+        bytes32 key = vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), 0);
         vm.warp(block.timestamp + 1 days); // large delay
         vault.release(key, 1_000_000 * USDC);
         vm.warp(block.timestamp + 1 days);
@@ -805,75 +852,91 @@ contract PerpsVaultTest is Base {
         assertEq(usdc.balanceOf(alice), 2_500_000 * USDC, "paid in parts");
     }
 
-    function test_surplus_sweep_keeps_every_claim_payable() public {
+    /// Keyless INSURANCE (0x..02) and BACKSTOP (0x..03) shares pay the fee address, only after the surplus delay;
+    /// the surplus sweep takes donations and rounding; every user claim stays payable after it.
+    function test_surplus_and_keyless_shares() public {
         _deposit(alice, alice, 1000 * USDC);
         _deposit(bob, bob, 1000 * USDC);
         (PerpsVault.Withdrawal[] memory w,,) = _empty();
-        address[] memory a = new address[](2);
-        uint64[] memory b = new uint64[](2);
+        address[] memory a = new address[](3);
+        uint64[] memory b = new uint64[](3);
         a[0] = alice;
         a[1] = bob;
+        a[2] = address(2); // INSURANCE
         b[0] = 1500 * USDC;
-        b[1] = 400 * USDC; // 100 USDC is the engine's insurance fund, outside the tree
+        b[1] = 400 * USDC;
+        b[2] = 100 * USDC;
         _submit(_cp(1, w, a, b));
         usdc.mint(address(vault), 3 * USDC); // a donation
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        vault.claimEscape(alice, 1500 * USDC, _eProof(a, b, 0), type(uint64).max);
+        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
+        bytes32 ins = vault.claimEscape(_acct(a, b, 2), _eProof(a, b, 2), type(uint64).max);
+        assertEq(usdc.balanceOf(FEE), 0, "insurance share not paid before the surplus delay");
+        vm.expectRevert(PerpsVault.NotReady.selector);
+        vault.release(ins, 1);
         vm.expectRevert(PerpsVault.InvalidSurplus.selector);
         vault.sweepEscapeSurplus();
         vm.warp(block.timestamp + 90 days);
+        vault.release(ins, type(uint64).max);
         uint64 swept = vault.sweepEscapeSurplus();
-        assertEq(swept, 103 * USDC, "insurance fund and donation");
-        assertEq(usdc.balanceOf(FEE), 103 * USDC, "to the fee address");
+        assertEq(swept, 3 * USDC, "the donation");
+        assertEq(usdc.balanceOf(FEE), 103 * USDC, "insurance share and donation to the fee address");
         vm.expectRevert(PerpsVault.InvalidSurplus.selector);
         vault.sweepEscapeSurplus();
-        vault.claimEscape(bob, 400 * USDC, _eProof(a, b, 1), type(uint64).max);
+        vault.claimEscape(_acct(a, b, 1), _eProof(a, b, 1), type(uint64).max);
         assertEq(usdc.balanceOf(bob), 400 * USDC, "bob still paid after the sweep");
         assertEq(usdc.balanceOf(address(vault)), 0, "empty");
+        assertEq(usdc.balanceOf(address(2)), 0, "nothing burned at 0x..02");
     }
 
-    function test_escape_total_must_match_proof_total() public {
+    function test_unproven_shares_fall_to_the_surplus() public {
         _deposit(alice, alice, 1000 * USDC);
         (PerpsVault.Withdrawal[] memory w,,) = _empty();
         address[] memory a = new address[](2);
         uint64[] memory b = new uint64[](2);
         a[0] = alice;
-        a[1] = bob;
-        b[0] = 600 * USDC;
-        b[1] = 400 * USDC;
-        PerpsVault.Checkpoint memory cp = _cp(1, w, a, b);
-        cp.escapeTotal = 900 * USDC; // root of a 1000 tree, total says 900
-        _submit(cp);
+        a[1] = address(3); // BACKSTOP
+        b[0] = 900 * USDC;
+        b[1] = 100 * USDC;
+        _submit(_cp(1, w, a, b));
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        PerpsVault.SumProof memory p = _eProof(a, b, 0);
+        vm.warp(block.timestamp + 90 days);
+        // nobody proved anything: the sweep keeps every unclaimed escape value (1000) and sweeps nothing
+        vm.expectRevert(PerpsVault.InvalidSurplus.selector);
+        vault.sweepEscapeSurplus();
+        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
+        assertEq(usdc.balanceOf(alice), 900 * USDC, "alice paid in full after 90 days");
+    }
+
+    function test_escape_with_zero_total_or_value_refused() public {
+        _deposit(alice, alice, 1000 * USDC);
+        (PerpsVault.Withdrawal[] memory w,,) = _empty();
+        address[] memory a = new address[](1);
+        uint64[] memory b = new uint64[](1);
+        a[0] = alice;
+        b[0] = 0;
+        _submit(_cp(1, w, a, b));
+        vm.warp(block.timestamp + 7 days);
+        vault.triggerEscape();
+        bytes32[] memory p = _eProof(a, b, 0);
+        PerpsVault.Account memory acc = _acct(a, b, 0);
+        vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
+        vault.claimEscape(acc, p, 1);
+    }
+
+    function test_proof_must_have_depth_32() public {
+        PerpsVault.Withdrawal[] memory ws = _withdrawSetup(500 * USDC);
+        bytes32[] memory full = _wProof(ws, 0);
+        bytes32[] memory short = new bytes32[](31);
+        for (uint256 i; i < 31; ++i) short[i] = full[i];
         vm.expectRevert(PerpsVault.InvalidProof.selector);
-        vault.claimEscape(alice, 600 * USDC, p, 1);
-    }
-
-    function test_sum_overflow_refused() public view {
-        PerpsVault.SumProof memory p;
-        p.index = 0;
-        p.hashes = new bytes32[](1);
-        p.sums = new uint64[](1);
-        p.sums[0] = type(uint64).max;
-        try harness.sumRootX(bytes32(uint256(1)), 1, p) returns (bytes32, uint64) {
-            revert("overflow accepted");
-        } catch (bytes memory e) {
-            assertTrue(bytes4(e) == PerpsVault.InvalidProof.selector, "InvalidProof");
-        }
-    }
-
-    function test_proof_depth_cap() public view {
-        PerpsVault.SumProof memory p;
-        p.hashes = new bytes32[](49);
-        p.sums = new uint64[](49);
-        try harness.sumRootX(bytes32(uint256(1)), 1, p) returns (bytes32, uint64) {
-            revert("depth 49 accepted");
-        } catch (bytes memory e) {
-            assertTrue(bytes4(e) == PerpsVault.InvalidProof.selector, "InvalidProof");
-        }
+        vault.withdraw(1, ws[0], short, 1);
+        bytes32[] memory long = new bytes32[](33);
+        for (uint256 i; i < 32; ++i) long[i] = full[i];
+        vm.expectRevert(PerpsVault.InvalidProof.selector);
+        vault.withdraw(1, ws[0], long, 1);
     }
 
     function test_reentrancy_through_token_refused() public {
@@ -892,23 +955,17 @@ contract PerpsVaultTest is Base {
     }
 
     // ================================================================== fuzz
-    function testFuzz_sum_tree_roundtrip(uint8 n, uint64 seed, uint8 pick) public view {
+    function testFuzz_tree_roundtrip(uint8 n, uint64 seed, uint8 pick) public view {
         uint256 count = uint256(n) % 33 + 1;
         bytes32[] memory h = new bytes32[](count);
-        uint64[] memory s = new uint64[](count);
-        for (uint256 i; i < count; ++i) {
-            h[i] = keccak256(abi.encode(seed, i));
-            s[i] = uint64(uint256(keccak256(abi.encode(seed, i, "s"))) % 1e15);
-        }
+        for (uint256 i; i < count; ++i) h[i] = keccak256(abi.encode(seed, i));
         uint64 idx = uint64(uint256(pick) % count);
-        (bytes32 root, uint64 total) = SumTree.root(h, s);
-        (bytes32 r2, uint64 t2) = harness.sumRootX(h[idx], s[idx], SumTree.proof(h, s, idx));
-        assertEq(r2, root, "root");
-        assertEq(t2, total, "total");
-        // the same proof with a changed sum or another leaf hash fails
-        (bytes32 r3, uint64 t3) = harness.sumRootX(h[idx], s[idx] + 1, SumTree.proof(h, s, idx));
-        assertTrue(t3 != total, "sum bound into the total");
-        if (count > 1) assertTrue(r3 != root, "sum bound into the root hash");
+        bytes32 root = Tree.root(h);
+        assertEq(harness.rootX(h[idx], idx, Tree.proof(h, idx)), root, "root");
+        if (count > 1) {
+            uint64 other = (idx + 1) % uint64(count);
+            assertTrue(harness.rootX(h[idx], other, Tree.proof(h, idx)) != root, "position bound");
+        }
     }
 
     function testFuzz_withdraw_amount_tamper(uint64 amount, uint64 delta) public {
@@ -916,11 +973,11 @@ contract PerpsVaultTest is Base {
         delta = uint64(bound(delta, 1, 1e12));
         _deposit(alice, alice, 2_000_000 * USDC);
         PerpsVault.Withdrawal[] memory ws = new PerpsVault.Withdrawal[](2);
-        ws[0] = PerpsVault.Withdrawal(0, alice, alice, amount);
-        ws[1] = PerpsVault.Withdrawal(1, bob, bob, 1);
+        ws[0] = _w(0, alice, alice, amount);
+        ws[1] = _w(1, bob, bob, 1);
         (, address[] memory a, uint64[] memory b) = _empty();
         _submit(_cp(1, ws, a, b));
-        PerpsVault.SumProof memory p = _wProof(ws, 0);
+        bytes32[] memory p = _wProof(ws, 0);
         PerpsVault.Withdrawal memory w = _copyW(ws[0]);
         w.amount = amount + delta;
         vm.expectRevert(PerpsVault.InvalidProof.selector);
@@ -929,7 +986,7 @@ contract PerpsVaultTest is Base {
 
     /// Memory structs are references: tamper with a copy, never with the record the proof was built from.
     function _copyW(PerpsVault.Withdrawal memory w) internal pure returns (PerpsVault.Withdrawal memory) {
-        return PerpsVault.Withdrawal(w.index, w.account, w.recipient, w.amount);
+        return PerpsVault.Withdrawal(w.withdrawalId, w.account, w.recipient, w.amount, w.height);
     }
 
     function bound(uint256 x, uint256 lo, uint256 hi) internal pure returns (uint256) {
@@ -987,11 +1044,53 @@ contract PerpsVaultGas is Base {
     event log_named_uint(string key, uint256 val);
 }
 
-/// Test-only: exposes the vault's internal sum-tree verifier (the deployed vault keeps it internal for size).
+/// Test-only: exposes the vault's internal Merkle verifier (the deployed vault keeps it internal for size).
 contract VaultHarness is PerpsVault {
     constructor(Config memory c) PerpsVault(c) {}
 
-    function sumRootX(bytes32 leafHash, uint64 leafSum, SumProof calldata proof) external pure returns (bytes32, uint64) {
-        return sumRoot(leafHash, leafSum, proof);
+    function rootX(bytes32 leaf, uint64 index, bytes32[] calldata siblings) external pure returns (bytes32) {
+        return _root(leaf, index, siblings);
+    }
+}
+
+contract PerpsVaultSilenceTest is Base {
+    function setUp() public {
+        _setUpVault();
+    }
+
+    /// After the first accepted checkpoint, `escapeDelay` without another makes escape due.
+    function test_escape_by_silence_after_first_checkpoint() public {
+        address u = address(0x1000000000000000000000000000000000000001);
+        _deposit(u, u, 100 * USDC);
+        (PerpsVault.Withdrawal[] memory w,,) = _empty();
+        address[] memory a = new address[](1);
+        uint64[] memory b = new uint64[](1);
+        a[0] = u;
+        b[0] = 100 * USDC;
+        _submit(_cp(1, w, a, b));
+        vm.warp(block.timestamp + 7 days - 1);
+        vm.expectRevert(PerpsVault.EscapeNotDue.selector);
+        vault.triggerEscape();
+        vm.warp(block.timestamp + 1);
+        assertEq(vault.escapeReason(), 1, "silence");
+        vault.triggerEscape();
+        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
+        assertEq(usdc.balanceOf(u), 100 * USDC, "paid");
+    }
+
+    /// Deposits for keyless accounts (system accounts, precompiles) are refused: nothing could ever refund them.
+    function test_keyless_deposit_refused() public {
+        address u = address(0x1000000000000000000000000000000000000001);
+        usdc.mint(u, 100 * USDC);
+        vm.startPrank(u);
+        usdc.approve(address(vault), 100 * USDC);
+        for (uint160 k; k < 4; ++k) {
+            vm.expectRevert(PerpsVault.InvalidDeposit.selector);
+            vault.deposit(10 * USDC, address(k));
+        }
+        vm.expectRevert(PerpsVault.InvalidDeposit.selector);
+        vault.deposit(10 * USDC, address(0xffff));
+        vault.deposit(10 * USDC, address(0x10000));
+        vm.stopPrank();
     }
 }

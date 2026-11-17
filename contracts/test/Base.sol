@@ -73,65 +73,57 @@ contract MockUSDC {
     }
 }
 
-/// Merkle sum tree builder (test side; the engine builds the same tree in Rust).
-library SumTree {
-    function node(bytes32 lh, uint64 ls, bytes32 rh, uint64 rs) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(bytes1(0x01), lh, ls, rh, rs));
+/// SPEC 11 Merkle tree builder (test side; the engine builds the same tree in Rust): leaves at positions
+/// 0..n-1, depth 32, empty subtrees Z(i), node H(0x01 || left || right).
+library Tree {
+    uint256 internal constant DEPTH = 32;
+
+    function zero(uint256 level) internal pure returns (bytes32 z) {
+        for (uint256 i; i < level; ++i) z = keccak256(abi.encodePacked(bytes1(0x01), z, z));
     }
 
-    /// Pads to a power of two with empty leaves (0, 0); returns root and total.
-    function root(bytes32[] memory hashes, uint64[] memory sums) internal pure returns (bytes32, uint64) {
-        (bytes32[] memory h, uint64[] memory s) = _pad(hashes, sums);
-        uint256 n = h.length;
-        while (n > 1) {
-            for (uint256 i; i < n / 2; ++i) {
-                h[i] = node(h[2 * i], s[2 * i], h[2 * i + 1], s[2 * i + 1]);
-                s[i] = s[2 * i] + s[2 * i + 1];
+    function root(bytes32[] memory leaves) internal pure returns (bytes32) {
+        if (leaves.length == 0) return zero(DEPTH);
+        bytes32[] memory level = _copy(leaves);
+        uint256 n = level.length;
+        bytes32 z;
+        for (uint256 d; d < DEPTH; ++d) {
+            uint256 m = (n + 1) / 2;
+            for (uint256 i; i < m; ++i) {
+                bytes32 l = level[2 * i];
+                bytes32 r = 2 * i + 1 < n ? level[2 * i + 1] : z;
+                level[i] = keccak256(abi.encodePacked(bytes1(0x01), l, r));
             }
-            n /= 2;
+            n = m;
+            z = keccak256(abi.encodePacked(bytes1(0x01), z, z));
         }
-        return (h[0], s[0]);
+        return level[0];
     }
 
-    function proof(bytes32[] memory hashes, uint64[] memory sums, uint64 index)
-        internal
-        pure
-        returns (PerpsVault.SumProof memory p)
-    {
-        (bytes32[] memory h, uint64[] memory s) = _pad(hashes, sums);
-        uint256 n = h.length;
-        uint256 depth;
-        while ((uint256(1) << depth) < n) ++depth;
-        p.index = index;
-        p.hashes = new bytes32[](depth);
-        p.sums = new uint64[](depth);
+    function proof(bytes32[] memory leaves, uint256 index) internal pure returns (bytes32[] memory sib) {
+        bytes32[] memory level = _copy(leaves);
+        uint256 n = level.length;
+        sib = new bytes32[](DEPTH);
+        bytes32 z;
         uint256 at = index;
-        for (uint256 d; d < depth; ++d) {
-            uint256 sib = at ^ 1;
-            p.hashes[d] = h[sib];
-            p.sums[d] = s[sib];
-            for (uint256 i; i < n / 2; ++i) {
-                h[i] = node(h[2 * i], s[2 * i], h[2 * i + 1], s[2 * i + 1]);
-                s[i] = s[2 * i] + s[2 * i + 1];
+        for (uint256 d; d < DEPTH; ++d) {
+            uint256 s = at ^ 1;
+            sib[d] = s < n ? level[s] : z;
+            uint256 m = (n + 1) / 2;
+            for (uint256 i; i < m; ++i) {
+                bytes32 l = level[2 * i];
+                bytes32 r = 2 * i + 1 < n ? level[2 * i + 1] : z;
+                level[i] = keccak256(abi.encodePacked(bytes1(0x01), l, r));
             }
-            n /= 2;
+            n = m;
             at /= 2;
+            z = keccak256(abi.encodePacked(bytes1(0x01), z, z));
         }
     }
 
-    function _pad(bytes32[] memory hashes, uint64[] memory sums)
-        private
-        pure
-        returns (bytes32[] memory h, uint64[] memory s)
-    {
-        uint256 n = 1;
-        while (n < hashes.length) n *= 2;
-        h = new bytes32[](n);
-        s = new uint64[](n);
-        for (uint256 i; i < hashes.length; ++i) {
-            h[i] = hashes[i];
-            s[i] = sums[i];
-        }
+    function _copy(bytes32[] memory a) private pure returns (bytes32[] memory b) {
+        b = new bytes32[](a.length);
+        for (uint256 i; i < a.length; ++i) b[i] = a[i];
     }
 }
 
@@ -177,7 +169,7 @@ abstract contract Base {
         c.windowSeconds = 1 days;
         c.largeThreshold = 100_000 * USDC;
         c.largeDelay = 1 days;
-        c.forcedDelay = 1 days;
+        c.forcedDelay = 2 days;
         c.escapeDelay = 7 days;
         c.guardians = gaddrs;
         c.pauseDuration = 2 days;
@@ -216,6 +208,16 @@ abstract contract Base {
         vm.stopPrank();
     }
 
+    address internal constant PROTOCOL_FEE = address(1);
+
+    function _w(uint64 id, address account, address recipient, uint64 amount)
+        internal
+        pure
+        returns (PerpsVault.Withdrawal memory)
+    {
+        return PerpsVault.Withdrawal(id, account, recipient, amount, 1000 + id);
+    }
+
     /// A checkpoint that credits every deposit and forced request so far, with the given trees.
     function _cp(uint64 height, PerpsVault.Withdrawal[] memory ws, address[] memory accts, uint64[] memory bals)
         internal
@@ -224,73 +226,68 @@ abstract contract Base {
     {
         cp.height = height;
         cp.time = uint64(block.timestamp) * 1000 + height;
-        cp.stateRoot = keccak256(abi.encode("state", height));
         cp.logHash = keccak256(abi.encode("log", height));
-        cp.depositsCredited = vault.depositCount();
-        cp.depositsHead = vault.depositHead(cp.depositsCredited);
-        cp.forcedProcessed = vault.forcedCount();
-        cp.forcedHead = vault.forcedHead(cp.forcedProcessed);
-        if (ws.length != 0) {
-            (bytes32[] memory h, uint64[] memory s) = _wLeaves(ws);
-            (cp.withdrawalsRoot, cp.withdrawalsTotal) = SumTree.root(h, s);
-            cp.withdrawalCount = uint64(ws.length);
-        }
-        if (accts.length != 0) {
-            (bytes32[] memory h, uint64[] memory s) = _eLeaves(accts, bals);
-            (cp.escapeRoot, cp.escapeTotal) = SumTree.root(h, s);
-        }
+        cp.marketsRoot = keccak256(abi.encode("markets", height));
+        cp.nextOrderId = height * 10;
+        cp.dust = 7;
+        cp.nextDepositIndex = vault.depositCount();
+        cp.depositsHead = vault.depositHead(cp.nextDepositIndex);
+        cp.nextForcedIndex = vault.forcedCount();
+        cp.forcedHead = vault.forcedHead(cp.nextForcedIndex);
+        cp.withdrawalsRoot = Tree.root(_wLeaves(ws));
+        cp.withdrawalCount = uint64(ws.length);
+        for (uint256 i; i < ws.length; ++i) cp.withdrawalsTotal += ws[i].amount;
+        cp.accountsRoot = Tree.root(_eLeaves(accts, bals));
+        for (uint256 i; i < bals.length; ++i) cp.totalEscape += bals[i];
     }
 
-    function _wLeaves(PerpsVault.Withdrawal[] memory ws)
-        internal
-        pure
-        returns (bytes32[] memory h, uint64[] memory s)
-    {
+    function _wLeaf(PerpsVault.Withdrawal memory w) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(bytes1(0x00), "PPv1wdrl", w.withdrawalId, w.account, w.recipient, w.amount, w.height)
+        );
+    }
+
+    function _wLeaves(PerpsVault.Withdrawal[] memory ws) internal pure returns (bytes32[] memory h) {
         h = new bytes32[](ws.length);
-        s = new uint64[](ws.length);
-        for (uint256 i; i < ws.length; ++i) {
-            h[i] = keccak256(
-                abi.encode(
-                    bytes32("PosternPerps.withdrawal.v1"),
-                    uint256(ws[i].index),
-                    ws[i].account,
-                    ws[i].recipient,
-                    uint256(ws[i].amount)
-                )
-            );
-            s[i] = ws[i].amount;
-        }
+        for (uint256 i; i < ws.length; ++i) h[i] = _wLeaf(ws[i]);
     }
 
-    function _eLeaves(address[] memory accts, uint64[] memory bals)
+    function _acct(address[] memory accts, uint64[] memory bals, uint256 i)
         internal
         pure
-        returns (bytes32[] memory h, uint64[] memory s)
+        returns (PerpsVault.Account memory a)
     {
+        a.account = accts[i];
+        a.index = uint32(i);
+        a.balance = bals[i];
+        a.escapeValue = bals[i];
+        a.positionsHash = keccak256(abi.encode("positions", accts[i]));
+        a.height = 42;
+    }
+
+    function _aLeaf(PerpsVault.Account memory a) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                bytes1(0x00), "PPv1acct", a.account, a.index, a.balance, a.escapeValue, a.positionsHash, a.height
+            )
+        );
+    }
+
+    function _eLeaves(address[] memory accts, uint64[] memory bals) internal pure returns (bytes32[] memory h) {
         h = new bytes32[](accts.length);
-        s = new uint64[](accts.length);
-        for (uint256 i; i < accts.length; ++i) {
-            h[i] = keccak256(abi.encode(bytes32("PosternPerps.escape.v1"), accts[i], uint256(bals[i])));
-            s[i] = bals[i];
-        }
+        for (uint256 i; i < accts.length; ++i) h[i] = _aLeaf(_acct(accts, bals, i));
     }
 
     function _submit(PerpsVault.Checkpoint memory cp) internal {
         vault.submitCheckpoint(cp, _sign(vault.checkpointDigest(cp), K));
     }
 
-    function _wProof(PerpsVault.Withdrawal[] memory ws, uint64 i) internal pure returns (PerpsVault.SumProof memory) {
-        (bytes32[] memory h, uint64[] memory s) = _wLeaves(ws);
-        return SumTree.proof(h, s, i);
+    function _wProof(PerpsVault.Withdrawal[] memory ws, uint64 i) internal pure returns (bytes32[] memory) {
+        return Tree.proof(_wLeaves(ws), i);
     }
 
-    function _eProof(address[] memory accts, uint64[] memory bals, uint64 i)
-        internal
-        pure
-        returns (PerpsVault.SumProof memory)
-    {
-        (bytes32[] memory h, uint64[] memory s) = _eLeaves(accts, bals);
-        return SumTree.proof(h, s, i);
+    function _eProof(address[] memory accts, uint64[] memory bals, uint64 i) internal pure returns (bytes32[] memory) {
+        return Tree.proof(_eLeaves(accts, bals), i);
     }
 
     // ------------------------------------------------------------------ assertions
