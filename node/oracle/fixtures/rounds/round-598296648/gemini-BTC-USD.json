@@ -1,0 +1,1 @@
+{"venue": "gemini-BTC-USD", "url": "https://api.gemini.com/v1/pubticker/btcusd", "sentMs": 1794889944000, "httpDateMs": 1794889944000, "error": null, "body": "{\"bid\":\"64900.41000\",\"ask\":\"64900.42000\",\"last\":\"64905.81000\",\"volume\":{\"BTC\":\"238.45005794\",\"USD\":\"15476794.1551426314\",\"timestamp\":1794889920000}}", "receivedMs": 1794889944760}

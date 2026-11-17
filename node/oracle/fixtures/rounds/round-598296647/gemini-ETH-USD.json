@@ -1,0 +1,1 @@
+{"venue": "gemini-ETH-USD", "url": "https://api.gemini.com/v1/pubticker/ethusd", "sentMs": 1794889941004, "httpDateMs": 1794889942000, "error": null, "body": "{\"bid\":\"1826.22000\",\"ask\":\"1826.23000\",\"last\":\"1825.24000\",\"volume\":{\"ETH\":\"1856.693101\",\"USD\":\"3388910.51566924\",\"timestamp\":1794889920000}}", "receivedMs": 1794889941936}
