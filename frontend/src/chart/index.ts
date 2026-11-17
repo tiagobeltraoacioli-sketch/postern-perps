@@ -7,6 +7,9 @@
  */
 export const CHART_INTERFACE_VERSION = '0.1.0';
 
+export { PriceChart } from './PriceChart';
+export { chartStats, resetChartStats } from './engine';
+
 export type {
   CandleStyle,
   ChartCandle,
