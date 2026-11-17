@@ -9,7 +9,7 @@ test('decision conformance vectors', () => {
   const { cases, sanctionsBuiltMs } = readJson('vectors/decision-vectors.json');
   const sanctions = fixtureSanctions();
   assert.equal(sanctions.builtMs, sanctionsBuiltMs);
-  assert.equal(cases.length, 81);
+  assert.equal(cases.length, 86);
   for (const c of cases) {
     const list = c.list === null ? null : lists[c.list];
     const d = decide(list, { ...c.request, sanctions: c.sanctions === null ? null : sanctions });

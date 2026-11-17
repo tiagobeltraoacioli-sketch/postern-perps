@@ -3354,6 +3354,214 @@
      "RESIDENCE_DECLARED_RESTRICTED"
     ]
    }
+  },
+  {
+   "name": "non-ASCII country that upper-cases to ASCII (U+00DF)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "\u00df",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "residence named like an object property",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "constructor"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "RESIDENCE_DECLARED_RESTRICTED"
+    ]
+   }
+  },
+  {
+   "name": "attestation given as an unknown string",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": "valid"
+   },
+   "expect": {
+    "allow": false,
+    "code": "ATTESTATION_REQUIRED",
+    "httpStatus": 403,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "signals given as a string in live mode",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": "none",
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "SIGNALS_UNAVAILABLE"
+    ]
+   }
+  },
+  {
+   "name": "empty subdivision string treated as unknown",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": "",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false,
+    "reasons": []
+   }
   }
  ]
 }

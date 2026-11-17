@@ -48,22 +48,24 @@ export function evaluateGeo(list, req) {
   const live = req.mode === 'live';
   const geo = req.geo ?? {};
   const reasons = [];
-  let country = typeof geo.country === 'string' ? geo.country.toUpperCase() : null;
-  let subdivision = typeof geo.subdivision === 'string' && geo.subdivision !== '' ? geo.subdivision.toUpperCase() : null;
+  // ASCII only before case folding (a non-ASCII letter can upper-case into ASCII, e.g. U+00DF -> "SS").
+  const ascii = (v) => typeof v === 'string' && /^[\x21-\x7e]+$/.test(v);
+  let country = ascii(geo.country) ? geo.country.toUpperCase() : null;
+  let subdivision = ascii(geo.subdivision) ? geo.subdivision.toUpperCase() : null;
   if (live && geo.trusted !== true) { reasons.push('UNTRUSTED_GEO_SOURCE'); country = null; subdivision = null; }
   let tier = null;
   if (country === 'T1') reasons.push('ANONYMIZER_TOR');
   if (country === null || !/^[A-Z]{2}$/.test(country) || RESERVED_CODES.includes(country)) {
     reasons.push('UNKNOWN_COUNTRY');
   } else {
-    const entry = list.countries[country];
+    const entry = Object.hasOwn(list.countries, country) ? list.countries[country] : null;
     tier = entry ? entry.tier : 'unlisted';
     const effect = entry ? entry.effect : TIERS[list.defaultTier];
     if (effect !== 'allow') reasons.push('JURISDICTION');
     if (subdivision !== null) {
       if (!/^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(subdivision) || subdivision.slice(0, 2) !== country) {
         reasons.push('GEO_INCONSISTENT');
-      } else if (list.subdivisions[subdivision]) {
+      } else if (Object.hasOwn(list.subdivisions, subdivision)) {
         reasons.push('JURISDICTION_SUBDIVISION');
       }
     } else if (list.restrictedSubdivisionCountries.includes(country)) {
@@ -75,7 +77,7 @@ export function evaluateGeo(list, req) {
   // travelling to an allowed country, or using one): the declaration can only add a refusal, never remove one.
   const att = req.attestation;
   if (att && att.status === 'valid' && typeof att.residenceCountry === 'string') {
-    const e = list.countries[att.residenceCountry];
+    const e = Object.hasOwn(list.countries, att.residenceCountry) ? list.countries[att.residenceCountry] : null;
     const eff = e ? e.effect : TIERS[list.defaultTier];
     if (eff !== 'allow') reasons.push('RESIDENCE_DECLARED_RESTRICTED');
   }
@@ -100,7 +102,7 @@ export function evaluateGeo(list, req) {
 function attestedResidenceAllowed(list, att) {
   if (!att || att.status !== 'valid' || typeof att.residenceCountry !== 'string') return false;
   const c = att.residenceCountry;
-  const e = list.countries[c];
+  const e = Object.hasOwn(list.countries, c) ? list.countries[c] : null;
   return !!e && e.effect === 'allow' && !list.restrictedSubdivisionCountries.includes(c);
 }
 
