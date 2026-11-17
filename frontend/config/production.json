@@ -1,0 +1,10 @@
+{
+  "note": "UNAUDITED prototype. Published endpoints of the production build. Hosts are placeholders until the owner provides them (TBD-owner); nothing is deployed.",
+  "apiUrl": "https://api.posterndex.com",
+  "wsUrl": "wss://api.posterndex.com/v1/ws",
+  "l2RpcUrl": "https://l2rpc.blochl1.com",
+  "l2ChainId": 700770,
+  "vault": null,
+  "collateral": null,
+  "explorerTx": null
+}

@@ -1,13 +1,36 @@
-// Generic EIP-712 hashing for flat structs (address, uintN, intN, bool, bytes32, string). Dependency-free.
+// Generic EIP-712 hashing (address, uintN, intN, bool, bytes32, string, nested structs and arrays of structs).
+// Dependency-free.
+// Checked against viem's hashTypedData in test/crypto.test.mjs (recorded vectors). Mock/test use only.
 import { keccak256, concat, unhex } from './keccak.mjs';
 const enc = new TextEncoder();
 const word = (x) => {
   const v = BigInt.asUintN(256, BigInt(x));
   return new Uint8Array(Buffer.from(v.toString(16).padStart(64, '0'), 'hex'));
 };
-export function encodeType(name, fields) { return `${name}(${fields.map((f) => `${f.type} ${f.name}`).join(',')})`; }
-function encodeField(type, value) {
-  if (type === 'string') return keccak256(enc.encode(String(value)));
+const one = (name, fields) => `${name}(${fields.map((f) => `${f.type} ${f.name}`).join(',')})`;
+/** encodeType with referenced struct types appended in alphabetical order (EIP-712). `types` maps struct names. */
+export function encodeType(name, fields, types = {}) {
+  const deps = new Set();
+  const walk = (fs) => {
+    for (const f of fs) {
+      const base = f.type.replace(/\[\]$/, '');
+      if (types[base] && !deps.has(base) && base !== name) {
+        deps.add(base);
+        walk(types[base]);
+      }
+    }
+  };
+  walk(fields);
+  return one(name, fields) + [...deps].sort().map((d) => one(d, types[d])).join('');
+}
+function encodeField(type, value, types = {}) {
+  const arr = /^(.+)\[\]$/.exec(type);
+  if (arr && types[arr[1]]) {
+    if (!Array.isArray(value)) throw new Error('array expected');
+    return keccak256(concat(...value.map((v) => hashStruct(arr[1], types[arr[1]], v, types))));
+  }
+  if (types[type]) return hashStruct(type, types[type], value, types);
+  if (type === 'string') { if (typeof value !== 'string') throw new Error('string expected'); return keccak256(enc.encode(value)); }
   if (type === 'bool') { if (typeof value !== 'boolean') throw new Error('bool expected'); return word(value ? 1 : 0); }
   if (type === 'address') {
     if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) throw new Error('address expected');
@@ -19,25 +42,37 @@ function encodeField(type, value) {
   }
   const m = /^(u?)int(\d+)$/.exec(type);
   if (m) {
-    if (!(typeof value === 'string' ? /^-?\d+$/.test(value) : Number.isSafeInteger(value))) throw new Error(`${type} expected`);
+    // Canonical decimal only: one accepted spelling per value (no leading zeros, no '+', no '-0'), so the
+    // bytes a client signed and the integers the server applies cannot differ by parsing.
+    if (!(typeof value === 'string' ? /^(0|-?[1-9]\d*)$/.test(value) : Number.isSafeInteger(value))) throw new Error(`${type} expected`);
     const v = BigInt(value), bits = BigInt(m[2]);
+    if (bits < 8n || bits > 256n || bits % 8n !== 0n) throw new Error(`unsupported type ${type}`);
     const lo = m[1] ? 0n : -(1n << (bits - 1n)), hi = m[1] ? (1n << bits) - 1n : (1n << (bits - 1n)) - 1n;
     if (v < lo || v > hi) throw new Error(`${type} out of range`);
     return word(v);
   }
   throw new Error(`unsupported type ${type}`);
 }
-export function hashStruct(name, fields, message) {
-  const parts = [keccak256(enc.encode(encodeType(name, fields)))];
+export function hashStruct(name, fields, message, types = {}) {
+  if (typeof message !== 'object' || message === null) throw new Error(`${name}: object expected`);
+  const parts = [keccak256(enc.encode(encodeType(name, fields, types)))];
   for (const f of fields) {
     if (!(f.name in message)) throw new Error(`missing field ${f.name}`);
-    try { parts.push(encodeField(f.type, message[f.name])); } catch (e) { throw new Error(`${f.name}: ${e.message}`); }
+    try { parts.push(encodeField(f.type, message[f.name], types)); } catch (e) { throw new Error(`${f.name}: ${e.message}`); }
   }
   for (const k of Object.keys(message)) if (!fields.some((f) => f.name === k)) throw new Error(`unknown field ${k}`);
   return keccak256(concat(...parts));
 }
-const DOMAIN_FIELDS = [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }];
-export function domainSeparator(domain) { return hashStruct('EIP712Domain', DOMAIN_FIELDS, domain); }
-export function typedDataHash(domain, name, fields, message) {
-  return keccak256(concat(Uint8Array.of(0x19, 0x01), domainSeparator(domain), hashStruct(name, fields, message)));
+// EIP712Domain fields in the order EIP-712 fixes; only the fields present in `domain` are part of the type
+// (the exchange domain has no verifyingContract; the vault's checkpoint domain has one).
+const DOMAIN_ORDER = [
+  { name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' },
+  { name: 'verifyingContract', type: 'address' }, { name: 'salt', type: 'bytes32' }];
+export function domainFields(domain) {
+  for (const k of Object.keys(domain)) if (!DOMAIN_ORDER.some((f) => f.name === k)) throw new Error(`unknown domain field ${k}`);
+  return DOMAIN_ORDER.filter((f) => f.name in domain);
+}
+export function domainSeparator(domain) { return hashStruct('EIP712Domain', domainFields(domain), domain); }
+export function typedDataHash(domain, name, fields, message, types = {}) {
+  return keccak256(concat(Uint8Array.of(0x19, 0x01), domainSeparator(domain), hashStruct(name, fields, message, types)));
 }

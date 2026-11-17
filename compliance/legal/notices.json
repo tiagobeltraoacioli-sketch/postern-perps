@@ -1,0 +1,58 @@
+{
+  "schema": "postern-perps/notices",
+  "version": "NOTICES-0.2-20261117",
+  "status": "DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype. Texts for the Interface (agent 391); this file is generated with the hashes of every document by compliance/tools/build_notices.py.",
+  "operatorLine": "PosternDEX Perpetuals by Bloch Inc. This interface is operated by Bloch Inc (Panama).",
+  "prototypeLine": "Unaudited prototype. Not live: no real funds. Nothing here is an offer or advice.",
+  "riskPoints": [
+    "Perpetual futures are leveraged. A small price move can lose your whole margin, and a cross-margin position can use your whole account balance.",
+    "A position is liquidated when its margin falls below the maintenance requirement. Liquidation closes it through the book, never worse than the price at which your account reaches zero, with a 0.5% liquidation fee; in extreme markets the backstop, the insurance fund and, last, auto-deleveraging of profitable positions are used.",
+    "A market halts when its price feed is stale or jumps. While halted you can only cancel: no closing, no liquidation, no stop-loss or take-profit. It may resume far from where it stopped.",
+    "Funding is paid every hour between longs and shorts (capped at 0.05% of position value per hour) and can cost you money while you hold a position.",
+    "One sequencer orders all actions. It cannot sign for you or move funds out, but it can delay or reorder; the forced-action path on the Bloch L2 bounds that delay.",
+    "Collateral is bUSDC on the Bloch L2: it depends on the Bloch bridge, on the L2 and on USDC (which its issuer can freeze) as well as on this exchange.",
+    "The software is an unaudited prototype and may contain errors that lose funds."
+  ],
+  "attestationPoints": [
+    "I am not a resident of, located in, or incorporated in a restricted jurisdiction, and I will not use a VPN or similar tool to hide my location.",
+    "I am not a person or entity on a sanctions list, and I am not acting for one.",
+    "I have read the Risk Disclosure and the Terms of Use, and I understand that I can lose all the funds I deposit."
+  ],
+  "restricted": {
+    "known": "PosternDEX Perpetuals is not available in your region ({country}). You can still cancel orders, reduce or close positions and withdraw.",
+    "unknown": "Your region could not be determined, so trading is not available. You can still cancel orders, reduce or close positions and withdraw.",
+    "anonymizer": "Trading is not available through a VPN, proxy or Tor. You can still cancel orders, reduce or close positions and withdraw.",
+    "sanctioned": "This address cannot use PosternDEX Perpetuals."
+  },
+  "restrictedSummary": "Not available in, among others, the United States and its territories, Canada, the United Kingdom, Brazil, mainland China, Australia, Singapore, Cuba, Iran, North Korea, Syria, Russia, Belarus, Myanmar and the Crimea, Sevastopol, Donetsk, Luhansk, Zaporizhzhia and Kherson regions of Ukraine; and, until counsel decides, in every other country.",
+  "documents": {
+    "terms": {
+      "path": "compliance/legal/terms-of-use.md",
+      "id": "TOU-0.2-20261117",
+      "sha256": "e783388a58cb4c2564a24e13fd88b4a854b92d0058099ab6035393dbda87a1f5"
+    },
+    "risk": {
+      "path": "compliance/legal/risk-disclosure.md",
+      "id": "RISK-0.2-20261117",
+      "sha256": "42c25e647676c9b3c067c75e2deb2e8f6533c73955fcaca5b2cd1a345ee3f3af"
+    },
+    "privacy": {
+      "path": "compliance/legal/privacy-notice.md",
+      "id": "PRIV-0.1-20261117",
+      "sha256": "25ea8d189dd653a8e4a7ca317fe2c41ae9580e0c1cb2a9cb955770ec6da06cf7"
+    },
+    "attestation": {
+      "path": "compliance/legal/attestation.md",
+      "id": "ATTEST-0.1-20261117",
+      "sha256": "d7ea07f70a6ab3d93dec0bc8aafb738bb57dd1baac94496cdb2986246c791175"
+    }
+  },
+  "attestation": {
+    "documentId": "ATTEST-0.1-20261117",
+    "statementId": "attest-0.1-20261117",
+    "text": "ATTEST-0.1-20261117\nI am not a resident of, located in, or incorporated in a restricted jurisdiction, and I will not use a VPN or similar tool to hide my location.\nI am not a person or entity on a sanctions list, and I am not acting for one.\nI have read the Risk Disclosure and the Terms of Use, and I understand that I can lose all the funds I deposit.",
+    "statementHash": "0xcfdf20a5c360057590fa84786ff9e9b76180ebcbb55390ce7a68f37b3b1b6621",
+    "sha256": "67ea26313caa97429ada72278fc3b899fd06cdcf407eae1c09d25e55e3e8c479",
+    "typedData": "agent 397: compliance/geoblock/src/attestation.mjs (Attestation(address account,string statementId,bytes32 statementHash,string residenceCountry,uint64 issuedAt,uint64 expiresAt)); statementId and statementHash above are its inputs"
+  }
+}

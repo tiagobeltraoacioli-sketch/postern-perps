@@ -1,0 +1,202 @@
+<?xml version="1.0" standalone="yes"?>
+<sdnList xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/XML">
+  <publshInformation>
+    <Publish_Date>11/13/2026</Publish_Date>
+    <Record_Count>4</Record_Count>
+  </publshInformation>
+    <sdnEntry>
+    <uid>36</uid>
+    <lastName>AEROCARIBBEAN AIRLINES</lastName>
+    <sdnType>Entity</sdnType>
+    <programList>
+      <program>CUBA</program>
+    </programList>
+    <akaList>
+      <aka>
+        <uid>12</uid>
+        <type>a.k.a.</type>
+        <category>strong</category>
+        <lastName>AERO-CARIBBEAN</lastName>
+      </aka>
+    </akaList>
+    <addressList>
+      <address>
+        <uid>25</uid>
+        <city>Havana</city>
+        <country>Cuba</country>
+      </address>
+    </addressList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>45314</uid>
+    <lastName>VALERIAN LABS, INC.</lastName>
+    <sdnType>Entity</sdnType>
+    <programList>
+      <program>ILLICIT-DRUGS-EO14059</program>
+    </programList>
+    <idList>
+      <id>
+        <uid>35018</uid>
+        <idType>Company Number</idType>
+        <idNumber>755260288</idNumber>
+        <idCountry>Canada</idCountry>
+      </id>
+      <id>
+        <uid>165750</uid>
+        <idType>Digital Currency Address - XBT</idType>
+        <idNumber>bc1qardcxz845jw83vgfvcmewhuxa0ag9gchjwmcfd</idNumber>
+      </id>
+      <id>
+        <uid>165751</uid>
+        <idType>Digital Currency Address - ETH</idType>
+        <idNumber>0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2</idNumber>
+      </id>
+      <id>
+        <uid>166051</uid>
+        <idType>Website</idType>
+        <idNumber>www.valerianlabs.com</idNumber>
+      </id>
+      <id>
+        <uid>165752</uid>
+        <idType>Digital Currency Address - USDT</idType>
+        <idNumber>0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2</idNumber>
+      </id>
+      <id>
+        <uid>165753</uid>
+        <idType>Digital Currency Address - USDC</idType>
+        <idNumber>0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2</idNumber>
+      </id>
+    </idList>
+    <addressList>
+      <address>
+        <uid>67420</uid>
+        <address1>1130-1971 Broadway St</address1>
+        <city>Port Coquitlam</city>
+        <stateOrProvince>British Columbia</stateOrProvince>
+        <postalCode>V3C 0C9</postalCode>
+        <country>Canada</country>
+      </address>
+    </addressList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>48432</uid>
+    <lastName>OKO DESIGN BUREAU</lastName>
+    <sdnType>Entity</sdnType>
+    <programList>
+      <program>RUSSIA-EO14024</program>
+    </programList>
+    <idList>
+      <id>
+        <uid>170746</uid>
+        <idType>Digital Currency Address - XBT</idType>
+        <idNumber>13fhnkmpBBWXUQucJd6efWvXdEj78DKavk</idNumber>
+      </id>
+      <id>
+        <uid>170744</uid>
+        <idType>Digital Currency Address - ETH</idType>
+        <idNumber>0x19F8f2B0915Daa12a3f5C9CF01dF9E24D53794F7</idNumber>
+      </id>
+      <id>
+        <uid>171287</uid>
+        <idType>Secondary sanctions risk:</idType>
+        <idNumber>See Section 11 of Executive Order 14024.</idNumber>
+      </id>
+      <id>
+        <uid>170742</uid>
+        <idType>Organization Established Date</idType>
+        <idNumber>2022</idNumber>
+      </id>
+      <id>
+        <uid>171663</uid>
+        <idType>Organization Type:</idType>
+        <idNumber>Manufacture of air and spacecraft and related machinery</idNumber>
+      </id>
+      <id>
+        <uid>170745</uid>
+        <idType>Digital Currency Address - TRX</idType>
+        <idNumber>TFdTr9C3BqQrzKBXqSxJfAZFTh8UwBAfSg</idNumber>
+      </id>
+      <id>
+        <uid>170743</uid>
+        <idType>Website</idType>
+        <idNumber>https://www.oko-kb.ru</idNumber>
+      </id>
+    </idList>
+    <addressList>
+      <address>
+        <uid>72662</uid>
+        <city>Saint Petersburg</city>
+        <country>Russia</country>
+      </address>
+    </addressList>
+  </sdnEntry>
+  <sdnEntry>
+    <uid>50641</uid>
+    <lastName>CRYPTEX</lastName>
+    <sdnType>Entity</sdnType>
+    <programList>
+      <program>CYBER2</program>
+      <program>RUSSIA-EO14024</program>
+    </programList>
+    <idList>
+      <id>
+        <uid>42518</uid>
+        <idType>Business Registration Number</idType>
+        <idNumber>1628</idNumber>
+        <idCountry>Saint Vincent and the Grenadines</idCountry>
+      </id>
+      <id>
+        <uid>179079</uid>
+        <idType>Digital Currency Address - TRX</idType>
+        <idNumber>TTUDyVhhpCC1xJoPmWzdjLAzeoPwbSABdr</idNumber>
+      </id>
+      <id>
+        <uid>179081</uid>
+        <idType>Digital Currency Address - LTC</idType>
+        <idNumber>M8yFL6SFC6TreATegTyuSYkDfDRbisdpT3</idNumber>
+      </id>
+      <id>
+        <uid>179078</uid>
+        <idType>Digital Currency Address - XBT</idType>
+        <idNumber>13JtX4h7G5ZuNK5mFudKGq9DHLvvMFuNuz</idNumber>
+      </id>
+      <id>
+        <uid>179080</uid>
+        <idType>Digital Currency Address - ETH</idType>
+        <idNumber>0x0931cA4D13BB4ba75D9B7132AB690265D749a5E7</idNumber>
+      </id>
+      <id>
+        <uid>179172</uid>
+        <idType>Secondary sanctions risk:</idType>
+        <idNumber>See Section 11 of Executive Order 14024.</idNumber>
+      </id>
+      <id>
+        <uid>179103</uid>
+        <idType>Organization Established Date</idType>
+        <idNumber>01 Dec 2021</idNumber>
+      </id>
+      <id>
+        <uid>179077</uid>
+        <idType>Website</idType>
+        <idNumber>cryptex.net</idNumber>
+      </id>
+    </idList>
+    <akaList>
+      <aka>
+        <uid>79253</uid>
+        <type>a.k.a.</type>
+        <category>strong</category>
+        <lastName>INTERNATIONAL PAYMENT SERVICE PROVIDER LLC</lastName>
+      </aka>
+    </akaList>
+    <addressList>
+      <address>
+        <uid>76791</uid>
+        <address1>Euro House, Richmond Hill Road</address1>
+        <address2>P.O. Box 2897</address2>
+        <city>Kingstown</city>
+        <country>Saint Vincent and the Grenadines</country>
+      </address>
+    </addressList>
+  </sdnEntry>
+</sdnList>
