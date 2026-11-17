@@ -32,8 +32,20 @@
     "fatf-call-for-action",
     "retail-leverage-limit"
   ],
-  "sources_file": "compliance/research/sources.json",
-  "iso3166_source": "S-ISO3166-TZDATA",
+  "research": {
+    "note": "informational (agent 397's loader accepts only listed top-level keys; decision code ignores this)",
+    "sources_file": "compliance/research/sources.json",
+    "iso3166_source": "S-ISO3166-TZDATA",
+    "counsel_questions": {
+      "Q-1": "Sanctioned countries: may exit-only (cancel, reduce-only close, withdraw) stay open to a user located there, or must funds be frozen as for a listed address? 0.2 keeps 354's exit-only policy until counsel decides.",
+      "Q-2": "Which countries, if any, may be 'allowed' at launch for a perpetuals venue whose frontend is operated by Bloch Inc (Panama)? 0.2 opens none (deny by default).",
+      "Q-3": "United States: do the 2026 CFTC developments (perpetuals on registered venues; foreign-futures relief through a U.S. FCM) change anything for an unregistered venue? Assumed no.",
+      "Q-4": "EU/EEA: does offering crypto perpetuals to EU residents from Panama without solicitation require MiFID II authorisation (reverse solicitation limits)?",
+      "Q-5": "Panama: does serving Panamanian residents require a licence (operator's home jurisdiction)? Not researched; denied meanwhile.",
+      "Q-6": "Syria and the occupied regions of Zaporizhzhia and Kherson: current EU/UK/UN status; kept blocked.",
+      "Q-7": "Australia, Singapore, Japan: do the retail leverage limits and registration regimes reach an offshore venue that does not solicit there; is a professional-investor route relevant? Blocked or denied meanwhile."
+    }
+  },
   "countries": {
     "AD": {
       "name": "Andorra",
@@ -2920,14 +2932,5 @@
     "public_reads": "market data, node status and account reads are not geoblocked",
     "sanctioned_address_policy": "frozen: an address on the sanctions list (compliance/geoblock/sanctions) is refused for EVERY action, exit-only included (HTTP 451 SANCTIONED); what happens to funds already inside is for counsel",
     "note": "For counsel: whether exit-only may stay open for tier-'blocked' entries whose reason is comprehensive-sanctions."
-  },
-  "counsel_questions": {
-    "Q-1": "Sanctioned countries: may exit-only (cancel, reduce-only close, withdraw) stay open to a user located there, or must funds be frozen as for a listed address? 0.2 keeps 354's exit-only policy until counsel decides.",
-    "Q-2": "Which countries, if any, may be 'allowed' at launch for a perpetuals venue whose frontend is operated by Bloch Inc (Panama)? 0.2 opens none (deny by default).",
-    "Q-3": "United States: do the 2026 CFTC developments (perpetuals on registered venues; foreign-futures relief through a U.S. FCM) change anything for an unregistered venue? Assumed no.",
-    "Q-4": "EU/EEA: does offering crypto perpetuals to EU residents from Panama without solicitation require MiFID II authorisation (reverse solicitation limits)?",
-    "Q-5": "Panama: does serving Panamanian residents require a licence (operator's home jurisdiction)? Not researched; denied meanwhile.",
-    "Q-6": "Syria and the occupied regions of Zaporizhzhia and Kherson: current EU/UK/UN status; kept blocked.",
-    "Q-7": "Australia, Singapore, Japan: do the retail leverage limits and registration regimes reach an offshore venue that does not solicit there; is a professional-investor route relevant? Blocked or denied meanwhile."
   }
 }

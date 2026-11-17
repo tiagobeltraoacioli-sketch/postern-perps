@@ -44,46 +44,15 @@
     "attestation": {
       "path": "compliance/legal/attestation.md",
       "id": "ATTEST-0.1-20261117",
-      "sha256": "aed80559e0f2d9864afd29580471e2caa1869a9c6094b591f181a20b1a93213d"
+      "sha256": "d7ea07f70a6ab3d93dec0bc8aafb738bb57dd1baac94496cdb2986246c791175"
     }
   },
   "attestation": {
     "documentId": "ATTEST-0.1-20261117",
+    "statementId": "attest-0.1-20261117",
     "text": "ATTEST-0.1-20261117\nI am not a resident of, located in, or incorporated in a restricted jurisdiction, and I will not use a VPN or similar tool to hide my location.\nI am not a person or entity on a sanctions list, and I am not acting for one.\nI have read the Risk Disclosure and the Terms of Use, and I understand that I can lose all the funds I deposit.",
+    "statementHash": "0xcfdf20a5c360057590fa84786ff9e9b76180ebcbb55390ce7a68f37b3b1b6621",
     "sha256": "67ea26313caa97429ada72278fc3b899fd06cdcf407eae1c09d25e55e3e8c479",
-    "eip712": {
-      "domain": {
-        "name": "PosternPerps",
-        "version": "1",
-        "chainId": 700770,
-        "verifyingContract": "TBD-deploy: the PerpsVault address, pinned at build time (SPEC 2.1)"
-      },
-      "primaryType": "Attestation",
-      "types": {
-        "Attestation": [
-          {
-            "name": "account",
-            "type": "address"
-          },
-          {
-            "name": "documentId",
-            "type": "string"
-          },
-          {
-            "name": "documentHash",
-            "type": "bytes32"
-          },
-          {
-            "name": "country",
-            "type": "string"
-          },
-          {
-            "name": "issuedAt",
-            "type": "uint64"
-          }
-        ]
-      },
-      "documentHash": "0x67ea26313caa97429ada72278fc3b899fd06cdcf407eae1c09d25e55e3e8c479"
-    }
+    "typedData": "agent 397: compliance/geoblock/src/attestation.mjs (Attestation(address account,string statementId,bytes32 statementHash,string residenceCountry,uint64 issuedAt,uint64 expiresAt)); statementId and statementHash above are its inputs"
   }
 }

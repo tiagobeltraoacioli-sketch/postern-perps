@@ -12,6 +12,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_notices as bn  # noqa: E402
+from keccak import keccak256  # noqa: E402
 
 COMP = bn.COMP
 with open(bn.OUT, encoding="utf8") as _f:
@@ -58,11 +59,17 @@ class Notices(unittest.TestCase):
     def test_attestation_hash(self):
         a = NOT["attestation"]
         self.assertEqual(hashlib.sha256(a["text"].encode("utf8")).hexdigest(), a["sha256"])
-        self.assertEqual(a["eip712"]["documentHash"], "0x" + a["sha256"])
+        self.assertEqual("0x" + keccak256(a["text"].encode("utf8")).hex(), a["statementHash"])
         self.assertTrue(a["text"].startswith(a["documentId"] + "\n"))
-        d = a["eip712"]["domain"]
-        self.assertEqual((d["name"], d["version"], d["chainId"]), ("PosternPerps", "1", 700770))  # SPEC 2.1
-        self.assertIn("PerpsVault", d["verifyingContract"])  # bound to one deployment (R395-2)
+        self.assertRegex(a["statementId"], r"^[a-z0-9][a-z0-9./-]{0,63}$")  # 397's statementId rule
+
+    def test_keccak_vectors(self):
+        self.assertEqual(keccak256(b"").hex(), "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
+        self.assertEqual(keccak256(b"abc").hex(), "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
+        # multi-block and multi-byte UTF-8, cross-checked against 397's keccak.mjs on 2026-11-17
+        self.assertEqual(keccak256(b"a" * 200).hex(), "96ea54061def936c4be90b518992fdc6f12f535068a256229aca54267b4d084d")
+        self.assertEqual(keccak256(("\u00e9" * 70 + "x").encode()).hex(),
+                         "77032d99c2222e2a3ac892084bcafd8a639e82bfddb217076a34d43c4f334c9f")
 
     def test_every_blocked_entry_named_in_terms_and_summary(self):
         codes = blocked_codes(GEO)

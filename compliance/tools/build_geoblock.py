@@ -81,13 +81,16 @@ def build():
         "default_tier": base["default_tier"],
         "unknown_country_effect": base["unknown_country_effect"],
         "reason_categories": base["reason_categories"] + [r for r in REASONS_ADDED if r not in base["reason_categories"]],
-        "sources_file": "compliance/research/sources.json",
-        "iso3166_source": "S-ISO3166-TZDATA",
+        "research": {
+            "note": "informational (agent 397's loader accepts only listed top-level keys; decision code ignores this)",
+            "sources_file": "compliance/research/sources.json",
+            "iso3166_source": "S-ISO3166-TZDATA",
+            "counsel_questions": res["counsel_questions"],
+        },
         "countries": dict(sorted(countries.items())),
         "subdivisions": dict(sorted(subs.items())),
         "anonymizers": base["anonymizers"],
         "denied_policy": base["denied_policy"],
-        "counsel_questions": res["counsel_questions"],
     }
     return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
 
@@ -123,7 +126,7 @@ def render_md(text):
         lines.append("- %s: %s, \"%s\", %s (read %s)%s" % (s, x["publisher"], x["title"], x["url"], x["read_utc"],
                      "; " + x["status"] if x.get("status") else ""))
     lines += ["", "## Questions for counsel", ""]
-    for q, t in geo["counsel_questions"].items():
+    for q, t in geo["research"]["counsel_questions"].items():
         lines.append("- %s: %s" % (q, t))
     lines += ["", "## Not done / not proven", "",
               "- %d codes are `restricted-review` / `not-researched`: denied, never researched." % sum(
