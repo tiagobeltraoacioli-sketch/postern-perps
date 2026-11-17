@@ -1,0 +1,146 @@
+{
+ "BTC-USD": {
+  "coinbase_1d": {
+   "candles": 350,
+   "first_utc": "2025-12-03T00:00Z",
+   "last_utc": "2026-11-17T00:00Z",
+   "worst_adverse_long_at": "2026-02-05T00:00Z",
+   "worst_adverse_long_bps": 1482,
+   "worst_adverse_short_at": "2026-02-06T00:00Z",
+   "worst_adverse_short_bps": 1421,
+   "worst_range_at": "2026-02-06T00:00Z",
+   "worst_range_bps": 1951
+  },
+  "coinbase_1h": {
+   "candles": 350,
+   "first_utc": "2026-11-02T15:00Z",
+   "last_utc": "2026-11-17T04:00Z",
+   "worst_adverse_long_at": "2026-11-05T15:00Z",
+   "worst_adverse_long_bps": 355,
+   "worst_adverse_short_at": "2026-11-15T02:00Z",
+   "worst_adverse_short_bps": 404,
+   "worst_range_at": "2026-11-15T02:00Z",
+   "worst_range_bps": 424
+  },
+  "kraken_1d": {
+   "candles": 721,
+   "first_utc": "2024-11-27T00:00Z",
+   "last_utc": "2026-11-17T00:00Z",
+   "worst_adverse_long_at": "2025-10-10T00:00Z",
+   "worst_adverse_long_bps": 1784,
+   "worst_adverse_short_at": "2026-02-06T00:00Z",
+   "worst_adverse_short_bps": 1406,
+   "worst_range_at": "2025-10-10T00:00Z",
+   "worst_range_bps": 2250
+  },
+  "kraken_1h": {
+   "candles": 721,
+   "first_utc": "2026-10-18T04:00Z",
+   "last_utc": "2026-11-17T04:00Z",
+   "worst_adverse_long_at": "2026-11-05T15:00Z",
+   "worst_adverse_long_bps": 356,
+   "worst_adverse_short_at": "2026-11-15T02:00Z",
+   "worst_adverse_short_bps": 398,
+   "worst_range_at": "2026-11-15T02:00Z",
+   "worst_range_bps": 419
+  },
+  "worst_both_1d_bps": 1784,
+  "worst_both_1h_bps": 404
+ },
+ "ETH-USD": {
+  "coinbase_1d": {
+   "candles": 350,
+   "first_utc": "2025-12-03T00:00Z",
+   "last_utc": "2026-11-17T00:00Z",
+   "worst_adverse_long_at": "2026-01-31T00:00Z",
+   "worst_adverse_long_bps": 1717,
+   "worst_adverse_short_at": "2026-08-19T00:00Z",
+   "worst_adverse_short_bps": 2178,
+   "worst_range_at": "2026-08-19T00:00Z",
+   "worst_range_bps": 2256
+  },
+  "coinbase_1h": {
+   "candles": 350,
+   "first_utc": "2026-11-02T15:00Z",
+   "last_utc": "2026-11-17T04:00Z",
+   "worst_adverse_long_at": "2026-11-08T21:00Z",
+   "worst_adverse_long_bps": 607,
+   "worst_adverse_short_at": "2026-11-15T02:00Z",
+   "worst_adverse_short_bps": 528,
+   "worst_range_at": "2026-11-08T21:00Z",
+   "worst_range_bps": 654
+  },
+  "kraken_1d": {
+   "candles": 721,
+   "first_utc": "2024-11-27T00:00Z",
+   "last_utc": "2026-11-17T00:00Z",
+   "worst_adverse_long_at": "2025-02-03T00:00Z",
+   "worst_adverse_long_bps": 2585,
+   "worst_adverse_short_at": "2025-05-08T00:00Z",
+   "worst_adverse_short_bps": 2273,
+   "worst_range_at": "2025-02-03T00:00Z",
+   "worst_range_bps": 3737
+  },
+  "kraken_1h": {
+   "candles": 721,
+   "first_utc": "2026-10-18T04:00Z",
+   "last_utc": "2026-11-17T04:00Z",
+   "worst_adverse_long_at": "2026-11-08T21:00Z",
+   "worst_adverse_long_bps": 689,
+   "worst_adverse_short_at": "2026-11-15T02:00Z",
+   "worst_adverse_short_bps": 528,
+   "worst_range_at": "2026-11-08T21:00Z",
+   "worst_range_bps": 746
+  },
+  "worst_both_1d_bps": 2585,
+  "worst_both_1h_bps": 689
+ },
+ "SOL-USD": {
+  "coinbase_1d": {
+   "candles": 350,
+   "first_utc": "2025-12-03T00:00Z",
+   "last_utc": "2026-11-17T00:00Z",
+   "worst_adverse_long_at": "2026-01-31T00:00Z",
+   "worst_adverse_long_bps": 1781,
+   "worst_adverse_short_at": "2026-02-25T00:00Z",
+   "worst_adverse_short_bps": 1661,
+   "worst_range_at": "2026-02-06T00:00Z",
+   "worst_range_bps": 3304
+  },
+  "coinbase_1h": {
+   "candles": 350,
+   "first_utc": "2026-11-02T15:00Z",
+   "last_utc": "2026-11-17T04:00Z",
+   "worst_adverse_long_at": "2026-11-08T21:00Z",
+   "worst_adverse_long_bps": 456,
+   "worst_adverse_short_at": "2026-11-15T02:00Z",
+   "worst_adverse_short_bps": 549,
+   "worst_range_at": "2026-11-15T02:00Z",
+   "worst_range_bps": 595
+  },
+  "kraken_1d": {
+   "candles": 721,
+   "first_utc": "2024-11-27T00:00Z",
+   "last_utc": "2026-11-17T00:00Z",
+   "worst_adverse_long_at": "2025-10-10T00:00Z",
+   "worst_adverse_long_bps": 2969,
+   "worst_adverse_short_at": "2025-03-02T00:00Z",
+   "worst_adverse_short_bps": 2532,
+   "worst_range_at": "2025-10-10T00:00Z",
+   "worst_range_bps": 4446
+  },
+  "kraken_1h": {
+   "candles": 721,
+   "first_utc": "2026-10-18T04:00Z",
+   "last_utc": "2026-11-17T04:00Z",
+   "worst_adverse_long_at": "2026-10-29T20:00Z",
+   "worst_adverse_long_bps": 516,
+   "worst_adverse_short_at": "2026-11-15T02:00Z",
+   "worst_adverse_short_bps": 542,
+   "worst_range_at": "2026-11-15T02:00Z",
+   "worst_range_bps": 588
+  },
+  "worst_both_1d_bps": 2969,
+  "worst_both_1h_bps": 549
+ }
+}

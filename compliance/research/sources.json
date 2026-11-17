@@ -1,0 +1,323 @@
+{
+  "schema": "postern-perps/sources",
+  "version": "0.2.0",
+  "note": "Every fact relied on by compliance/ and docs/MARKETS.md, with the exact sentence read and the read date. Read anonymously. A fact not in this file is not relied on. UNAUDITED prototype; legal items are for counsel.",
+  "sources": [
+    {
+      "id": "S-HL-FEES",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Fees",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Fees are based on your rolling 14 day volume and are assessed at the end of each day in UTC.",
+        "Perps fee tiers, base rate: tier 0 taker 0.045% maker 0.015%; tier 1 >5M 0.040% / 0.012%; tier 2 >25M 0.035% / 0.008%; tier 3 >100M 0.030% / 0.004%; tier 4 >500M 0.028% / 0.000%; tier 5 >2B 0.026% / 0.000%; tier 6 >7B 0.024% / 0.000% (table rows)."
+      ]
+    },
+    {
+      "id": "S-HL-FUND",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Funding",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/funding",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The funding rate on Hyperliquid is paid every hour.",
+        "For consistency with CEXs, interest rate component is predetermined at 0.01% every 8 hours, which is 0.00125% every hour, or 11.6% APR paid to short.",
+        "The funding rate formula applies to 8 hour funding rate. However, funding is paid every hour at one eighth of the computed rate for each hour.",
+        "The specific formula is `Funding Rate (F) = Average Premium Index (P) + clamp (interest rate - Premium Index (P), -0.0005, 0.0005)`. The premium is sampled every 5 seconds and averaged over the hour.",
+        "Funding on Hyperliquid is capped at 0.5%/hour."
+      ]
+    },
+    {
+      "id": "S-HL-MT",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Margin tiers",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/margin-tiers",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "`maintenance_margin_rate(tier = n) = (Initial Margin Rate at Maximum leverage at tier n) / 2` . For example, at 20x max leverage, `maintenance_margin_rate = 2.5%`.",
+        "BTC: 0-150M max leverage 40; >150M 20. ETH: 0-100M 25; >100M 15. SOL: 0-70M 20; >70M 10 (table rows, Mainnet Margin Tiers)."
+      ]
+    },
+    {
+      "id": "S-HL-LIQ",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Liquidations",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "If the account equity drops below 2/3 of the maintenance margin without successful liquidation through the book, a backstop liquidation happens through the liquidator vault.",
+        "Unlike CEXs there is no clearance fee on liquidations.",
+        "For liquidatable positions larger than 100k USDC (10k USDC on testnet for easier testing), only 20% of the position will be sent as a market liquidation order to the book."
+      ]
+    },
+    {
+      "id": "S-HL-MARK",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Robust price indices",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/robust-price-indices",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Oracle prices are updated by the validators approximately once every three seconds.",
+        "Mark price is an unbiased and robust estimate of the fair perp price, and is used for margining, liquidations, triggering TP/SL, and computing unrealized pnl."
+      ]
+    },
+    {
+      "id": "S-DYDX-FEES",
+      "publisher": "dYdX (documentation)",
+      "title": "Rewards, Fees and Parameters",
+      "url": "https://docs.dydx.xyz/concepts/trading/rewards",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Users are eligible for lower fees based on their 30 day trading volume across sub accounts and markets",
+        "Tier 1 < $1M taker 5.0 bps maker 1.0; 2 >= $1M 4.5 / 1.0; 3 >= $5M 4.0 / 0.5; 4 >= $25M 3.5 / 0; 5 >= $50M 3.0 / 0; 6 >= $100M 2.5 / -0.7; 7 >= $200M 2.5 / -1.1 (table rows)."
+      ]
+    },
+    {
+      "id": "S-KRAKEN-OHLC",
+      "publisher": "Kraken (public REST API)",
+      "title": "OHLC data",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=<XBTUSD|ETHUSD|SOLUSD>&interval=<60|1440>",
+      "read_utc": "2026-11-17T04:07Z",
+      "recorded": "compliance/research/marketdata/20261117/kraken_*.json"
+    },
+    {
+      "id": "S-CB-CANDLES",
+      "publisher": "Coinbase Exchange (public REST API)",
+      "title": "Product candles",
+      "url": "https://api.exchange.coinbase.com/products/<BTC-USD|ETH-USD|SOL-USD>/candles?granularity=<3600|86400>",
+      "read_utc": "2026-11-17T04:07Z",
+      "recorded": "compliance/research/marketdata/20261117/cb_*.json"
+    },
+    {
+      "id": "S-CFTC-8412",
+      "publisher": "U.S. Commodity Futures Trading Commission",
+      "title": "Release Number 8412-21 (BitMEX consent order)",
+      "url": "https://www.cftc.gov/PressRoom/PressReleases/8412-21",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Cryptocurrency trading platforms conducting business in the U.S. must obtain the appropriate registration, and must implement robust Know-Your-Customer and Anti-Money Laundering procedures.",
+        "Thus, the order finds that BitMEX violated the CEA by operating a facility to trade or process swaps without being approved as a Designated Contract Market (DCM) or a Swap Execution Facility (SEF).",
+        "BitMEX has certified to the CFTC that anyone located, incorporated, or otherwise established in, or a resident of, the U.S. is prohibited from accessing the BitMEX trading platform"
+      ]
+    },
+    {
+      "id": "S-CFTC-8715",
+      "publisher": "U.S. Commodity Futures Trading Commission",
+      "title": "Release Number 8715-23 (Ooki DAO default judgment)",
+      "url": "https://www.cftc.gov/PressRoom/PressReleases/8715-23",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "This decision should serve as a wake-up call to anyone who believes they can circumvent the law by adopting a DAO structure, intending to insulate themselves from law enforcement and ultimately putting the public at risk.",
+        "The administrative order and this enforcement action charged that bZeroX (and then the Ooki DAO) unlawfully offered leveraged and margined retail commodity transactions outside of a registered exchange, unlawfully acted as an FCM, and unlawfully failed to comply with Bank Secrecy Act obligations applicable to FCMs."
+      ]
+    },
+    {
+      "id": "S-US-2026-ONSHORE",
+      "publisher": "Cahill Gordon & Reindel (law firm client alert; SECONDARY)",
+      "title": "True Perpetuals Come Onshore (2026-06-02)",
+      "url": "https://www.cahill.com/publications/client-alerts/2026-06-02-true-perpetuals-come-onshore",
+      "read_utc": "2026-11-17",
+      "status": "search-result summary only, not text-read: UNVERIFIED",
+      "quotes": [],
+      "note": "Reported: CFTC actions of 2026-05 allowing perpetual contracts on registered venues and certain offshore perpetuals via a U.S. FCM as foreign futures. Does not open the U.S. for an unregistered venue; for counsel."
+    },
+    {
+      "id": "S-OSC-BYBIT",
+      "publisher": "Ontario Securities Commission",
+      "title": "OSC takes action against non-compliant international crypto asset trading platform Bybit",
+      "url": "https://osc.ca/en/news-events/news/osc-takes-action-against-non-compliant-international-crypto-asset-trading-platform-bybit",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Bybit, incorporated in the British Virgin Islands, is operating an unregistered crypto asset trading platform, encouraging Ontarians to use the platform, and allowing Ontario residents to trade crypto asset products that are securities and derivatives."
+      ]
+    },
+    {
+      "id": "S-OSC-2022",
+      "publisher": "Ontario Securities Commission",
+      "title": "OSC holds global crypto asset trading platforms accountable",
+      "url": "https://osc.ca/en/news-events/news/osc-holds-global-crypto-asset-trading-platforms-accountable",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Foreign crypto asset trading platforms that want to operate in Ontario must play by the rules or face enforcement action,"
+      ]
+    },
+    {
+      "id": "S-FCA-2020",
+      "publisher": "UK Financial Conduct Authority",
+      "title": "FCA bans the sale of crypto-derivatives to retail consumers (first published 06/10/2020)",
+      "url": "https://www.fca.org.uk/news/press-releases/fca-bans-sale-crypto-derivatives-retail-consumers",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The FCA has published final rules banning the sale of derivatives and exchange traded notes (ETNs) that reference certain types of cryptoassets to retail consumers."
+      ]
+    },
+    {
+      "id": "S-CVM-BYBIT",
+      "publisher": "Comissão de Valores Mobiliários (Brazil)",
+      "title": "CVM alerta para atuação irregular de ByBit Fintech Limited como corretora de valores mobiliários (publicado 05/09/2022)",
+      "url": "https://www.gov.br/cvm/pt-br/assuntos/noticias/2022/cvm-alerta-para-atuacao-irregular-de-bybit-fintech-limited-como-corretora-de-valores-mobiliarios",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Por meio do Ato Declaratório CVM 20.123 , a Autarquia determinou a imediata suspensão de qualquer oferta pública, de forma direta ou indireta, a investidores residentes no Brasil de oportunidades de investimento em valores mobiliários, pelo fato de a empresa não integrar o sistema de distribuição previsto no art. 15 da Lei 6.385/76."
+      ]
+    },
+    {
+      "id": "S-BR-L6385",
+      "publisher": "Presidência da República (Brazil), planalto.gov.br",
+      "title": "Lei nº 6.385/1976, art. 2º",
+      "url": "https://www.planalto.gov.br/ccivil_03/leis/l6385.htm",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "VIII - outros contratos derivativos, independentemente dos ativos subjacentes; e"
+      ]
+    },
+    {
+      "id": "S-BR-L14478",
+      "publisher": "Presidência da República (Brazil), planalto.gov.br",
+      "title": "Lei nº 14.478/2022, art. 2º",
+      "url": "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2022/lei/l14478.htm",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Art. 2º As prestadoras de serviços de ativos virtuais somente poderão funcionar no País mediante prévia autorização de órgão ou entidade da Administração Pública federal."
+      ]
+    },
+    {
+      "id": "S-OFAC-PROGRAMS",
+      "publisher": "U.S. Treasury, Office of Foreign Assets Control",
+      "title": "Sanctions Programs and Country Information",
+      "url": "https://ofac.treasury.gov/sanctions-programs-and-country-information",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "OFAC administers a number of different sanctions programs. The sanctions can be either comprehensive or selective, using the blocking of assets and trade restrictions to accomplish foreign policy and national security goals.",
+        "Active Sanctions Programs (list entries read): Cuba Sanctions; Iran Sanctions; North Korea Sanctions; Russian Harmful Foreign Activities Sanctions; Ukraine-/Russia-related Sanctions"
+      ]
+    },
+    {
+      "id": "S-OFAC-SYRIA-2025",
+      "publisher": "U.S. Treasury, Office of Foreign Assets Control",
+      "title": "Publication of Final Rule to Remove the Syria Sanctions Regulations (recent action 2025-08-25)",
+      "url": "https://ofac.treasury.gov/recent-actions/20250825",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The Department of the Treasury's Office of Foreign Assets Control (OFAC) is amending the Syrian Sanctions Regulations to remove them from the Code of Federal Regulations , consistent with Executive Order 14312 of June 30, 2025, “Providing for the Revocation of Syria Sanctions.”"
+      ]
+    },
+    {
+      "id": "S-OFAC-UKR",
+      "publisher": "U.S. Treasury, Office of Foreign Assets Control",
+      "title": "Ukraine-/Russia-related Sanctions",
+      "url": "https://ofac.treasury.gov/sanctions-programs-and-country-information/ukraine-russia-related-sanctions",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "13685 - Blocking Property of Certain Persons and Prohibiting Certain Transactions with Respect to the Crimea Region of Ukraine (December 19, 2014)",
+        "14065 - Blocking Property Of Certain Persons And Prohibiting Certain Transactions With Respect To Continued Russian Efforts To Undermine The Sovereignty And Territorial Integrity Of Ukraine (February 21, 2022)"
+      ]
+    },
+    {
+      "id": "S-EU-833",
+      "publisher": "EUR-Lex (European Union)",
+      "title": "Council Regulation (EU) No 833/2014, consolidated text 2025-07-20",
+      "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:02014R0833-20250720",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "It shall be prohibited to provide crypto-asset wallet, account or custody services to Russian nationals or natural persons residing in Russia, or legal persons, entities or bodies established in Russia."
+      ]
+    },
+    {
+      "id": "S-EU-765",
+      "publisher": "EUR-Lex (European Union)",
+      "title": "Council Regulation (EC) No 765/2006, consolidated text 2025-07-20",
+      "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:02006R0765-20250720",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "It shall be prohibited to provide crypto-asset wallet, account or custody services to Belarusian nationals or natural persons residing in Belarus, or legal persons, entities or bodies established in Belarus."
+      ]
+    },
+    {
+      "id": "S-PBOC-2021",
+      "publisher": "CGTN (state media report of the PBoC notice of 2021-09-24; SECONDARY) and Baker McKenzie blockchain blog (SECONDARY)",
+      "title": "PBOC says virtual currency-related activities are illegal",
+      "url": "https://news.cgtn.com/news/2021-09-24/PBOC-says-virtual-currency-related-activities-are-illegal-13OSIEl91cc/index.html",
+      "also": "https://blockchain.bakermckenzie.com/2021/10/04/chinas-central-bank-declares-all-cryptocurrency-transactions-illegal/",
+      "read_utc": "2026-11-17",
+      "status": "primary pbc.gov.cn text not read; a 2026 replacement notice is reported by one secondary source (unverified); the restriction is kept",
+      "quotes": [
+        "Overseas virtual currency exchanges to provide services for domestic residents via the internet are also considered illegal financial activities, the notice said.",
+        "all digital currency services for trading, order matching, token issuance and derivatives of virtual currencies are strictly prohibited"
+      ]
+    },
+    {
+      "id": "S-FATF-CFA-2026-10",
+      "publisher": "FATF",
+      "title": "High-Risk Jurisdictions subject to a Call for Action - 30 October 2026",
+      "url": "https://www.fatf-gafi.org/en/publications/High-risk-and-other-monitored-jurisdictions/call-for-action-october-2026.html",
+      "read_utc": "2026-11-17",
+      "status": "page refused anonymous reads (HTTP 403); content known only from a search-result summary: DPRK, Iran, Myanmar. UNVERIFIED: used only to keep closed, never to open",
+      "quotes": []
+    },
+    {
+      "id": "S-ESMA-CA-FI",
+      "publisher": "ESMA",
+      "title": "Guidelines on the conditions and criteria for the qualification of crypto-assets as financial instruments (ESMA75453128700-1323)",
+      "url": "https://www.esma.europa.eu/sites/default/files/2025-03/ESMA75453128700-1323_Guidelines_on_the_conditions_and_criteria_for_the_qualification_of_CAs_as_FIs.pdf",
+      "read_utc": "2026-11-17",
+      "status": "PDF located, text not extracted (no PDF tool on the Mac): UNVERIFIED; used only to keep EU/EEA closed for counsel",
+      "quotes": []
+    },
+    {
+      "id": "S-DYDX-TERMS",
+      "publisher": "dYdX Trading Inc. (BENCHMARK, not a legal source)",
+      "title": "Terms of Use",
+      "url": "https://dydx.exchange/terms",
+      "read_utc": "2026-11-17",
+      "status": "read via summary; benchmark of what a peer venue restricts",
+      "quotes": [
+        "the United States, Canada or the United Kingdom",
+        "Iran, Cuba, North Korea, Syria, Myanmar (Burma), the regions of Crimea, Donetsk or Luhansk"
+      ]
+    },
+    {
+      "id": "S-ISO3166-TZDATA",
+      "publisher": "IANA tz database 2026f (public domain)",
+      "title": "iso3166.tab (ISO 3166-1 alpha-2 codes current as of ISO/TC 46 N1127, 2024-02-29)",
+      "url": "file:///usr/share/zoneinfo/iso3166.tab (copied to compliance/research/iso3166.tab)",
+      "read_utc": "2026-11-17",
+      "quotes": []
+    },
+    {
+      "id": "S-ASIC-21-060",
+      "publisher": "Australian Securities and Investments Commission",
+      "title": "21-060MR ASIC's CFD product intervention order takes effect",
+      "url": "https://www.asic.gov.au/about-asic/news-centre/find-a-media-release/2021-releases/21-060mr-asic-s-cfd-product-intervention-order-takes-effect",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The maximum CFD leverage available to retail clients will range from 30:1 to a 2:1, depending on the underlying asset class.",
+        "A CFD is a leveraged derivative contract that allows a client to speculate in the change in value of an underlying asset, such as foreign exchange rates, stock market indices, single equities, commodities or cryptoassets."
+      ],
+      "note": "The 2:1 limit for crypto-asset CFDs and the extension of the order to 2027-05-23 are known from a search summary only (not text-read): UNVERIFIED detail"
+    },
+    {
+      "id": "S-MAS-2022",
+      "publisher": "Monetary Authority of Singapore",
+      "title": "MAS proposes measures to reduce risks to consumers from cryptocurrency trading and enhance standards of stablecoin-related activities (2022)",
+      "url": "https://www.mas.gov.sg/news/media-releases/2022/mas-proposes-measures-to-reduce-risks-to-consumers-from-cryptocurrency-trading-and-enhance-standards-of-stablecoin-related-activities",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "They must also disallow the use of credit facilities and leverage by retail consumers for cryptocurrency trading."
+      ],
+      "note": "a proposal (2022); the final guidelines PS-G03 (2024) are reported by a search summary to bar DPT service providers from derivatives with retail customers: UNVERIFIED"
+    },
+    {
+      "id": "S-FSA-592",
+      "publisher": "Financial Services Agency, Japan",
+      "title": "FSA Weekly Review No.592 (June 27, 2024)",
+      "url": "https://www.fsa.go.jp/en/newsletter/weekly2024/592.html",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The FSA and the Kanto Local Finance Bureau issued warnings to entities that are operating financial instruments businesses without proper registration.",
+        "The FSA issued a warning to LBank Exchange that is operating crypto-asset (virtual currency) exchange business without proper registration in violation of the \"Payment Services Act.\""
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+ "_note": "MOCK / DEV FIXTURE ONLY. The real list is compliance/geoblock.json (392). It lists every ISO 3166-1 code since 0.2.0 and has no 'allowed' entry yet, so the only open country of the mock is ZZ, a user-assigned code that is not a country: the mock refuses to start if this list ever names a country the real list contains (deny wins). This is NOT a legal statement about any country; everything legal is for counsel.",
+ "mock_allowed_countries": [
+  "ZZ"
+ ],
+ "mock_default_country": "ZZ",
+ "mock_sanctioned_addresses": [
+  "0x000000000000000000000000000000000000dead"
+ ]
+}
