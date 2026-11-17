@@ -56,7 +56,7 @@ export type Scene = {
 };
 
 /** Share of the plot height given to the volume bars (drawn under the candles, own scale). */
-export const VOLUME_SHARE = 0.18;
+export const VOLUME_SHARE = 0.15;
 
 const crisp = (v: number, dpr: number) => (Math.round(v * dpr - 0.5) + 0.5) / dpr;
 const snap = (v: number, dpr: number) => Math.round(v * dpr) / dpr;
@@ -177,7 +177,7 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
       if (!(c.v > 0)) continue;
       const h = Math.max(1 / dpr, (c.v / s.volMax) * band);
       const x = snap(slotX(slots[i], view, plotW) - vw / 2, dpr);
-      ctx.fillStyle = withAlpha(c.c >= c.o ? p.up : p.down, s.stale && i === cs.length - 1 ? 0.08 : 0.17);
+      ctx.fillStyle = withAlpha(c.c >= c.o ? p.up : p.down, s.stale && i === cs.length - 1 ? 0.07 : 0.14);
       ctx.fillRect(x, snap(plotH - h, dpr), vw, plotH - snap(plotH - h, dpr));
       drawn.volumes++;
     }
@@ -394,7 +394,8 @@ function drawAxisTag(ctx: Ctx, s: Scene, tag: PlacedTag, text: string) {
 function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, tag: PlacedTag) {
   const p = s.palette;
   ctx.font = font(s, 600);
-  const main = level.label;
+  // A pinned level says on its label too that its price is beyond the edge.
+  const main = tag.pinned === 'above' ? `\u2191 ${level.label}` : tag.pinned === 'below' ? `\u2193 ${level.label}` : level.label;
   const detail = level.detail ?? '';
   const pad = 7;
   const wMain = tabularWidth(ctx, main);

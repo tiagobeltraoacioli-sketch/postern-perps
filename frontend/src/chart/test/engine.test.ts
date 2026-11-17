@@ -132,7 +132,21 @@ describe('it draws the data given and nothing else', () => {
     expect(tag.pinned).toBe('below');
     expect(tag.y + scene.tagH / 2).toBeLessThanOrEqual(scene.plotH + 1e-9);
     expect(base.lines().some((l) => l.includes('1,000.0'))).toBe(true);
-    expect(base.lines().some((l) => l.includes('Liquidation'))).toBe(true);
+    expect(base.lines().some((l) => l.includes('\u2193 Liquidation'))).toBe(true);
+  });
+  it('names the live tags and never writes a tick label under a tag', () => {
+    const { engine, run, base } = setup();
+    const cs = walk(100, T0, M15);
+    const last = cs[99].c;
+    engine.setData(data(cs, { mark: { price: last + 3, text: 'MARK-TEXT' }, index: { price: last - 40, text: 'IDX' } }));
+    run();
+    const s = engine.getScene()!;
+    const lines = base.lines();
+    for (const name of ['Mark', 'Index', 'Last']) expect(lines).toContain(name);
+    // Tick labels: text-3 ink, starting at the tick column (plotW + 8).
+    const tickYs = base.ops('fillText').filter((c) => c.fillStyle === s.palette.text3 && Math.abs((c.args[1] as number) - (s.plotW + 8)) < 0.01).map((c) => c.args[2] as number);
+    expect(tickYs.length).toBeGreaterThan(0);
+    for (const y of tickYs) for (const t of s.tags) expect(Math.abs(t.y - y)).toBeGreaterThanOrEqual(s.tagH / 2 + s.fontPx / 2);
   });
   it('a level with a non-finite price is not drawn', () => {
     const { engine, run } = setup();

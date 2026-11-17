@@ -73,13 +73,20 @@ const send = (method, params = {}, sessionId) =>
     ws.send(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
 
+// One tab for the whole run (creating tabs stalled under a heavily loaded machine); each page() call re-configures it.
+let tab = null;
 async function page(w, h, dpr, mobile, reduced) {
-  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-  const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  if (!tab) {
+    const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+    const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+    tab = { targetId, sessionId };
+    await send('Runtime.enable', {}, sessionId);
+    await send('Page.enable', {}, sessionId);
+  }
+  const { sessionId } = tab;
   const s = (m, p) => send(m, p, sessionId);
-  await s('Runtime.enable');
-  await s('Page.enable');
   await s('Page.bringToFront');
+  await s('Emulation.setCPUThrottlingRate', { rate: 1 });
   await s('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile });
   await s('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }] });
   return {
@@ -97,17 +104,21 @@ async function page(w, h, dpr, mobile, reduced) {
       return r.result.value;
     },
     async shot(name) {
-      const { data } = await s('Page.captureScreenshot', { format: 'png' });
-      writeFileSync(join(out, `${name}.png`), Buffer.from(data, 'base64'));
+      try {
+        const { data } = await s('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(join(out, `${name}.png`), Buffer.from(data, 'base64'));
+      } catch (e) {
+        results.failures.push(`${name}: ${e.message}`);
+      }
     },
     async mouse(type, x, y, extra = {}) {
       await s('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons: extra.buttons ?? (type === 'mouseMoved' ? 0 : 1), clickCount: 1, ...extra });
     },
-    close: () => send('Target.closeTarget', { targetId }),
+    close: async () => {},
   };
 }
 
-const results = { browser: version.Browser, when: new Date().toISOString(), screens: [], measure: [], consoleErrors };
+const results = { browser: version.Browser, when: new Date().toISOString(), screens: [], measure: [], consoleErrors, failures: [] };
 
 try {
   if (mode === 'screens' || mode === 'all') {
@@ -183,6 +194,8 @@ try {
     results.measure.push({ scenario: 'zoom out 30 wheel steps + drag pan 60 moves, 1500 candles, CPU 4x', ...r });
     await p.close();
   }
+} catch (e) {
+  results.failures.push(`run stopped: ${e.message}`);
 } finally {
   writeFileSync(join(out, 'measure.json'), JSON.stringify(results, null, 2));
   try {
@@ -195,5 +208,5 @@ try {
   server.close();
   rmSync(profile, { recursive: true, force: true });
 }
-console.log(JSON.stringify({ screens: results.screens.length, measure: results.measure, consoleErrors }, null, 1));
+console.log(JSON.stringify({ screens: results.screens.length, measure: results.measure, consoleErrors, failures: results.failures }, null, 1));
 process.exit(0);
