@@ -49,6 +49,10 @@ Against a real node (no `--mock`), the checks that need an account with collater
 agent approval and rights, book deltas) are SKIPPED, listed and never counted as passed, unless `--funded [LABEL]`:
 the suite then signs as the throwaway account `--print-accounts` names, which the operator funds through the dev
 vault deposit on the L2 before the run (the API has no deposit route by design: deposits come only from the vault).
+Without an L2, `conformance/fake-l2.mjs` serves the vault's VAULT.md 0.2 `Deposit` events (head-chained) to a dev
+node's watcher: start it twice (the node requires two agreeing endpoints) with the node's vault address and
+`--deposit ACCOUNT:AMOUNT`, and give the node `--l2 http://127.0.0.1:P1,http://127.0.0.1:P2`. With `--funded` and
+no checkpoint yet, the suite sends CancelAll actions (at most 40) until one exists.
 
 Options: `--seed N` (default 7), `--start-time MS|now` (default 1794878400000; `now` makes the engine time
 follow the wall clock from launch so a browser's millisecond nonces fall inside the window), `--static` (blocks

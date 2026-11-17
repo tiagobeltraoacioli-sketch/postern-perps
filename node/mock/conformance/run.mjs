@@ -192,7 +192,20 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
   // ---------- finality and the input log ----------
   const committee = await get('/v1/committee');
   valid('GET /v1/committee', 'Committee', committee.body);
-  const cp = await get('/v1/finality/latest');
+  // A real node makes blocks only from inputs and checkpoints every few blocks: with a funded account the suite
+  // produces blocks (CancelAll, an exit-only action) until a checkpoint exists, at most 40 actions / 60 s.
+  let cp = await get('/v1/finality/latest');
+  if (cp.status === 404 && canFund && !mock) {
+    const wk = keyOf(funded), wa = addressOf(wk);
+    let wn = BigInt((await get('/v1/status')).body.time);
+    for (let i = 0; i < 40 && cp.status === 404; i++) {
+      const msg = { account: wa, nonce: String(wn++), marketId: 0 };
+      await post('/v1/actions?wait=included', { type: 'CancelAll', message: msg, signature: hex(sign(typedDataHash(domain, 'CancelAll', eip.body.types.CancelAll, msg), wk)), wire: true }, {});
+      await new Promise((r) => setTimeout(r, 1000));
+      cp = await get('/v1/finality/latest');
+    }
+  }
+  if (!ok('a finalized checkpoint exists (GET /v1/finality/latest 200)', cp.status === 200, `HTTP ${cp.status}`)) throw new Error('no checkpoint: the finality checks cannot run');
   valid('GET /v1/finality/latest', 'Checkpoint', cp.body);
   const C = cp.body;
   const vaultDomain = { name: 'PosternPerpsVault', version: '1', chainId: 700770, verifyingContract: status.body.network.vault };
@@ -373,12 +386,18 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
   const isBuyPrice = (m) => {
     const t = scaleInt(m.tickSize, 8);
     const best = scaleInt(tickers.body.tickers.find((x) => x.symbol === m.symbol).markPrice, 8);
-    return String(((best / 2n) / t) * t);
+    // Half the mark, on the tick; one tick when the node has no mark yet (no oracle input): never price 0.
+    const half = ((best / 2n) / t) * t;
+    return String(half >= t ? half : t);
   };
   const po = { account: mainAddr, nonce: nextNonce(), marketId: mk.marketId, isBuy: true, orderType: 0, timeInForce: 0, price: isBuyPrice(mk), size: String(scaleInt(mk.minOrderSize, 8)), reduceOnly: false, triggerPrice: '0', clientOrderId: '0x' + '00'.repeat(32) };
   const rpo = await post('/v1/actions?wait=included', signed('PlaceOrder', po, main), hdr);
   valid('PlaceOrder ack', 'ActionAck', rpo.body);
   ok('PlaceOrder included within 2 s with an engine result', rpo.body?.status === 'included' && typeof rpo.body?.result?.ok === 'boolean', JSON.stringify(rpo.body));
+  // The market table the API publishes is the one the engine enforces: an order on the published tick, step and
+  // minimum size is never refused for TICK, STEP or SIZE_BOUNDS (a client that follows /v1/markets must not be
+  // refused for following it).
+  if (canFund) ok('an order on /v1/markets\' tick, step and minimum is not refused TICK/STEP/SIZE_BOUNDS', !['TICK', 'STEP', 'SIZE_BOUNDS'].includes(rpo.body?.result?.error), JSON.stringify(rpo.body?.result));
   // 9. price 0 is MALFORMED (SPEC 2.3: no "any price" order); a real engine checks the account first
   if (needsFunds('market order with price 0 never executes (MALFORMED)')) {
     const p0 = { ...po, nonce: nextNonce(), orderType: 1, timeInForce: 1, price: '0' };
