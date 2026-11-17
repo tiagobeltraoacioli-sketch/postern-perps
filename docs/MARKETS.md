@@ -1,4 +1,4 @@
-# PosternDEX Perpetuals: markets and risk parameters (v0.2.0, 2026-11-17)
+# PosternDEX Perpetuals: markets and risk parameters (v0.2.1, 2026-11-17)
 
 UNAUDITED prototype work by agent 392 (continuing 354). Nothing here is legal advice; whether any market may be
 offered anywhere is for counsel. Machine-readable files: `compliance/markets.json` (per market) and
@@ -61,7 +61,7 @@ rule R-6 from the measured one-hour stress (section 4): ETH's measured 6.89% one
 | Funding interval | 1 hour | Hyperliquid "paid every hour" (S-HL-FUND) |
 | Interest component | 0.00125% per hour (`interest` 12500) | Hyperliquid 0.01% per 8 h = 0.00125% per hour (S-HL-FUND) |
 | Clamp of (interest - premium) | +-0.00625% per hour (`fundingClamp` 62500) | Hyperliquid clamp 0.05% on the 8-hour rate, paid 1/8 per hour (S-HL-FUND) = 0.00625% per hour |
-| Funding cap | 0.1% per hour (`maxFundingRate` 1,000,000) | Hyperliquid 0.5% per hour (S-HL-FUND) |
+| Funding cap | 0.05% per hour (`maxFundingRate` 500,000 = SPEC v0.1 default) | Hyperliquid 0.5% per hour (S-HL-FUND) |
 
 Middle ground on revenue (owner rule): the base tier equals the leading benchmark, the volume tiers follow it, no
 rebates (a rebate is protocol revenue paid out), and every protocol fee accrues to the `PROTOCOL_FEE` account swept
@@ -69,8 +69,14 @@ daily (when at least 100 USDC) to `0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544` o
 
 Decided (technical), the funding cap: rule R-5, `24 * maxFundingRate < IMF - MMF` of tier 0, so a position opened
 at full leverage cannot be pushed from its initial to its maintenance requirement by capped funding alone in less
-than one day; Hyperliquid's 0.5%/h would do it in 5 hours at our BTC tiers. The cost: in a persistent premium the
-funding cap is reached sooner and the premium closes more slowly.
+than one day (0.05%/h satisfies it with a margin of two: 1.2% per day against BTC's 2.5%); Hyperliquid's 0.5%/h
+would do it in 5 hours at our BTC tiers. The cost: in a persistent premium the funding cap is reached sooner and the
+premium closes more slowly.
+
+Revision 0.2.1 (same day): the first push (`1da5df7`) proposed 0.1%/h. Reviewer 395 (cross-area 04:31 UTC)
+objected that R395-16 (premium samples read from a book the sequencer can quote risk-free) scales with the cap, so
+the cap must not be looser than SPEC's default until the sampling point is fixed. Accepted: 0.05%/h; raising it is
+a later change that needs R395-16 closed.
 
 Request to 388 (SPEC): (a) SPEC S-7.2 uses `c = 500000` per hour; the benchmark's clamp is on the 8-hour rate, so
 the per-hour equivalent is 62500: please read `fundingClamp` per market from genesis; (b) add the fee tiers of
