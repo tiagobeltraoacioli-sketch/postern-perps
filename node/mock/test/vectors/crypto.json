@@ -220,5 +220,60 @@
    "forcedProcessed": "0"
   },
   "digest": "0x7e53032e9598aef1e257dcf2cd3323c44f0daa7b0f6cad4d6b4cacd5e0b273aa"
+ },
+ "oracle": {
+  "domain": {
+   "name": "PosternPerps",
+   "version": "1",
+   "chainId": 700770,
+   "verifyingContract": "0xdb0b1676ac81645ca3e2fbe136b6ad00b2eb908c"
+  },
+  "types": {
+   "OracleObservation": [
+    {
+     "name": "round",
+     "type": "uint64"
+    },
+    {
+     "name": "timeMs",
+     "type": "uint64"
+    },
+    {
+     "name": "prices",
+     "type": "OraclePrice[]"
+    }
+   ],
+   "OraclePrice": [
+    {
+     "name": "marketId",
+     "type": "uint32"
+    },
+    {
+     "name": "price",
+     "type": "uint64"
+    },
+    {
+     "name": "sources",
+     "type": "uint8"
+    }
+   ]
+  },
+  "message": {
+   "round": "598292802",
+   "timeMs": "1794878406123",
+   "prices": [
+    {
+     "marketId": 1,
+     "price": "6725000000000",
+     "sources": 5
+    },
+    {
+     "marketId": 3,
+     "price": "18240000000",
+     "sources": 3
+    }
+   ]
+  },
+  "digest": "0xd8403947f67f52a331ee15dcc4def2d771d2537ee62715273cc3a8b2823b6c24"
  }
 }

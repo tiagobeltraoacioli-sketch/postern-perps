@@ -995,8 +995,7 @@
      "type": "array",
      "items": {
       "$ref": "#/$defs/BlockInput"
-     },
-     "minItems": 1
+     }
     },
     "inputsEncoded": {
      "$ref": "#/$defs/Hex"

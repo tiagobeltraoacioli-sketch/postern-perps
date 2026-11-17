@@ -16,6 +16,7 @@ import { Validator } from '../lib/schema.mjs';
 import { keccak256, hex, unhex, concat } from '../lib/keccak.mjs';
 import { sign, recover, addressOf, N } from '../lib/secp256k1.mjs';
 import { typedDataHash } from '../lib/eip712.mjs';
+import { decodeInputs } from '../lib/encoding.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..');
@@ -167,11 +168,48 @@ export async function runConformance(base, { mock = false, schema, runId = Strin
   const blocks = await get(`/v1/blocks?from=${Math.max(1, C.height - 4)}&limit=5`);
   valid('GET /v1/blocks', 'BlockList', blocks.body);
   const B = blocks.body.blocks;
+  // inputsEncoded (SPEC 3.2 canonical bytes) says exactly what `inputs` says; every action signature recovers to
+  // the block's named signer under the published domain.
+  const checkInputs = async (label, needActions) => {
+  let decodedOk = true, sigOk = true, nActions = 0, nOracle = 0, why = '';
+  const recent = (await get(`/v1/blocks?from=${Math.max(1, (await get('/v1/status')).body.latestBlock.height - 60)}&limit=61`)).body.blocks;
+  for (const b of recent) {
+    let dec;
+    try {
+      dec = decodeInputs(unhex(b.inputsEncoded), eip.body);
+    } catch (e) {
+      decodedOk = false;
+      why = `${b.height}: ${e.message}`;
+      continue;
+    }
+    if (dec.length !== b.inputs.length) { decodedOk = false; why = `${b.height}: count`; continue; }
+    dec.forEach((d, i) => {
+      const j = b.inputs[i];
+      const same = d.kind === j.kind && (d.kind === 'action' ? d.type === j.type && JSON.stringify(d.message) === JSON.stringify(j.message) && d.signature === j.signature : JSON.stringify(d.payload) === JSON.stringify(j.payload));
+      if (!same) { decodedOk = false; why = `${b.height}[${i}]: ${JSON.stringify(d).slice(0, 120)} vs ${JSON.stringify(j).slice(0, 120)}`; }
+      if (d.kind === 'oracle') nOracle++;
+      if (d.kind === 'action') {
+        nActions++;
+        try {
+          const who = recover(typedDataHash(domain, d.type, eip.body.types[d.type], d.message), unhex(d.signature));
+          if (j.signer ? who !== j.signer : who !== d.message.account) sigOk = false;
+        } catch {
+          sigOk = false;
+        }
+      }
+    });
+  }
+  ok(`${label}: inputsEncoded decodes (SPEC 3.2, strict) to exactly the block's inputs (${recent.length} blocks, ${nActions} actions, ${nOracle} oracle)`, decodedOk, why);
+  ok(`${label}: every action input recovers to its signer under the published domain`, sigOk);
+  if (needActions) ok(`${label}: the recent log carries action inputs`, nActions > 0);
+  };
+
   ok('blocks consecutive, time strictly increasing', B.every((b, i) => i === 0 || (b.height === B[i - 1].height + 1 && b.time > B[i - 1].time)));
   ok('each block prevLogHash = previous logHash', B.every((b, i) => i === 0 || b.prevLogHash === B[i - 1].logHash));
   ok('logHash = keccak(prev || be64(h) || be64(time) || keccak(inputsEncoded)) (API 3.3, SPEC 3.1)', B.every((b) => hex(keccak256(concat(unhex(b.prevLogHash), be64(b.height), be64(b.time), keccak256(unhex(b.inputsEncoded))))) === b.logHash));
   const atCp = B.find((b) => b.height === C.height);
   if (atCp) ok('checkpoint logHash and stateRoot equal the block\'s', atCp.logHash === C.logHash && atCp.stateRoot === C.stateRoot);
+  await checkInputs('log', false);
   const one = await get(`/v1/blocks/${B[0].height}`);
   valid('GET /v1/blocks/{h}', 'Block', one.body);
   const stream = await fetch(`${base}/v1/blocks/stream?from=${status.body.latestBlock.height - 2}`);
@@ -295,6 +333,7 @@ export async function runConformance(base, { mock = false, schema, runId = Strin
   await expectError('agent ApproveAgent', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: String(an++), agent: addressOf(keyOf(`agent2/${runId}`)), name: 'x', expiresAt: String(T0 + 1000n) }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
   const ags = await get(`/v1/accounts/${mainAddr}/agents`);
   ok('approved agent listed', ags.body?.agents?.some((g) => g.agent === agentAddr));
+  await checkInputs('after actions', true);
 
   // ---------- geoblocking (mock and dev: the country comes from X-Mock-Country) ----------
   if (mock) {

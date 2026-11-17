@@ -38,5 +38,9 @@ const vd = { name: 'PosternPerpsVault', version: '1', chainId: 700770, verifying
 const ct = [{ name: 'height', type: 'uint64' }, { name: 'time', type: 'uint64' }, { name: 'stateRoot', type: 'bytes32' }, { name: 'logHash', type: 'bytes32' }, { name: 'withdrawalsRoot', type: 'bytes32' }, { name: 'depositsCredited', type: 'uint64' }, { name: 'forcedProcessed', type: 'uint64' }];
 const cm = { height: '120340', time: '1794878411400', stateRoot: '0x' + '11'.repeat(32), logHash: '0x' + '22'.repeat(32), withdrawalsRoot: '0x' + '33'.repeat(32), depositsCredited: '41', forcedProcessed: '0' };
 out.checkpoint = { domain: vd, fields: ct, message: cm, digest: hashTypedData({ domain: vd, types: { Checkpoint: ct }, primaryType: 'Checkpoint', message: Object.fromEntries(Object.entries(cm).map(([k, v]) => [k, /^0x/.test(v) ? v : BigInt(v)])) }) };
+// 394's oracle observation (array of structs) in the engine domain
+const ot = { OracleObservation: [{ name: 'round', type: 'uint64' }, { name: 'timeMs', type: 'uint64' }, { name: 'prices', type: 'OraclePrice[]' }], OraclePrice: [{ name: 'marketId', type: 'uint32' }, { name: 'price', type: 'uint64' }, { name: 'sources', type: 'uint8' }] };
+const om = { round: '598292802', timeMs: '1794878406123', prices: [{ marketId: 1, price: '6725000000000', sources: 5 }, { marketId: 3, price: '18240000000', sources: 3 }] };
+out.oracle = { domain: fx.domain, types: ot, message: om, digest: hashTypedData({ domain: fx.domain, types: ot, primaryType: 'OracleObservation', message: { round: BigInt(om.round), timeMs: BigInt(om.timeMs), prices: om.prices.map((p) => ({ marketId: p.marketId, price: BigInt(p.price), sources: p.sources })) } }) };
 writeFileSync(process.argv[3], JSON.stringify(out, null, 1) + '\n');
 console.log('ok', out.typed.length, out.keccak.length);

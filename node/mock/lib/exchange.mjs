@@ -13,6 +13,7 @@ import { keccak256, hex, concat } from './keccak.mjs';
 import { sign, addressOf } from './secp256k1.mjs';
 import { typedDataHash } from './eip712.mjs';
 import { Rng } from './rng.mjs';
+import { encodeInputs, ORACLE_TYPES } from './encoding.mjs';
 import { parseFixed, formatFixed, pow10, divFloor, divCeil, abs, min, max, parseU64 } from './fixed.mjs';
 
 const enc = new TextEncoder();
@@ -138,6 +139,10 @@ export class Exchange {
     this.committeeKeys = Array.from({ length: 7 }, (_, i) => mockKey(`committee/${seed}/${i}`));
     this.committee = this.committeeKeys.map((k, i) => ({ key: k, address: addressOf(k), i })).sort((a, b) => (a.address < b.address ? -1 : 1));
     this.threshold = 5;
+    // Oracle committee (394): seven throwaway keys, quorum 5; dedicated keys, not the checkpoint keys.
+    this.oracleKeys = Array.from({ length: 7 }, (_, i) => mockKey(`oracle/${seed}/${i}`));
+    this.oracleSigners = this.oracleKeys.map((k) => addressOf(k));
+    this.oracleQuorum = 5;
     this.sequencerKey = mockKey(`sequencer/${seed}`);
     this.sequencer = addressOf(this.sequencerKey);
     this.setHash = hex(keccak256(concat(be64(this.threshold), ...this.committee.map((c) => unhex(c.address)))));
@@ -841,7 +846,8 @@ export class Exchange {
     }
     if (round > this.oracleRound) {
       this.oracleRound = round;
-      inputs.push({ kind: 'oracle', payload: { mock: 'mock-oracle-v0 (not the format of node/oracle/README.md)', round: String(round), prices: [...this.markets.values()].filter((m) => m.oracleState === 'ok').map((m) => ({ marketId: m.id, price: String(m.index) })) } });
+      const live = [...this.markets.values()].filter((m) => m.oracleState === 'ok').sort((a, b) => a.id - b.id);
+      if (live.length) inputs.push({ kind: 'oracle', payload: this.oracleUpdate(round, time, live) });
     }
     // Deposits: l2Finalized become credited (deposit inputs, vault index order).
     for (const acc of this.accounts.values()) {
@@ -851,7 +857,7 @@ export class Exchange {
           d.creditedHeight = height;
           this.credit(acc, d.amount);
           this.depositsCredited += 1n;
-          inputs.push({ kind: 'deposit', payload: { depositId: String(d.depositId), account: acc.address, amount: String(d.amount), l2TxHash: d.l2TxHash, logIndex: d.logIndex } });
+          inputs.push({ kind: 'deposit', payload: { depositIndex: String(this.depositsCredited - 1n), account: acc.address, amount: String(d.amount) } });
           ev.deposits(acc, d);
           ev.account(acc);
         } else if (d.status === 'seen' && !d.demo && d.finalAt <= time) {
@@ -893,8 +899,9 @@ export class Exchange {
       this.candleTick(m, ev);
     }
     this.fundingTick(ev);
-    if (inputs.length === 0) inputs.push({ kind: 'oracle', payload: { mock: 'mock-heartbeat-v0', round: String(this.oracleRound), prices: [] } });
-    const inputsEncoded = hex(enc.encode(canonical(inputs)));
+    // SPEC 3.2 canonical bytes. A mock block may carry no input (the simulated market moves without inputs:
+    // the mock's blocks are not replayable from the log; README "Fidelity").
+    const inputsEncoded = hex(encodeInputs(inputs, this.eip712));
     const prevLogHash = this.lastLogHash;
     const logHash = hex(keccak256(concat(unhex(prevLogHash), be64(height), be64(time), keccak256(unhex(inputsEncoded)))));
     const leaves = this.accountLeaves();
@@ -912,6 +919,20 @@ export class Exchange {
     this.progressWithdrawals(ev);
     ev.block = { height, time };
     return ev;
+  }
+  /** 394's OracleUpdate: `quorum` observations (signer indices ascending, rotating), each signed in the engine domain. */
+  oracleUpdate(round, time, live) {
+    const start = Number(round % BigInt(this.oracleKeys.length));
+    const idx = Array.from({ length: this.oracleQuorum }, (_, k) => (start + k) % this.oracleKeys.length).sort((a, b) => a - b);
+    const lo = Number(round) * 3000;
+    const observations = idx.map((i) => {
+      const timeMs = Math.max(lo, time - 40 - 7 * i);
+      const prices = live.map((m) => ({ marketId: m.id, price: String(this.toWire(m, 'price', m.index)), sources: 5 }));
+      const msg = { round: String(round), timeMs: String(timeMs), prices };
+      const digest = typedDataHash(this.eip712.domain, 'OracleObservation', ORACLE_TYPES.OracleObservation, msg, ORACLE_TYPES);
+      return { signer: i, timeMs: String(timeMs), prices, signature: hex(sign(digest, this.oracleKeys[i])) };
+    });
+    return { round: String(round), observations };
   }
   blockSignature(b) {
     if (!b._sig) b._sig = hex(sign(keccak256(concat(enc.encode('postern-perps-mock/block'), unhex(b.hash))), this.sequencerKey));

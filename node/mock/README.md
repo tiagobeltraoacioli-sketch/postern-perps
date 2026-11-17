@@ -89,8 +89,11 @@ documented response field, and is simplified inside. Not like SPEC v0.1:
   whole positions at the mark against the liquidity account (no bankruptcy-price IOC, no ADL, no fee to INSURANCE
   from the remaining equity rule);
 - funding uses the average (mark - index) / index sample per block, not impact prices; no daily fee sweep;
-- the oracle input is a mock payload, not 394's `OracleUpdate`; `inputsEncoded` is canonical JSON, not SPEC 3.2's
-  binary encoding; the state root, account proof and withdrawal Merkle tree are the mock's own formats (commutative
+- the oracle input IS 394's `OracleUpdate` (five of seven derived oracle keys sign `OracleObservation` in the
+  engine domain every 3 s round) and `inputsEncoded` IS SPEC 3.2's binary encoding (the conformance suite decodes
+  it strictly and compares it with `inputs`), but a mock block may carry no input and the simulated market moves
+  without inputs, so the mock's log is not replayable by an engine; the oracle committee keys are not published
+  by the API; the state root, account proof and withdrawal Merkle tree are the mock's own formats (commutative
   pairs), not SPEC 11's; the checkpoint digest is 389's proposal (B) (seven fields), not the extended one of the
   vault draft `e0cc9fd` (thirteen fields): VAULT.md and SPEC 0.2 decide, then the mock follows;
 - `accounts` defaults to demo data for unknown addresses (the API says a zero account).
@@ -102,7 +105,6 @@ to zero per market (tested).
 
 ## Not done / not proven
 
-The mock is not the engine and proves nothing about the engine. Not done: SPEC 11 trees and proofs, SPEC 3.2
-binary input encoding, 394's signed oracle input, the vault's 13-field checkpoint, forced requests, the fee
+The mock is not the engine and proves nothing about the engine. Not done: SPEC 11 trees and proofs, the vault's 13-field checkpoint, forced requests, the fee
 sweep, ADL, open-order margin. The conformance suite has not yet been run against the real node (it does not
 exist yet). The busy-scenario rate is wall-clock dependent.
