@@ -1,0 +1,11 @@
+{
+  "name": "@postern-perps/geoblock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PosternDEX Perpetuals geoblocking and sanctions screening (UNAUDITED prototype, not legal advice)",
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": { ".": "./src/index.mjs", "./edge": "./edge/worker.mjs" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "engines": { "node": ">=20" }
+}

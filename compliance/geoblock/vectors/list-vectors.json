@@ -1,0 +1,521 @@
+{
+ "about": "Strict-loader vectors: each case applies ops to fixtures/geoblock.fixture.json and expects acceptance or refusal (an error message containing errorContains). Every implementation runs them.",
+ "cases": [
+  {
+   "name": "the fixture as is",
+   "ops": [],
+   "accept": true
+  },
+  {
+   "name": "informational top-level key tolerated",
+   "ops": [
+    {
+     "set": [
+      "sources"
+     ],
+     "value": [
+      {
+       "id": "x"
+      }
+     ]
+    }
+   ],
+   "accept": true
+  },
+  {
+   "name": "extra informational field in an entry tolerated",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "BR",
+      "sources"
+     ],
+     "value": [
+      "s1"
+     ]
+    }
+   ],
+   "accept": true
+  },
+  {
+   "name": "unknown top-level decision-like key",
+   "ops": [
+    {
+     "set": [
+      "allow_list"
+     ],
+     "value": [
+      "BR"
+     ]
+    }
+   ],
+   "accept": false,
+   "errorContains": "unknown top-level key"
+  },
+  {
+   "name": "wrong schema",
+   "ops": [
+    {
+     "set": [
+      "schema"
+     ],
+     "value": "postern-perps/geoblock-v2"
+    }
+   ],
+   "accept": false,
+   "errorContains": "schema"
+  },
+  {
+   "name": "version not semver",
+   "ops": [
+    {
+     "set": [
+      "version"
+     ],
+     "value": "0.1.x"
+    }
+   ],
+   "accept": false,
+   "errorContains": "version"
+  },
+  {
+   "name": "major version 1",
+   "ops": [
+    {
+     "set": [
+      "version"
+     ],
+     "value": "1.0.0"
+    }
+   ],
+   "accept": false,
+   "errorContains": "major"
+  },
+  {
+   "name": "rule text without deny by default",
+   "ops": [
+    {
+     "set": [
+      "rule"
+     ],
+     "value": "Allow unless listed."
+    }
+   ],
+   "accept": false,
+   "errorContains": "Deny by default"
+  },
+  {
+   "name": "blocked tier allowing",
+   "ops": [
+    {
+     "set": [
+      "tiers",
+      "blocked",
+      "effect"
+     ],
+     "value": "allow"
+    }
+   ],
+   "accept": false,
+   "errorContains": "tier blocked"
+  },
+  {
+   "name": "restricted-review tier allowing",
+   "ops": [
+    {
+     "set": [
+      "tiers",
+      "restricted-review",
+      "effect"
+     ],
+     "value": "allow"
+    }
+   ],
+   "accept": false,
+   "errorContains": "tier restricted-review"
+  },
+  {
+   "name": "allowed tier denying",
+   "ops": [
+    {
+     "set": [
+      "tiers",
+      "allowed",
+      "effect"
+     ],
+     "value": "deny"
+    }
+   ],
+   "accept": false,
+   "errorContains": "tier allowed"
+  },
+  {
+   "name": "extra tier",
+   "ops": [
+    {
+     "set": [
+      "tiers",
+      "sandbox"
+     ],
+     "value": {
+      "effect": "allow"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "tiers must be exactly"
+  },
+  {
+   "name": "missing tier",
+   "ops": [
+    {
+     "delete": [
+      "tiers",
+      "restricted-review"
+     ]
+    }
+   ],
+   "accept": false,
+   "errorContains": "tiers must be exactly"
+  },
+  {
+   "name": "default tier allowed",
+   "ops": [
+    {
+     "set": [
+      "default_tier"
+     ],
+     "value": "allowed"
+    }
+   ],
+   "accept": false,
+   "errorContains": "default_tier"
+  },
+  {
+   "name": "default tier unknown",
+   "ops": [
+    {
+     "set": [
+      "default_tier"
+     ],
+     "value": "open"
+    }
+   ],
+   "accept": false,
+   "errorContains": "default_tier"
+  },
+  {
+   "name": "unknown country effect allow",
+   "ops": [
+    {
+     "set": [
+      "unknown_country_effect"
+     ],
+     "value": "allow"
+    }
+   ],
+   "accept": false,
+   "errorContains": "unknown_country_effect"
+  },
+  {
+   "name": "country key lowercase",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "de"
+     ],
+     "value": {
+      "tier": "blocked"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "wrong shape"
+  },
+  {
+   "name": "country key alpha-3",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "DEU"
+     ],
+     "value": {
+      "tier": "blocked"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "wrong shape"
+  },
+  {
+   "name": "reserved code XX allowed",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "XX"
+     ],
+     "value": {
+      "tier": "allowed"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "may not be allowing"
+  },
+  {
+   "name": "reserved code T1 allowed",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "T1"
+     ],
+     "value": {
+      "tier": "allowed"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "wrong shape"
+  },
+  {
+   "name": "reserved code ZZ allowed (the node mock fixture does this; refused in a real list)",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "ZZ"
+     ],
+     "value": {
+      "tier": "allowed"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "may not be allowing"
+  },
+  {
+   "name": "reserved code ZZ blocked is fine",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "ZZ"
+     ],
+     "value": {
+      "tier": "blocked"
+     }
+    }
+   ],
+   "accept": true
+  },
+  {
+   "name": "unknown tier in an entry",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "BR",
+      "tier"
+     ],
+     "value": "banned"
+    }
+   ],
+   "accept": false,
+   "errorContains": "unknown"
+  },
+  {
+   "name": "reasons not an array",
+   "ops": [
+    {
+     "set": [
+      "countries",
+      "BR",
+      "reasons"
+     ],
+     "value": "x"
+    }
+   ],
+   "accept": false,
+   "errorContains": "reasons"
+  },
+  {
+   "name": "subdivision allowing",
+   "ops": [
+    {
+     "set": [
+      "subdivisions",
+      "UA-30"
+     ],
+     "value": {
+      "tier": "allowed"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "may not be allowing"
+  },
+  {
+   "name": "subdivision key shape",
+   "ops": [
+    {
+     "set": [
+      "subdivisions",
+      "UA43"
+     ],
+     "value": {
+      "tier": "blocked"
+     }
+    }
+   ],
+   "accept": false,
+   "errorContains": "wrong shape"
+  },
+  {
+   "name": "anonymizer tor allowed",
+   "ops": [
+    {
+     "set": [
+      "anonymizers",
+      "tor"
+     ],
+     "value": "allow"
+    }
+   ],
+   "accept": false,
+   "errorContains": "anonymizers.tor"
+  },
+  {
+   "name": "anonymizer vpn missing",
+   "ops": [
+    {
+     "delete": [
+      "anonymizers",
+      "vpn_proxy"
+     ]
+    }
+   ],
+   "accept": false,
+   "errorContains": "anonymizers.vpn_proxy"
+  },
+  {
+   "name": "anonymizer unknown kind",
+   "ops": [
+    {
+     "set": [
+      "anonymizers",
+      "residential_proxy"
+     ],
+     "value": "deny"
+    }
+   ],
+   "accept": false,
+   "errorContains": "anonymizer residential_proxy unknown"
+  },
+  {
+   "name": "anonymizer hosting plain deny accepted",
+   "ops": [
+    {
+     "set": [
+      "anonymizers",
+      "hosting"
+     ],
+     "value": "deny"
+    }
+   ],
+   "accept": true
+  },
+  {
+   "name": "denied policy open",
+   "ops": [
+    {
+     "set": [
+      "denied_policy",
+      "policy"
+     ],
+     "value": "open"
+    }
+   ],
+   "accept": false,
+   "errorContains": "denied_policy.policy"
+  },
+  {
+   "name": "denied policy actions_refused accepted",
+   "ops": [
+    {
+     "set": [
+      "denied_policy",
+      "policy"
+     ],
+     "value": "actions_refused"
+    }
+   ],
+   "accept": true
+  },
+  {
+   "name": "exit-only list with a trading action",
+   "ops": [
+    {
+     "set": [
+      "denied_policy",
+      "exit_only_actions"
+     ],
+     "value": [
+      "CancelOrder",
+      "PlaceOrder"
+     ]
+    }
+   ],
+   "accept": false,
+   "errorContains": "not an exit action"
+  },
+  {
+   "name": "exit-only list with ApproveAgent",
+   "ops": [
+    {
+     "set": [
+      "denied_policy",
+      "exit_only_actions"
+     ],
+     "value": [
+      "ApproveAgent"
+     ]
+    }
+   ],
+   "accept": false,
+   "errorContains": "not an exit action"
+  },
+  {
+   "name": "exit-only list with RevokeAgent accepted",
+   "ops": [
+    {
+     "set": [
+      "denied_policy",
+      "exit_only_actions"
+     ],
+     "value": [
+      "CancelOrder",
+      "RevokeAgent"
+     ]
+    }
+   ],
+   "accept": true
+  },
+  {
+   "name": "countries missing",
+   "ops": [
+    {
+     "delete": [
+      "countries"
+     ]
+    }
+   ],
+   "accept": false,
+   "errorContains": "countries must be an object"
+  }
+ ]
+}

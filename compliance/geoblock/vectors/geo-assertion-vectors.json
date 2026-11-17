@@ -1,0 +1,111 @@
+{
+ "about": "Geo assertion vectors; MACs computed with node:crypto createHmac (independent of src/sha256.mjs). The secret is a public test label, never a real secret.",
+ "secretUtf8": "postern-perps-397-test-geo-secret-vectors-0001",
+ "cases": [
+  {
+   "name": "ok",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412301,
+   "expect": "ok",
+   "mac": "49e4e88105a635a2bfb71db5e4a9fa28f304e14a4ecce50359fd851116d4fd59"
+  },
+  {
+   "name": "ok with subdivision and unknown signals",
+   "header": "v1;c=UA;s=UA-30;tor=-;vpn=-;host=-;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "ok",
+   "mac": "76499d5bb8ecfa9e91ef8d501791c4d29c3c2d9515ea801131f74b3ca886da32"
+  },
+  {
+   "name": "ok Tor country T1",
+   "header": "v1;c=T1;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "ok",
+   "mac": "3e91b990049d1760e9bfa356298e5a897cc6c371726b71a31858fca9b40051e0"
+  },
+  {
+   "name": "ok unknown country",
+   "header": "v1;c=-;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "ok",
+   "mac": "01ee9d5d6dc748cee4e8ffd773886ca8c0235df2c14244394aa6bd3e38647c20"
+  },
+  {
+   "name": "wrong mac",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "mac": "969fc4c92be238b354b0f72d9e64d73ef39aa8aea1fdb879f18715248d54c5e9",
+   "nowMs": 1794878412300,
+   "expect": "mac"
+  },
+  {
+   "name": "uppercase mac hex",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "mac": "49E4E88105A635A2BFB71DB5E4A9FA28F304E14A4ECCE50359FD851116D4FD59",
+   "nowMs": 1794878412300,
+   "expect": "shape"
+  },
+  {
+   "name": "stale",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878442301,
+   "expect": "stale",
+   "mac": "49e4e88105a635a2bfb71db5e4a9fa28f304e14a4ecce50359fd851116d4fd59"
+  },
+  {
+   "name": "edge of window",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878442300,
+   "expect": "ok",
+   "mac": "49e4e88105a635a2bfb71db5e4a9fa28f304e14a4ecce50359fd851116d4fd59"
+  },
+  {
+   "name": "future",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878407299,
+   "expect": "future",
+   "mac": "49e4e88105a635a2bfb71db5e4a9fa28f304e14a4ecce50359fd851116d4fd59"
+  },
+  {
+   "name": "version 2 refused",
+   "header": "v2;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "format",
+   "mac": "0d12097b1e44e67d10e244efb1b78fa722414ca6c78d6c244e88f5d866cd9cb5"
+  },
+  {
+   "name": "field order changed",
+   "header": "v1;s=-;c=BR;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "format",
+   "mac": "410071889ebcd07e439d04e7bff1b8ba4a16c80f34b8f02a98fd6abc3c55ab8d"
+  },
+  {
+   "name": "subdivision of another country",
+   "header": "v1;c=PA;s=BR-SP;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "inconsistent",
+   "mac": "c0bb0e09eafed434dfda4c19754984547f3313948e5d1de0ae95b56511bbde89"
+  },
+  {
+   "name": "subdivision without country",
+   "header": "v1;c=-;s=UA-43;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "inconsistent",
+   "mac": "6d2d995f867e2fc4a58bb7327db81bf55546f12996b910772d06f8e87ed0c5d8"
+  },
+  {
+   "name": "lowercase country",
+   "header": "v1;c=br;s=-;tor=0;vpn=0;host=0;sur=api;ts=1794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "format",
+   "mac": "d5007a2634f55e861b8042d70b201b2410ea5db6de955453b56629135f7b245b"
+  },
+  {
+   "name": "leading zero timestamp",
+   "header": "v1;c=BR;s=-;tor=0;vpn=0;host=0;sur=api;ts=01794878412300;rid=0123456789abcdef0123456789abcdef",
+   "nowMs": 1794878412300,
+   "expect": "format",
+   "mac": "251e834838ebbed4854eaa303e2938980300edfb8979bd711721b2b242ea862e"
+  }
+ ]
+}
