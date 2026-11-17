@@ -1,0 +1,267 @@
+/*
+ * Postern design tokens (see ../../DESIGN.md).
+ *
+ * Masonry and lamp: the interface is monochrome stone; the only chromatic
+ * colour that is not a status is --net, the lamp of the selected network.
+ * Dark is the default theme; [data-theme='light'] is the finished second one.
+ * scripts/check-contrast.mjs reads this file and fails below WCAG AA.
+ */
+
+/* Self-hosted fonts (SIL OFL 1.1; licence texts in public/licenses/). Latin only: the UI is English. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../../node_modules/@fontsource-variable/fraunces/files/fraunces-latin-opsz-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  /* Type */
+  --font-ui: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces Variable', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --text-micro: 0.75rem; /* 12 */
+  --text-small: 0.8125rem; /* 13 */
+  --text-ui: 0.875rem; /* 14 */
+  --text-body: 1rem; /* 16 */
+  --text-lead: 1.125rem; /* 18 */
+  --text-title: 1.375rem; /* 22 */
+  --text-figure: 1.75rem; /* 28: a headline figure inside a card (preview screens) */
+  --text-display: clamp(1.75rem, 1.2rem + 2vw, 2.5rem); /* 28 to 40 */
+  --text-numeral: clamp(2rem, 1.5rem + 2.2vw, 2.75rem); /* amount inputs: 32 to 44 */
+  --text-eyebrow: 0.75rem; /* 12: small-caps eyebrows (font-variant-caps), never running text */
+
+  /* Space: 4-point scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* Radius: squared stone, one arch */
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-4: 18px;
+  --r-arch: 999px;
+  --r-gate: 6px; /* the foot of the gate: dressed stone, barely eased */
+
+  /* Motion */
+  --t-fast: 120ms;
+  --t-base: 200ms;
+  --t-slow: 420ms;
+  --t-lamp: 900ms; /* the lamp changing state: slow enough to read as light, never gating an action */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-spring: cubic-bezier(0.3, 1.4, 0.5, 1);
+
+  /* A raised hand (stop): the mark of a sentence that tells the user what not to do. */
+  --icon-hand: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.5'/%3E%3Cpath d='M5.4 5.4l13.2 13.2'/%3E%3C/svg%3E");
+  /* Fine stone grain, laid over the wall and the gate. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .34 -.13'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  --shell-max: 1280px;
+  --gutter: clamp(16px, 4vw, 40px);
+  --header-h: 64px;
+}
+
+/* ---------- Dark (default) ---------- */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0b0e0f;
+  --field: #0b0e0f;
+  --surface: #111516;
+  --surface-2: #171c1e;
+  --surface-3: #1f2629;
+  --line: #252d30;
+  --line-strong: #364145;
+  --control-border: #667579;
+  --text: #eceae3;
+  --text-2: #a8b0ae;
+  --text-3: #8a9492;
+  --primary-bg: #eceae3;
+  --primary-bg-hover: #ffffff;
+  --primary-fg: #0b0e0f;
+  --ok: #7fd6a0;
+  --warn: #e9b44c;
+  --danger: #f59585;
+  --info: #9dbbea;
+  --focus: #eceae3;
+  --accent-fg: #0b0e0f;
+  --masonry: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='176' height='96' fill='none' stroke='%238a9492' stroke-opacity='.13'%3E%3Cpath d='M0 .5h176M0 48.5h176M.5 0v48M88.5 48v48'/%3E%3C/svg%3E");
+  --card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 40px 80px -48px rgb(0 0 0 / 0.9);
+  --scrim: rgb(4 6 7 / 0.72);
+  --shadow-overlay: 0 24px 64px -16px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.4);
+  --net: #c8fa72;
+  /* Dressed stone of the gate (never behind text), its mortar, the lamp's ironwork and unlit glass. */
+  --stone-1: #232a2d;
+  --stone-2: #2a3235;
+  --stone-3: #1d2426;
+  --stone-edge: #3b474b;
+  --mortar: #06090a;
+  --lamp-iron: #6b7b81;
+  --lamp-glass-off: #1d2426;
+  --masonry-lit: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='176' height='96' fill='none' stroke='%23d8d6cc' stroke-opacity='.34'%3E%3Cpath d='M0 .5h176M0 48.5h176M.5 0v48M88.5 48v48'/%3E%3C/svg%3E");
+  --glow-blend: screen;
+  --glow-wall: 0.2; /* how far the lamp reaches on the wall */
+  --glow-halo: 0.62;
+  --grain-opacity: 0.5;
+  --recess: rgb(0 0 0 / 0.5); /* the shade under the arch */
+  --gate-shadow:
+    0 1px 0 rgb(255 255 255 / 0.04) inset, 0 60px 90px -50px rgb(0 0 0 / 0.95),
+    0 18px 30px -22px rgb(0 0 0 / 0.8);
+}
+:root {
+  /* The lamp as it looks on dark stone, in both themes (brand mark, network tiles). */
+  --net-bright: #c8fa72;
+  --tile: #14191a;
+  --tile-fg: #eceae3;
+  --tile-edge: #364145;
+}
+
+/* ---------- Light ---------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f2f0e9;
+  --field: #ffffff;
+  --surface: #fbfaf6;
+  --surface-2: #f0ede4;
+  --surface-3: #e6e2d6;
+  --line: #ddd9cc;
+  --line-strong: #c4bfb0;
+  --control-border: #858a81;
+  --text: #14191a;
+  --text-2: #485250;
+  --text-3: #5d6765;
+  --primary-bg: #14191a;
+  --primary-bg-hover: #2a3233;
+  --primary-fg: #f6f4ee;
+  --ok: #1a6640;
+  --warn: #7d5000;
+  --danger: #ad281f;
+  --info: #245c9f;
+  --focus: #14191a;
+  --accent-fg: #ffffff;
+  --masonry: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='176' height='96' fill='none' stroke='%235d6765' stroke-opacity='.17'%3E%3Cpath d='M0 .5h176M0 48.5h176M.5 0v48M88.5 48v48'/%3E%3C/svg%3E");
+  --card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 32px 64px -44px rgb(20 25 26 / 0.45);
+  --scrim: rgb(20 25 26 / 0.45);
+  --shadow-overlay: 0 24px 64px -20px rgb(20 25 26 / 0.35), 0 2px 8px rgb(20 25 26 / 0.12);
+  --net: #486f00;
+  --stone-1: #e7e3d6;
+  --stone-2: #ded9ca;
+  --stone-3: #eeeadf;
+  --stone-edge: #c4bfb0;
+  --mortar: #a9a393;
+  --lamp-iron: #2b3332;
+  --lamp-glass-off: #f6f4ee;
+  --masonry-lit: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='176' height='96' fill='none' stroke='%23ffffff' stroke-opacity='.9'%3E%3Cpath d='M0 1.5h176M0 49.5h176M1.5 0v48M89.5 48v48'/%3E%3C/svg%3E");
+  --glow-blend: multiply;
+  --glow-wall: 0.1;
+  --glow-halo: 0.3;
+  --grain-opacity: 0.35;
+  --recess: rgb(60 52 30 / 0.2);
+  --gate-shadow:
+    0 1px 0 rgb(255 255 255 / 0.8) inset, 0 50px 70px -48px rgb(60 52 30 / 0.55),
+    0 14px 24px -18px rgb(60 52 30 / 0.35);
+}
+
+/*
+ * The lamp: one accent per network, tuned per theme (3:1 or better against
+ * the surfaces; it never carries meaning alone and is never body text).
+ */
+[data-network='bloch-l2'] {
+  --net-bright: #c8fa72;
+  --net: var(--net-bright);
+}
+[data-network='ethereum'] {
+  --net-bright: #8fa3ff;
+  --net: var(--net-bright);
+}
+[data-network='linea'] {
+  --net-bright: #61dfff;
+  --net: var(--net-bright);
+}
+[data-network='arbitrum-one'] {
+  --net-bright: #4db5ff;
+  --net: var(--net-bright);
+}
+[data-network='bnb-smart-chain'] {
+  --net-bright: #f3ba2f;
+  --net: var(--net-bright);
+}
+[data-network='base'] {
+  --net-bright: #6e9bff;
+  --net: var(--net-bright);
+}
+[data-network='op-mainnet'] {
+  --net-bright: #ff6470;
+  --net: var(--net-bright);
+}
+[data-network='devnet4'] {
+  --net-bright: #b9a6ff;
+  --net: var(--net-bright);
+}
+[data-network='preview'] {
+  --net-bright: #c8fa72;
+  --net: var(--net-bright);
+}
+/* Networks a bridged token comes from (badges of token marks only: no route, no lamp of a page). */
+[data-network='bitcoin'] {
+  --net-bright: #f5a53b;
+}
+[data-network='solana'] {
+  --net-bright: #b596ff;
+}
+[data-network='tron'] {
+  --net-bright: #ff7a6e;
+}
+[data-network='stellar'] {
+  --net-bright: #c9d3da;
+}
+:root[data-theme='light'] [data-network='bloch-l2'] {
+  --net: #486f00;
+}
+:root[data-theme='light'] [data-network='ethereum'] {
+  --net: #4257c9;
+}
+:root[data-theme='light'] [data-network='linea'] {
+  --net: #006b85;
+}
+:root[data-theme='light'] [data-network='arbitrum-one'] {
+  --net: #0b67b2;
+}
+:root[data-theme='light'] [data-network='bnb-smart-chain'] {
+  --net: #7a5b00;
+}
+:root[data-theme='light'] [data-network='base'] {
+  --net: #0052ff;
+}
+:root[data-theme='light'] [data-network='op-mainnet'] {
+  --net: #d4001a;
+}
+:root[data-theme='light'] [data-network='devnet4'] {
+  --net: #5b3fc4;
+}
+:root[data-theme='light'] [data-network='preview'] {
+  --net: #486f00;
+}
