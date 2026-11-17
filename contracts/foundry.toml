@@ -10,7 +10,7 @@ solc_version = "0.8.24"
 evm_version = "shanghai"
 optimizer = true
 # Measured, not assumed: creation must stay far below the L2's per-transaction gas cap (see docs/VAULT.md, "Gas").
-optimizer_runs = 200
+optimizer_runs = 1
 bytecode_hash = "none"
 fs_permissions = [{ access = "read", path = "./test/vectors" }]
 
@@ -22,3 +22,4 @@ seed = "0x7b10ca"
 runs = 128
 depth = 64
 fail_on_revert = false
+show_metrics = true

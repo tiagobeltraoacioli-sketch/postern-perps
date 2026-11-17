@@ -1,0 +1,22 @@
+{
+  "schema": "postern-perps/vault-config/1",
+  "status": "PROTOTYPE, UNAUDITED: not for deployment (perpetuals not deployed before legal review)",
+  "chainId": 700770,
+  "token": "TBD-deploy",
+  "tokenNote": "bUSDC on the Bloch L2 (BridgedStablecoinV3 of the Ethereum route), 6 decimals; address from bloch-l2-bridge deployments/bridges.json once deployed",
+  "feeRecipient": "0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544",
+  "validators": ["TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner"],
+  "threshold": 5,
+  "unpauseThreshold": 6,
+  "guardians": ["TBD-owner", "TBD-owner", "TBD-owner"],
+  "pauseDuration": 172800,
+  "pauseCooldown": 172800,
+  "cap": 1000000000000,
+  "minDeposit": 10000000,
+  "windowLimit": 250000000000,
+  "windowSeconds": 86400,
+  "largeThreshold": 50000000000,
+  "largeDelay": 86400,
+  "forcedDelay": 86400,
+  "escapeDelay": 604800
+}

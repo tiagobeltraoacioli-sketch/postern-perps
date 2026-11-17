@@ -9,8 +9,11 @@ contract PerpsVaultTest is Base {
     address internal bob = address(0xB0B);
     address internal carol = address(0xCA201);
 
+    VaultHarness internal harness;
+
     function setUp() public {
         _setUpVault();
+        harness = new VaultHarness(_config());
     }
 
     // ================================================================== configuration
@@ -855,7 +858,7 @@ contract PerpsVaultTest is Base {
         p.hashes = new bytes32[](1);
         p.sums = new uint64[](1);
         p.sums[0] = type(uint64).max;
-        try vault.sumRoot(bytes32(uint256(1)), 1, p) returns (bytes32, uint64) {
+        try harness.sumRootX(bytes32(uint256(1)), 1, p) returns (bytes32, uint64) {
             revert("overflow accepted");
         } catch (bytes memory e) {
             assertTrue(bytes4(e) == PerpsVault.InvalidProof.selector, "InvalidProof");
@@ -866,7 +869,7 @@ contract PerpsVaultTest is Base {
         PerpsVault.SumProof memory p;
         p.hashes = new bytes32[](49);
         p.sums = new uint64[](49);
-        try vault.sumRoot(bytes32(uint256(1)), 1, p) returns (bytes32, uint64) {
+        try harness.sumRootX(bytes32(uint256(1)), 1, p) returns (bytes32, uint64) {
             revert("depth 49 accepted");
         } catch (bytes memory e) {
             assertTrue(bytes4(e) == PerpsVault.InvalidProof.selector, "InvalidProof");
@@ -899,11 +902,11 @@ contract PerpsVaultTest is Base {
         }
         uint64 idx = uint64(uint256(pick) % count);
         (bytes32 root, uint64 total) = SumTree.root(h, s);
-        (bytes32 r2, uint64 t2) = vault.sumRoot(h[idx], s[idx], SumTree.proof(h, s, idx));
+        (bytes32 r2, uint64 t2) = harness.sumRootX(h[idx], s[idx], SumTree.proof(h, s, idx));
         assertEq(r2, root, "root");
         assertEq(t2, total, "total");
         // the same proof with a changed sum or another leaf hash fails
-        (bytes32 r3, uint64 t3) = vault.sumRoot(h[idx], s[idx] + 1, SumTree.proof(h, s, idx));
+        (bytes32 r3, uint64 t3) = harness.sumRootX(h[idx], s[idx] + 1, SumTree.proof(h, s, idx));
         assertTrue(t3 != total, "sum bound into the total");
         if (count > 1) assertTrue(r3 != root, "sum bound into the root hash");
     }
@@ -982,4 +985,13 @@ contract PerpsVaultGas is Base {
     }
 
     event log_named_uint(string key, uint256 val);
+}
+
+/// Test-only: exposes the vault's internal sum-tree verifier (the deployed vault keeps it internal for size).
+contract VaultHarness is PerpsVault {
+    constructor(Config memory c) PerpsVault(c) {}
+
+    function sumRootX(bytes32 leafHash, uint64 leafSum, SumProof calldata proof) external pure returns (bytes32, uint64) {
+        return sumRoot(leafHash, leafSum, proof);
+    }
 }

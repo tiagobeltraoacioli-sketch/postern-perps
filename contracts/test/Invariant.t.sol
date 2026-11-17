@@ -231,7 +231,10 @@ contract Handler is Base {
     function _depositOf(uint64 index) internal view returns (address a, uint64 amt) {
         amt = vault.depositTotalAt(index + 1) - vault.depositTotalAt(index);
         for (uint256 i; i < 3; ++i) {
-            if (vault.depositLink(vault.depositHead(index), index, accts[i], amt) == vault.depositHead(index + 1)) {
+            if (
+                keccak256(abi.encode(vault.depositHead(index), uint256(index), accts[i], uint256(amt)))
+                    == vault.depositHead(index + 1)
+            ) {
                 return (accts[i], amt);
             }
         }
