@@ -90,14 +90,19 @@ fn admission_and_engine_refuse_forgery_replay_window_and_authority() {
     let ok = place_order(&n.g, &u, ua, t + 2, 1, 672505, 10, false);
     n.seq.admit(&request(&n.g, &ok), t).unwrap();
     assert_eq!(n.seq.admit(&request(&n.g, &ok), t).unwrap_err().code, "BAD_NONCE");
+    // SPEC 2.5 (replaces the strict-increase rule of the pre-SPEC proposal): a lower, unused nonce inside the
+    // window is valid (out-of-order arrival); the same nonce twice never is, pending or applied
     let lower = place_order(&n.g, &u, ua, t + 1, 1, 672505, 11, false);
-    assert_eq!(n.seq.admit(&request(&n.g, &lower), t).unwrap_err().code, "BAD_NONCE");
+    n.seq.admit(&request(&n.g, &lower), t).unwrap();
+    let lower_again = place_order(&n.g, &u, ua, t + 1, 1, 672505, 12, false);
+    assert_eq!(n.seq.admit(&request(&n.g, &lower_again), t).unwrap_err().code, "BAD_NONCE", "pending nonce reused");
     // window
     let old = place_order(&n.g, &u, ua, t - 121_000, 1, 672505, 10, false);
     assert_eq!(n.seq.admit(&request(&n.g, &old), t).unwrap_err().code, "BAD_NONCE");
     let future = place_order(&n.g, &u, ua, t + 31_000, 1, 672505, 10, false);
     assert_eq!(n.seq.admit(&request(&n.g, &future), t).unwrap_err().code, "BAD_NONCE");
     assert!(all_applied(&n.step()));
+    assert_eq!(n.seq.admit(&request(&n.g, &lower_again), t).unwrap_err().code, "BAD_NONCE", "applied nonce reused");
     // agent: approved by the main key, may trade, may not withdraw or approve
     let ag = user(4);
     let aga = key_address(&ag);
@@ -110,7 +115,7 @@ fn admission_and_engine_refuse_forgery_replay_window_and_authority() {
     assert_eq!(n.seq.admit(&request(&n.g, &wd), t).unwrap_err().code, "AGENT_NOT_ALLOWED");
     assert!(all_applied(&n.step()));
     let orders = n.seq.engine.orders_json(&ua);
-    assert_eq!(orders["orders"].as_array().unwrap().len(), 2);
+    assert_eq!(orders["orders"].as_array().unwrap().len(), 3, "t+2, t+1 and the agent's order");
 }
 
 /// The engine itself refuses (deterministically, in replay) what admission would have refused: a malicious
@@ -398,7 +403,8 @@ fn real_engine_deposit_order_withdraw_certificate_and_recovery() {
     assert!(postern_perps_engine::merkle::verify(&rec.leaf(), 0, &sib, &body.withdrawals_root));
     assert!(!postern_perps_engine::merkle::verify(&rec.leaf(), 1, &sib, &body.withdrawals_root), "wrong position refused");
     assert_eq!(body.state_root(), n.seq.block(body.height).unwrap().unwrap().header.state_root, "components reproduce the replayed root");
-    assert!(body.total_escape >= 3_999_000_000 && body.total_escape <= 4_000_000_000, "escape {}", body.total_escape);
+    // engine definition (SPEC 11 systemHash): every account, the protocol-fee account (1 USDC fee) included
+    assert_eq!(body.total_escape, 4_001_000_000, "user 4000 USDC + fee account 1 USDC");
     for v in &n.vals {
         assert_eq!(v.engine.state_root(), n.seq.engine.state_root());
     }

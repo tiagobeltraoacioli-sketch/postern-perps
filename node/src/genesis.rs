@@ -32,6 +32,8 @@ pub struct Genesis {
     pub typed_data_hash: H256,
     pub markets: Vec<Market>,
     pub markets_hash: H256,
+    /// markets.json "defaults" (fees, funding, oracle) for the API's Market objects
+    pub markets_defaults: serde_json::Map<String, serde_json::Value>,
     pub collateral_decimals: u32,
     pub committee: Vec<Address>,
     pub threshold: usize,
@@ -162,6 +164,7 @@ impl Genesis {
             typed_data_hash: keccak(typed_data_bytes),
             markets,
             markets_hash: keccak(markets_bytes),
+            markets_defaults: mj.get("defaults").and_then(|v| v.as_object()).cloned().unwrap_or_default(),
             collateral_decimals,
             committee,
             threshold,

@@ -230,7 +230,8 @@ async fn http_api_actions_finality_geo_and_websocket() {
     assert_eq!(acc["collateral"], "10000.000000");
     let (_, st) = get_json(&format!("{}/v1/status", n.url)).await;
     assert_eq!(st["unaudited"], true);
-    assert_eq!(st["network"]["eip712"]["chainId"], 7007701);
+    assert_eq!(st["network"]["eip712"]["chainId"], 700770, "SPEC 2.1");
+    assert_eq!(st["network"]["eip712"]["verifyingContract"], to_hex(&g.vault));
     let (_, td) = get_json(&format!("{}/v1/eip712", n.url)).await;
     assert!(td["actions"].as_array().unwrap().iter().any(|a| a == "PlaceOrder"));
     // WebSocket: status channel delivers updates

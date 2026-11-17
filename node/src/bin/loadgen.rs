@@ -98,6 +98,7 @@ async fn main() {
     }
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     let st2: serde_json::Value = http_call("GET", &format!("{url}/v1/status"), None, &[]).await.ok().and_then(|(_, b)| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let nodei: serde_json::Value = http_call("GET", &format!("{url}/v1/node"), None, &[]).await.ok().and_then(|(_, b)| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut l = lat.lock().unwrap().clone();
     l.sort_unstable();
     let pct = |p: f64| -> u64 { if l.is_empty() { 0 } else { l[((l.len() as f64 - 1.0) * p) as usize] } };
@@ -110,7 +111,7 @@ async fn main() {
             "admissionLatencyMicros": {"p50": pct(0.5), "p90": pct(0.9), "p99": pct(0.99), "max": pct(1.0)},
             "allIncludedSeconds": included_s,
             "latestBlock": st["latestBlock"], "latestFinalizedAfter1.5s": st2["latestFinalized"], "latestBlockAfter1.5s": st2["latestBlock"],
-            "validators": st2["validators"],
+            "validators": nodei["validators"],
         })
     );
 }
