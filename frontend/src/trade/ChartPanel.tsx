@@ -1,12 +1,9 @@
 /**
  * The chart slot. The chart itself is agent 396's component (`frontend/src/chart/`, interface v0.1.0); this file only
- * turns the app's exact values into its props (`chartInputs`, tested) and renders `PriceChart` when the chart
- * module exports it. Until then it renders a plain reading of the last candle and says the chart is pending, so
- * the trading screen is complete without inventing a drawing.
+ * turns the app's exact values into its props (`chartInputs`, tested). Exact prices go as the app's fixed-point
+ * text; a price picked on the chart is a float, snapped here to the tick with the app's own integer rule.
  */
-import { type ComponentType } from 'react';
-import * as chart from '../chart';
-import type { ChartInterval, ChartLevel, ChartFill, ChartNotice, PriceChartProps } from '../chart';
+import { PriceChart, type ChartInterval, type ChartLevel, type ChartFill, type ChartNotice } from '../chart';
 import { feed } from '../state/session';
 import { useStore, persisted } from '../lib/store';
 import { formatPx, formatSize, formatUsd } from '../lib/format';
@@ -17,6 +14,8 @@ import { pricePick } from './hooks';
 import { useTheme } from '../ui/theme';
 import { toDecimalString, PX_DECIMALS } from '../lib/fixed';
 
+/** One empty array, so the chart sees the same reference while another market's candles are cleared. */
+const NO_CANDLES: readonly never[] = [];
 const INTERVALS: ChartInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
 export const chartInterval = persisted<ChartInterval>('postern.perps.interval.v1', '15m', (v): v is ChartInterval => INTERVALS.includes(v as ChartInterval));
 
@@ -45,7 +44,6 @@ export function chartInputs(market: Market, account: AccountState | null): { lev
   return { levels, fills };
 }
 
-const PriceChart = (chart as unknown as { PriceChart?: ComponentType<PriceChartProps> }).PriceChart;
 
 export function ChartPanel({ market, ticker }: { market: Market; ticker: Ticker | undefined }) {
   const candles = useStore(feed.candles);
@@ -61,8 +59,7 @@ export function ChartPanel({ market, ticker }: { market: Market; ticker: Ticker 
       ? { tone: 'warn', title: 'Reconnecting', text: 'Prices may be behind the exchange.' }
       : null;
   const dp = market.priceDecimals;
-  if (PriceChart)
-    return (
+  return (
       <section className="panel chart-panel" aria-label="Price chart">
         <PriceChart
           symbol={market.symbol}
@@ -70,7 +67,7 @@ export function ChartPanel({ market, ticker }: { market: Market; ticker: Ticker 
           interval={interval}
           intervals={INTERVALS}
           onIntervalChange={(i) => chartInterval.set(i)}
-          candles={candles.symbol === market.symbol ? candles.candles : []}
+          candles={candles.symbol === market.symbol ? candles.candles : NO_CANDLES}
           ready={candles.ready && candles.symbol === market.symbol}
           priceDecimals={dp}
           sizeDecimals={market.sizeDecimals}
@@ -91,34 +88,4 @@ export function ChartPanel({ market, ticker }: { market: Market; ticker: Ticker 
         />
       </section>
     );
-  const last = candles.candles[candles.candles.length - 1];
-  return (
-    <section className="panel chart-panel chart-pending" aria-label="Price chart">
-      <header className="panel-head">
-        <h2>{market.symbol}</h2>
-        <div className="segmented" role="group" aria-label="Candle interval">
-          {INTERVALS.map((i) => (
-            <button key={i} type="button" aria-pressed={i === interval} onClick={() => chartInterval.set(i)}>
-              {i}
-            </button>
-          ))}
-        </div>
-      </header>
-      <div className="chart-placeholder">
-        {notice && <p className={`badge badge-${notice.tone === 'danger' ? 'danger' : 'warn'}`}>{notice.title}</p>}
-        <p className="eyebrow">Chart component pending (agent 396)</p>
-        {last ? (
-          <dl className="ohlc num">
-            <div><dt>O</dt><dd>{last.o.toFixed(dp)}</dd></div>
-            <div><dt>H</dt><dd>{last.h.toFixed(dp)}</dd></div>
-            <div><dt>L</dt><dd>{last.l.toFixed(dp)}</dd></div>
-            <div><dt>C</dt><dd>{last.c.toFixed(dp)}</dd></div>
-          </dl>
-        ) : (
-          <p>Reading candles…</p>
-        )}
-        <p className="chart-levels">{levels.map((l) => `${l.label} ${l.priceText}`).join(' · ')}</p>
-      </div>
-    </section>
-  );
 }

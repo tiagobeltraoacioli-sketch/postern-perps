@@ -14,7 +14,7 @@ import { SZ_DECIMALS, toDecimalString } from '../lib/fixed';
 import { buildOrder, DEFAULT_SLIPPAGE_PPM, isMarketKind, isTriggerKind, newClientOrderId, parseAt, priceText, type OrderForm } from './order-builder';
 import { positionInputs, pricePick, useAccountState } from './hooks';
 import type { Market, OrderType, Ticker, TimeInForce } from '../lib/types';
-import { readAck } from '../compliance/notices';
+import { storedAttestation } from '../compliance/eligibility';
 import { Attestation } from '../compliance/Attestation';
 import { LeverageDialog } from './LeverageDialog';
 import { orderTypeWords } from '../lib/eip712';
@@ -86,7 +86,7 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
       : null;
   const summary = state ? accountSummary(state.account.collateral, inputs) : null;
 
-  const acknowledged = account ? !!readAck(account) : false;
+  const acknowledged = account ? !!storedAttestation(account) : false;
   void ackTick;
   const busy = pending?.phase === 'signing';
   const problems = preview?.problems ?? [];

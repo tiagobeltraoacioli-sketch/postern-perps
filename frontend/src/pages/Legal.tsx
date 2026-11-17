@@ -1,5 +1,5 @@
 /** Notices: operator, risk, restrictions, licences. Draft wording for counsel (compliance/notices.ts). */
-import { NOTICE_VERSION, OPERATOR_LINE, PROTOTYPE_LINE, RISK_POINTS } from '../compliance/notices';
+import { DOCUMENTS, NOTICE_VERSION, OPERATOR_LINE, PROTOTYPE_LINE, RESTRICTED_SUMMARY, RISK_POINTS } from '../compliance/notices';
 
 export function Legal() {
   return (
@@ -20,9 +20,8 @@ export function Legal() {
       </section>
       <section className="panel prose">
         <h2>Where it is not available</h2>
-        <p>
-          PosternDEX Perpetuals is not offered where derivatives exchanges of this kind are restricted, including the United States, Canada, the United Kingdom and Brazil, and nowhere to persons on sanctions lists. The list, with its sources, is maintained by Bloch Inc and applied by the exchange; where your region cannot be determined, trading is off. Cancelling, reducing and withdrawing always stay open, so funds can always leave.
-        </p>
+        <p>{RESTRICTED_SUMMARY}</p>
+        <p>Where your region cannot be determined, trading is off. Cancelling, reducing, withdrawing and revoking agent keys stay open, so funds can always leave.</p>
       </section>
       <section className="panel prose">
         <h2>Licences</h2>
@@ -30,7 +29,9 @@ export function Legal() {
           Fonts: Inter and Fraunces under the SIL Open Font License 1.1 (<a href="./licenses/Inter-OFL-1.1.txt">Inter</a>, <a href="./licenses/Fraunces-OFL-1.1.txt">Fraunces</a>). Icons: Lucide (ISC). Libraries: React (MIT), viem (MIT). Marks and the price chart are drawn in house.
         </p>
       </section>
-      <p className="fine">Notice version {NOTICE_VERSION}. Draft wording for counsel; not legal advice.</p>
+      <p className="fine">
+        Notices {NOTICE_VERSION}; documents {Object.values(DOCUMENTS).map((d) => d.id).join(', ')}. Draft wording for counsel; not legal advice.
+      </p>
     </div>
   );
 }

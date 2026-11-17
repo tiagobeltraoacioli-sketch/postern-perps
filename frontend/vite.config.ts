@@ -25,6 +25,7 @@ export default defineConfig(({ command }) => ({
     environmentOptions: { jsdom: { url: 'https://perps.invalid/' } },
     setupFiles: ['./src/test/setup.ts'],
     restoreMocks: true,
+    // The chart's tests (agent 396) need their canvas stand-in setup: they run with their own config from `npm test`.
     include: ['src/test/**/*.test.{ts,tsx}'],
   },
 }));

@@ -80,7 +80,7 @@ const scenario = async (query) => {
   const r = await fetch(`${MOCK}/mock/scenario?${query}`);
   if (!r.ok) throw new Error(`scenario ${query}: ${r.status}`);
 };
-const RESET = 'geo=PA&resume=BTC-USD&eip712=pinned&sequencer=running&vault=normal';
+const RESET = 'geo=PA&resume=BTC-USD&eip712=pinned&sequencer=running&vault=normal&accounts=reset';
 const failures = [];
 const results = [];
 const expect = (scene, ok, what) => {
@@ -132,11 +132,15 @@ try {
   if (run('02-attestation')) {
     await has('02', /Before your first order/);
     await has('02', /I am not a resident of/);
+    await has('02', /ATTEST-0\.1-20261117/);
     await shot('02-attestation-dark');
   }
-  // Accept the attestation.
+  // Sign the eligibility statement (397's typed data, 392's text): one wallet signature, checked in the page.
+  await page.fill('Country of residence', 'PA');
   await page.evaluate(`document.querySelectorAll('.attestation input[type=checkbox]').forEach((c) => c.click())`);
-  await page.click('I confirm');
+  await page.click('Sign the statement');
+  await page.waitFor('attestation signed', `!document.querySelector('.attestation')`);
+  expect('02', signatures === 1, 'the attestation is one wallet signature');
   await page.fill('Size', '0.25');
   await page.fill('Limit price', '67000.5');
   await page.waitVisibleText(/Review long 0\.25 BTC/);
@@ -158,7 +162,7 @@ try {
   }
   await page.click('Sign in wallet and send');
   await page.waitVisibleText(/Included in block|Rejected|Refused/, 15_000);
-  expect('05', signatures === 1, 'exactly one wallet signature for one order');
+  expect('05', signatures === 2, 'exactly one wallet signature for one order (after the attestation)');
   await has('05', /Included in block/);
   await shot('05-order-included-dark', false);
   await page.click('Close');

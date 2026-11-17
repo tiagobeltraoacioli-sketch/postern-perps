@@ -1177,6 +1177,22 @@ main {
   display: grid;
   gap: var(--s-1);
 }
+.statement pre {
+  margin: var(--s-1) 0 0;
+  padding: var(--s-3);
+  white-space: pre-wrap;
+  font-family: var(--font-ui);
+  font-size: var(--text-micro);
+  color: var(--text);
+  background: var(--surface-2);
+  border-radius: var(--r-1);
+  border: 1px solid var(--line);
+}
+.country {
+  width: 64px;
+  height: 30px;
+  text-align: center;
+}
 .attestation summary {
   font-size: var(--text-small);
   color: var(--text-2);
@@ -1738,8 +1754,15 @@ td.liq {
   .stat {
     white-space: normal;
   }
-  .stat-lead {
-    grid-column: 1 / -1;
+  .stat dd {
+    white-space: nowrap;
+  }
+  .stat-lead dd {
+    font-size: var(--text-lead);
+  }
+  .trade-chart,
+  .chart-panel {
+    min-height: 460px;
   }
   .app {
     padding-bottom: 56px;
@@ -1770,10 +1793,6 @@ td.liq {
   .trade[data-phone-tab='trades'] .trade-chart,
   .trade[data-phone-tab='trades'] .trade-book {
     display: none;
-  }
-  .trade-chart,
-  .chart-panel {
-    min-height: 340px;
   }
   .market-bar {
     flex-direction: column;
