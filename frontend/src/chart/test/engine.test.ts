@@ -172,6 +172,22 @@ describe('it draws the data given and nothing else', () => {
     });
     expect(starts.size).toBe(1);
   });
+  it('fill markers are drawn under the level labels', () => {
+    const { engine, run, base } = setup();
+    const cs = walk(100, T0, M15);
+    const entry = cs[90].c;
+    engine.setData(data(cs, {
+      levels: [{ id: 'p', kind: 'position', side: 'buy', price: entry, priceText: 'E', label: 'Long 0.5000 BTC' }],
+      fills: [{ id: 'f', time: cs[1].t, price: entry, side: 'buy' }, { id: 'g', time: cs[90].t, price: entry, side: 'sell' }],
+    }));
+    run();
+    const p = engine.getScene()!.palette;
+    // A marker is stroked then filled in the up or down colour; a label box is filled then stroked.
+    const markers = base.calls.map((c, i) => (c.op === 'fill' && base.calls[i - 1]?.op === 'stroke' && (c.fillStyle === p.up || c.fillStyle === p.down) ? i : -1)).filter((i) => i >= 0);
+    const label = base.calls.findIndex((c) => c.op === 'fillText' && String(c.args[0]).startsWith('Long'));
+    expect(markers.length).toBeGreaterThan(0);
+    expect(label).toBeGreaterThan(Math.max(...markers));
+  });
   it('a level with a non-finite price is not drawn', () => {
     const { engine, run } = setup();
     engine.setData(data(walk(50, T0, M15), { levels: [{ id: 'x', kind: 'order', side: 'buy', price: NaN, priceText: '?', label: 'Buy' }] }));

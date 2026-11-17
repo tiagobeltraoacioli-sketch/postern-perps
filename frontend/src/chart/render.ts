@@ -235,33 +235,7 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   if (s.last) live(s.last.c, s.stale ? p.text3 : s.last.c >= s.last.o ? p.up : p.down, [1, 2], 0.8);
   if (s.mark) live(s.mark.price, s.stale ? p.text3 : p.net, [5, 4], 0.95);
 
-  // The user's levels: line across the plot and a label at the left.
-  ctx.font = font(s, 500);
-  ctx.textBaseline = 'middle';
-  const tagById = new Map(s.tags.map((t) => [t.id, t]));
-  let elbowX = 0;
-  for (const level of s.levels) {
-    const tag = tagById.get(level.id);
-    if (tag && Number.isFinite(level.price)) elbowX = Math.max(elbowX, 8 + levelLabelWidth(ctx, s, level, tag) + 10);
-  }
-  elbowX = Math.min(elbowX, s.plotW - 12);
-  for (const level of s.levels) {
-    if (!range || !Number.isFinite(level.price)) continue;
-    const st = levelStyle(level, p);
-    const y = toY(level.price);
-    const tag = tagById.get(level.id);
-    if (y >= 0 && y <= plotH) {
-      ctx.setLineDash(st.dash);
-      ctx.strokeStyle = st.color;
-      ctx.lineWidth = st.width;
-      line(ctx, 0, st.width === 1 ? crisp(y, dpr) : y, plotW, st.width === 1 ? crisp(y, dpr) : y);
-      ctx.setLineDash([]);
-    }
-    if (tag) drawLevelLabel(ctx, s, level, st.color, tag, elbowX);
-    drawn.levels++;
-  }
-
-  // Fills.
+  // Fills (under the level labels, so a marker never covers a label's text).
   for (const f of s.fills) {
     if (!range) break;
     const x = slotX(f.slot, view, plotW);
@@ -291,6 +265,32 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
     ctx.fill();
     drawn.fills++;
   }
+  // The user's levels: line across the plot and a label at the left.
+  ctx.font = font(s, 500);
+  ctx.textBaseline = 'middle';
+  const tagById = new Map(s.tags.map((t) => [t.id, t]));
+  let elbowX = 0;
+  for (const level of s.levels) {
+    const tag = tagById.get(level.id);
+    if (tag && Number.isFinite(level.price)) elbowX = Math.max(elbowX, 8 + levelLabelWidth(ctx, s, level, tag) + 10);
+  }
+  elbowX = Math.min(elbowX, s.plotW - 12);
+  for (const level of s.levels) {
+    if (!range || !Number.isFinite(level.price)) continue;
+    const st = levelStyle(level, p);
+    const y = toY(level.price);
+    const tag = tagById.get(level.id);
+    if (y >= 0 && y <= plotH) {
+      ctx.setLineDash(st.dash);
+      ctx.strokeStyle = st.color;
+      ctx.lineWidth = st.width;
+      line(ctx, 0, st.width === 1 ? crisp(y, dpr) : y, plotW, st.width === 1 ? crisp(y, dpr) : y);
+      ctx.setLineDash([]);
+    }
+    if (tag) drawLevelLabel(ctx, s, level, st.color, tag, elbowX);
+    drawn.levels++;
+  }
+
   ctx.restore();
 
   // Axes.
