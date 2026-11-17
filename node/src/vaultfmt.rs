@@ -1,10 +1,10 @@
-//! The vault's formats, exactly as `docs/VAULT.md` v0.1 (agent 390, `contracts/src/PerpsVault.sol`) states them:
-//! deposit and forced-request hash chains (5.4), Merkle SUM trees with their withdrawal and escape leaves (5.5).
-//! The node computes them so that validators sign what the vault will verify.
+//! The vault's chain formats, exactly as `docs/VAULT.md` v0.2 5.4 (agent 390, contracts 27c1969) states them.
+//! (VAULT 0.1's sum trees were dropped by 390 in 0.2 with a written argument; the trees are SPEC 11's, computed by
+//! the engine crate.)
 //!
 //! UNAUDITED PROTOTYPE.
 
-use crate::util::{keccak, keccak_parts, word_address, word_u128, Address, H256, ZERO_H256};
+use crate::util::{keccak_parts, word_address, word_u128, Address, H256};
 
 /// `bytes32("...")`: ASCII left-aligned, zero-padded.
 pub fn bytes32_text(s: &str) -> H256 {
@@ -25,129 +25,70 @@ pub fn forced_head0(chain_id: u64, vault: &Address) -> H256 {
     keccak_parts(&[&bytes32_text("PosternPerps.forced.v1"), &word_u128(chain_id as u128), &word_address(vault)])
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn forced_head_next(prev: &H256, index: u64, account: &Address, kind: u64, market_id: u32, amount: u64, deadline: u64) -> H256 {
-    keccak_parts(&[
-        prev,
-        &word_u128(index as u128),
-        &word_address(account),
-        &word_u128(kind as u128),
-        &word_u128(market_id as u128),
-        &word_u128(amount as u128),
-        &word_u128(deadline as u128),
-    ])
+/// VAULT.md 0.2: `keccak256(abi.encode(prev, uint256 i, address account, uint256 kind, uint256 deadline, uint256 arg))`.
+pub fn forced_head_next(prev: &H256, index: u64, account: &Address, kind: u64, deadline: u64, arg: u64) -> H256 {
+    keccak_parts(&[prev, &word_u128(index as u128), &word_address(account), &word_u128(kind as u128), &word_u128(deadline as u128), &word_u128(arg as u128)])
 }
 
-pub fn withdrawal_leaf(index: u64, account: &Address, recipient: &Address, amount: u64) -> H256 {
-    keccak_parts(&[
-        &bytes32_text("PosternPerps.withdrawal.v1"),
-        &word_u128(index as u128),
-        &word_address(account),
-        &word_address(recipient),
-        &word_u128(amount as u128),
-    ])
-}
 
-pub fn escape_leaf(account: &Address, amount: u64) -> H256 {
-    keccak_parts(&[&bytes32_text("PosternPerps.escape.v1"), &word_address(account), &word_u128(amount as u128)])
-}
-
-fn node(lh: &H256, ls: u64, rh: &H256, rs: u64) -> H256 {
-    keccak_parts(&[&[0x01], lh, &ls.to_be_bytes(), rh, &rs.to_be_bytes()])
-}
-
-/// Root and total of the sum tree over `leaves` (complete binary tree padded with `(0, 0)` to a power of two;
-/// one leaf: the leaf itself; no leaf: `(0, 0)`). `None` if a sum does not fit u64 (the vault refuses it too).
-pub fn sum_root(leaves: &[(H256, u64)]) -> Option<(H256, u64)> {
-    if leaves.is_empty() {
-        return Some((ZERO_H256, 0));
-    }
-    let mut level: Vec<(H256, u64)> = leaves.to_vec();
-    let size = level.len().next_power_of_two();
-    level.resize(size, (ZERO_H256, 0));
-    while level.len() > 1 {
-        let mut next = Vec::with_capacity(level.len() / 2);
-        for p in level.chunks(2) {
-            let s = p[0].1.checked_add(p[1].1)?;
-            next.push((node(&p[0].0, p[0].1, &p[1].0, p[1].1), s));
-        }
-        level = next;
-    }
-    Some(level[0])
-}
-
-/// Proof `(hashes, sums)` for leaf `index`, sibling of the leaf level first.
-pub fn sum_proof(leaves: &[(H256, u64)], index: usize) -> Option<(Vec<H256>, Vec<u64>)> {
-    if index >= leaves.len() {
-        return None;
-    }
-    let mut level: Vec<(H256, u64)> = leaves.to_vec();
-    level.resize(level.len().next_power_of_two(), (ZERO_H256, 0));
-    let (mut hs, mut ss) = (Vec::new(), Vec::new());
-    let mut i = index;
-    while level.len() > 1 {
-        let sib = level[i ^ 1];
-        hs.push(sib.0);
-        ss.push(sib.1);
-        let mut next = Vec::with_capacity(level.len() / 2);
-        for p in level.chunks(2) {
-            next.push((node(&p[0].0, p[0].1, &p[1].0, p[1].1), p[0].1.checked_add(p[1].1)?));
-        }
-        level = next;
-        i /= 2;
-    }
-    Some((hs, ss))
-}
-
-/// The vault's `sumRoot(leaf, sum, proof)` recomputation.
-pub fn sum_verify(root: &H256, total: u64, leaf: &H256, amount: u64, index: u64, hashes: &[H256], sums: &[u64]) -> bool {
-    if hashes.len() != sums.len() || hashes.len() > 48 || (hashes.len() < 64 && index >> hashes.len() != 0) {
-        return false;
-    }
-    let (mut h, mut s) = (*leaf, amount);
-    for (i, (sh, ssum)) in hashes.iter().zip(sums).enumerate() {
-        let Some(t) = s.checked_add(*ssum) else { return false };
-        h = if (index >> i) & 1 == 1 { node(sh, *ssum, &h, s) } else { node(&h, s, sh, *ssum) };
-        s = t;
-    }
-    &h == root && s == total
-}
-
+/// Shared vectors of agent 390: `contracts/test/vectors/vault-vectors.json` (schema 0.2, contracts 27c1969,
+/// produced by `forge test --mc PerpsVaultVectors`). The node must reproduce every output byte for byte.
 #[cfg(test)]
-mod tests {
+mod vault_vectors {
     use super::*;
+    use crate::checkpoint::{CheckpointBody, CHECKPOINT_TYPE};
+    use crate::eip712::Domain;
+    use crate::engine::WithdrawalRecord;
+    use crate::util::{keccak, parse_address, to_hex};
 
-    #[test]
-    fn sum_tree_every_size_and_forgeries() {
-        for n in 1..=17usize {
-            let leaves: Vec<(H256, u64)> = (0..n).map(|i| (withdrawal_leaf(i as u64, &[1; 20], &[2; 20], 10 + i as u64), 10 + i as u64)).collect();
-            let (root, total) = sum_root(&leaves).unwrap();
-            assert_eq!(total, (0..n as u64).map(|i| 10 + i).sum::<u64>());
-            for i in 0..n {
-                let (hs, ss) = sum_proof(&leaves, i).unwrap();
-                assert!(sum_verify(&root, total, &leaves[i].0, leaves[i].1, i as u64, &hs, &ss), "n={n} i={i}");
-                assert!(!sum_verify(&root, total, &leaves[i].0, leaves[i].1 + 1, i as u64, &hs, &ss), "inflated amount");
-                assert!(!sum_verify(&root, total + 1, &leaves[i].0, leaves[i].1, i as u64, &hs, &ss), "wrong total");
-                if n > 1 {
-                    assert!(!sum_verify(&root, total, &leaves[i].0, leaves[i].1, (i ^ 1) as u64, &hs, &ss), "wrong index");
-                }
-                assert!(!sum_verify(&root, total, &leaves[i].0, leaves[i].1, (i + (1 << hs.len())) as u64, &hs, &ss), "index above 2^depth");
-            }
-        }
-        assert_eq!(sum_root(&[]).unwrap(), (ZERO_H256, 0));
-        let one = (escape_leaf(&[3; 20], 5), 5);
-        assert_eq!(sum_root(&[one]).unwrap(), one, "one leaf: the root is the leaf");
-        assert!(sum_root(&[(ZERO_H256, u64::MAX), (ZERO_H256, 1)]).is_none(), "sum overflow refused");
+    fn k(s: &str) -> H256 {
+        keccak(s.as_bytes())
     }
 
     #[test]
-    fn preimage_lengths_differ() {
-        // 160, 96 and 81 bytes (VAULT.md 5.5): a node is never a leaf, a leaf of one tree never of the other
-        assert_ne!(32 * 5, 32 * 3);
-        assert_ne!(32 * 3, 1 + 32 + 8 + 32 + 8);
-        assert_eq!(bytes32_text("PosternPerps.deposit.v1")[..23], *b"PosternPerps.deposit.v1");
-        assert_ne!(deposit_head0(700770, &[1; 20]), forced_head0(700770, &[1; 20]));
-        assert_ne!(deposit_head0(700770, &[1; 20]), deposit_head0(1, &[1; 20]));
-        let _ = keccak(b"");
+    fn heads_domain_checkpoint_digest_state_root_leaf_and_roots() {
+        let vault = parse_address("0xF62849F9A0B5Bf2913b396098F7c7019b51A820a").unwrap();
+        assert_eq!(to_hex(&deposit_head0(700770, &vault)), "0x14ac17057b39ed17e5d150480e7c42180a7fa1d604e22282eaa0a49379e5f875");
+        assert_eq!(to_hex(&forced_head0(700770, &vault)), "0x76fabf4cf7ebd9898533505e4a5dbcef50ed361022328cd954e05c41f9e95696");
+        let dom = Domain { name: "PosternPerpsVault".into(), version: "1".into(), chain_id: 700770, verifying_contract: Some(vault) };
+        assert_eq!(to_hex(&dom.separator()), "0xd8612207db80974d15f1485a3a41ac5d3ea80eecc91cde21caaa2d6287031cd5");
+        assert_eq!(to_hex(&keccak(CHECKPOINT_TYPE.as_bytes())), "0xa11fd1f0c03526baa4a08e1e667b8972d6ed98015080bcd9c7e4e7c4cbf7bcb6");
+        let cp = CheckpointBody {
+            height: 10,
+            time: 1_800_000_000_000,
+            log_hash: k("log"),
+            accounts_root: k("accounts"),
+            markets_root: k("markets"),
+            withdrawals_root: k("withdrawals"),
+            next_deposit_index: 2,
+            next_forced_index: 1,
+            next_order_id: 77,
+            total_escape: 5_000_000,
+            dust: 9,
+            aux_hash: k("aux"),
+            deposits_head: k("dh"),
+            forced_head: k("fh"),
+            withdrawal_count: 4,
+            withdrawals_total: 1_000_000,
+        };
+        assert_eq!(to_hex(&cp.state_root()), "0xe72601eaf3f450e42a4936525576728e24a4c75301e50dc379caca768cbfec22");
+        assert_eq!(to_hex(&cp.digest(&dom)), "0xedbdd9a9ebd4e2e3767ec12a7c2e2fa499fd328953513ff27eb7ad385e3163f9");
+        let w = WithdrawalRecord {
+            id: 3,
+            account: parse_address("0x1111111111111111111111111111111111111111").unwrap(),
+            recipient: parse_address("0x2222222222222222222222222222222222222222").unwrap(),
+            amount: 1_234_567,
+            fee: 0,
+            height: 99,
+        };
+        assert_eq!(to_hex(&w.leaf()), "0xe9166baba646062a6c6d061b7bd43516cf74f9893efb8dc38fe32d02a0b77bd9");
+        let abc = [k("a"), k("b"), k("c")];
+        assert_eq!(to_hex(&postern_perps_engine::merkle::root(&abc, 32)), "0x8fbe559c6533a8a7b143ff5aeb5a68f790da1a04469c65f6b7a3a8895fa97d89");
+        assert_eq!(to_hex(&postern_perps_engine::merkle::root(&[], 32)), "0x7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e");
+        // a body whose stateRoot field disagrees with its components is refused
+        let mut j = cp.to_json();
+        j["stateRoot"] = to_hex(&k("x")).into();
+        assert!(CheckpointBody::from_json(&j).is_err());
+        assert_eq!(CheckpointBody::from_json(&cp.to_json()).unwrap(), cp);
     }
 }

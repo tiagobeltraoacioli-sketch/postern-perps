@@ -50,9 +50,11 @@ pub struct WithdrawalRecord {
 }
 
 impl WithdrawalRecord {
-    /// VAULT.md 5.5 withdrawal leaf.
+    /// SPEC 11 / VAULT.md 0.2 5.5 withdrawal leaf, computed by the engine crate's own function:
+    /// `keccak256(0x00 || "PPv1wdrl" || be64 id || account || recipient || be64 amount || be64 height)`.
     pub fn leaf(&self) -> H256 {
-        crate::vaultfmt::withdrawal_leaf(self.id, &self.account, &self.recipient, self.amount)
+        let r = postern_perps_engine::engine::WithdrawalRecord { id: self.id, account: self.account, recipient: self.recipient, amount: self.amount, height: self.height };
+        postern_perps_engine::merkle::leaf_hash(&postern_perps_engine::Engine::withdrawal_leaf_data(&r))
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -139,6 +141,32 @@ pub fn merkle_verify(root: &H256, leaf: &H256, index: u64, count: u64, proof: &[
     p.next().is_none() && &h == root
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateParts {
+    pub accounts_root: H256,
+    pub markets_root: H256,
+    pub withdrawals_root: H256,
+    pub next_order_id: u64,
+    pub total_escape: u128,
+    pub dust: u128,
+    pub aux_hash: H256,
+    pub withdrawals_total: u64,
+}
+
+/// SPEC 11 state root from its components (the vault's `stateRootOf`).
+pub fn state_root_of(height: u64, time: u64, next_deposit: u64, next_forced: u64, p: &StateParts) -> H256 {
+    let sys = keccak_parts(&[
+        b"PPv1sys",
+        &next_deposit.to_be_bytes(),
+        &next_forced.to_be_bytes(),
+        &p.next_order_id.to_be_bytes(),
+        &p.total_escape.to_be_bytes(),
+        &p.dust.to_be_bytes(),
+        &p.aux_hash,
+    ]);
+    keccak_parts(&[b"PosternPerps/state/v1", &height.to_be_bytes(), &time.to_be_bytes(), &p.accounts_root, &p.markets_root, &p.withdrawals_root, &sys])
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthorityError {
     UnknownSigner,
@@ -162,9 +190,10 @@ pub trait Engine: Send + Sync {
     fn genesis_log_hash(&self) -> H256;
     fn withdrawal_count(&self) -> u64;
     fn withdrawal(&self, id: u64) -> Option<WithdrawalRecord>;
-    /// Per account (engine order), what it receives if escape starts at this state (VAULT.md 5.5 escape tree);
-    /// accounts owed 0 are omitted.
-    fn escape_entries(&self) -> Vec<(Address, u64)>;
+    /// The components of SPEC 11's state root that the vault's checkpoint carries (VAULT.md 0.2 5.2).
+    fn state_parts(&self) -> StateParts;
+    /// Depth-32 siblings (bottom-up) of withdrawal `id` in the tree of the first `count` records.
+    fn withdrawal_proof(&self, id: u64, count: u64) -> Option<Vec<H256>>;
     /// SPEC S-2.5 nonce rule against the applied state (admission adds its own pending set).
     fn nonce_ok(&self, signer: &Address, nonce: u64, time: u64) -> Result<(), &'static str>;
     fn account_json(&self, a: &Address) -> serde_json::Value;

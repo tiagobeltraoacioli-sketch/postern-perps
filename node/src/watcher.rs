@@ -13,7 +13,8 @@
 //!
 //! Events of `docs/VAULT.md` v0.1 (agent 390):
 //! `Deposit(uint64 indexed index, address indexed account, address indexed sender, uint64 amount, bytes32 head)`,
-//! `ForcedRequest(uint64 indexed index, address indexed account, uint8 kind, uint32 marketId, uint64 amount, uint64 deadline, bytes32 head)`.
+//! `ForcedRequest(uint64 indexed index, address indexed account, uint8 kind, uint64 deadline, uint64 arg, bytes32 head)` (VAULT.md 0.2).
+//! 7. The L2 time (newest `latest` block timestamp of the two endpoints, seconds) is recorded for the forced-deadline rule.
 //! 6. Every event's `head` must equal the chain head the watcher computes itself (VAULT.md 5.4) from the previous
 //!    head (`head0` = keccak256(abi.encode(bytes32 tag, chainid, vault))): a log that does not chain is refused.
 //!
@@ -50,7 +51,7 @@ impl WatcherConfig {
             endpoints,
             vault,
             deposit_sig: "Deposit(uint64,address,address,uint64,bytes32)".into(),
-            forced_sig: "ForcedRequest(uint64,address,uint8,uint32,uint64,uint64,bytes32)".into(),
+            forced_sig: "ForcedRequest(uint64,address,uint8,uint64,uint64,bytes32)".into(),
             poll_ms: 1000,
             max_range: 2000,
             start_block: 0,
@@ -66,6 +67,8 @@ pub struct L2View {
     pub deposits: BTreeMap<u64, DepositEvent>,
     pub forced: BTreeMap<u64, ForcedEvent>,
     pub endpoints_agree: bool,
+    /// newest L2 block timestamp (seconds) seen at the `latest` tag of either endpoint
+    pub l2_time_s: u64,
     pub last_error: Option<String>,
     pub polls: u64,
     pub disagreements: u64,
@@ -266,28 +269,18 @@ pub fn decode_event(cfg: &WatcherConfig, l: &RawLog) -> Result<Event, String> {
             log_index: l.log_index,
         }))
     } else if t0 == keccak(cfg.forced_sig.as_bytes()) {
-        if l.topics.len() != 3 || l.data.len() != 160 {
+        if l.topics.len() != 3 || l.data.len() != 128 {
             return Err("ForcedRequest log shape".into());
         }
         let k = word_to_u64(&l.data[..32])?;
-        let kind = ForcedKind::from_vault(k).ok_or("unknown forced kind")?;
-        let market_id = u32::try_from(word_to_u64(&l.data[32..64])?).map_err(|_| "forced marketId")?;
-        let amount = word_to_u64(&l.data[64..96])?;
-        let deadline = word_to_u64(&l.data[96..128])?;
-        let arg = match kind {
-            ForcedKind::CancelAll => 0,
-            ForcedKind::Close => market_id as u64,
-            ForcedKind::Withdraw => amount,
-        };
+        let kind = ForcedKind::from_u8(u8::try_from(k).map_err(|_| "forced kind")?).ok_or("unknown forced kind")?;
         Ok(Event::Forced(ForcedEvent {
             index: word_to_u64(&l.topics[1])?,
             account: word_to_addr(&l.topics[2])?,
             kind,
-            deadline,
-            arg,
-            market_id,
-            amount,
-            head: h(&l.data[128..160]),
+            deadline: word_to_u64(&l.data[32..64])?,
+            arg: word_to_u64(&l.data[64..96])?,
+            head: h(&l.data[96..128]),
             l2_block: l.block_number,
             l2_block_hash: l.block_hash,
             l2_tx_hash: l.tx_hash,
@@ -324,6 +317,18 @@ async fn poll_inner(cfg: &WatcherConfig, view: &SharedView) -> Result<bool, Stri
         if c != L2_CHAIN_ID {
             return Err(format!("endpoint {e} reports chain {c}, not {L2_CHAIN_ID}"));
         }
+    }
+    let mut l2t = 0u64;
+    for e in [a, b] {
+        if let Ok(blk) = rpc(e, "eth_getBlockByNumber", serde_json::json!(["latest", false])).await {
+            if let Some(t) = blk.get("timestamp").and_then(|t| hex_u64(t).ok()) {
+                l2t = l2t.max(t);
+            }
+        }
+    }
+    {
+        let mut v = view.lock().unwrap();
+        v.l2_time_s = v.l2_time_s.max(l2t);
     }
     let (na, _) = block_num_hash(a, serde_json::json!("finalized")).await?;
     let (nb, _) = block_num_hash(b, serde_json::json!("finalized")).await?;
@@ -409,7 +414,7 @@ async fn poll_inner(cfg: &WatcherConfig, view: &SharedView) -> Result<bool, Stri
                 if x.index != nf {
                     return Err(format!("forced index {} where {nf} expected: stop", x.index));
                 }
-                let want = forced_head_next(&fh, x.index, &x.account, x.kind.vault_code(), x.market_id, x.amount, x.deadline);
+                let want = forced_head_next(&fh, x.index, &x.account, x.kind as u64, x.deadline, x.arg);
                 if want != x.head {
                     return Err(format!("forced request {}: event head does not chain", x.index));
                 }

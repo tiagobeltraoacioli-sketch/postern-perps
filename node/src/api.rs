@@ -78,6 +78,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/forced", get(forced))
         .route("/v1/geo", get(geo))
         .route("/v1/ws", get(ws))
+        .route("/v1/oracle/{symbol}", get(oracle_status))
+        .fallback(|| async { not_found("unknown endpoint") })
         .layer(DefaultBodyLimit::max(16 * 1024))
         .with_state(app)
 }
@@ -166,9 +168,15 @@ async fn ticker(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Respons
     }
 }
 
-async fn book(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
+async fn book(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Response {
     if app.g.market_by_symbol(&sym).is_none() {
         return not_found("unknown market");
+    }
+    if let Some(d) = q.get("depth") {
+        match d.parse::<u32>() {
+            Ok(n) if (1..=500).contains(&n) => {}
+            _ => return error(400, "MALFORMED", "depth must be 1 to 500", serde_json::json!({"path": "depth"})),
+        }
     }
     let s = app.seq.lock().unwrap();
     Json(serde_json::json!({"symbol": sym, "seq": 0, "height": s.engine.height(), "time": s.engine.time(), "bids": [], "asks": []})).into_response()
@@ -180,9 +188,12 @@ async fn empty_list_trades(State(app): State<Arc<App>>, Path(sym): Path<String>)
     }
     Json(serde_json::json!({"trades": []})).into_response()
 }
-async fn empty_list_candles(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
+async fn empty_list_candles(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Response {
     if app.g.market_by_symbol(&sym).is_none() {
         return not_found("unknown market");
+    }
+    if !matches!(q.get("interval").map(|s| s.as_str()).unwrap_or("1m"), "1m" | "5m" | "15m" | "1h" | "4h" | "1d") {
+        return error(400, "MALFORMED", "unknown interval", serde_json::json!({"path": "interval"}));
     }
     Json(serde_json::json!({"candles": []})).into_response()
 }
@@ -191,6 +202,15 @@ async fn empty_list_funding(State(app): State<Arc<App>>, Path(sym): Path<String>
         return not_found("unknown market");
     }
     Json(serde_json::json!({"funding": []})).into_response()
+}
+
+async fn oracle_status(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
+    let Some(m) = app.g.market_by_symbol(&sym) else { return not_found("unknown market") };
+    let s = app.seq.lock().unwrap();
+    Json(serde_json::json!({"symbol": m.symbol, "status": "halted", "price": null, "time": s.engine.time(),
+        "round": s.engine.last_oracle_round().to_string(), "sources": [], "signers": 0, "threshold": app.g.oracle_quorum,
+        "haltReason": "no oracle feeder wired to this dev node (agent 394's feeder submits OracleUpdate inputs)"}))
+    .into_response()
 }
 
 async fn committee(State(app): State<Arc<App>>) -> Response {
@@ -404,7 +424,7 @@ fn withdrawal_json(app: &App, id: u64) -> Option<serde_json::Value> {
     let status = if cert.is_some() { "certified" } else { "included" };
     Some(serde_json::json!({
         "withdrawalId": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient),
-        "amount": crate::util::scaled_to_decimal(rec.amount, 6), "fee": crate::util::scaled_to_decimal(rec.fee, 6),
+        "amount": crate::util::scaled_to_decimal(rec.amount as u128, 6), "fee": crate::util::scaled_to_decimal(rec.fee as u128, 6),
         "status": status, "requestedHeight": rec.height, "includedHeight": rec.height,
         "checkpointHeight": cert.as_ref().and_then(|c| c["checkpoint"]["height"].as_u64()),
         "certificate": cert, "l2TxHash": null, "availableAt": null,
@@ -445,7 +465,7 @@ fn deposit_status_json(app: &App, d: &crate::types::DepositEvent) -> serde_json:
     let credited = d.index < s.engine.next_deposit_index();
     let mut j = deposit_json(d);
     j["depositId"] = j["index"].clone();
-    j["amount"] = serde_json::Value::String(crate::util::scaled_to_decimal(d.amount, 6));
+    j["amount"] = serde_json::Value::String(crate::util::scaled_to_decimal(d.amount as u128, 6));
     j["status"] = serde_json::Value::String(if credited { "credited" } else { "l2Finalized" }.into());
     j["creditedHeight"] = s.deposit_heights.get(&d.index).copied().into();
     j

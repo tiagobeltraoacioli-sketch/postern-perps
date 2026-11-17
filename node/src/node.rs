@@ -179,3 +179,54 @@ pub fn spawn_local_validators(
     }
     Ok(hs)
 }
+
+/// A validator in its own process (dev mode): pulls blocks from the sequencer's public API (`/v1/blocks?raw=1`),
+/// replays them with its own engine and its own L2 view, and posts its checkpoint signatures to
+/// `POST /v1/finality/signatures`. It trusts the sequencer's API for nothing but bytes: every block is verified
+/// exactly as the in-process validators do (`Validator::process`).
+pub async fn run_remote_validator(base: String, mut v: Validator, mut stop: tokio::sync::watch::Receiver<bool>) -> Result<(), String> {
+    use crate::watcher::http_call;
+    loop {
+        if *stop.borrow() {
+            return Ok(());
+        }
+        let from = v.height + 1;
+        let r = http_call("GET", &format!("{base}/v1/blocks?from={from}&limit=200&raw=1"), None, &[]).await;
+        let blocks: Vec<crate::types::Block> = match r {
+            Ok((200, body)) => {
+                let j: serde_json::Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+                j["blocks"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|b| b["raw"].as_str().and_then(|h| crate::util::parse_hex_vec(h).ok())).filter_map(|raw| crate::types::Block::from_bytes(&raw).ok()).collect())
+                    .unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        if blocks.is_empty() {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                _ = stop.changed() => return Ok(()),
+            }
+            continue;
+        }
+        for b in blocks {
+            match v.process(&b, now_ms()) {
+                VResult::Applied { checkpoint: Some((body, sig)) } => {
+                    let req = serde_json::json!({"height": body.height, "signature": crate::util::to_hex(&sig)}).to_string();
+                    let _ = http_call("POST", &format!("{base}/v1/finality/signatures"), Some(&req), &[]).await;
+                }
+                VResult::Applied { checkpoint: None } | VResult::AppliedNotSigned(_) => {}
+                VResult::Wait(_) => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    break;
+                }
+                VResult::Refused { reason, latched } => {
+                    if latched {
+                        return Err(format!("validator latched: {reason}"));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}

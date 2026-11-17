@@ -4,12 +4,12 @@
 //! oracle quorum), so the sequencer / validator / checkpoint / certificate machinery is tested on real rules.
 //!
 //! Determinism: `BTreeMap` only, integer arithmetic only, checked everywhere (an overflow is a refusal), no clock.
-//! State root: `keccak256("PosternPerps stub state v0" || snapshot())`: a commitment, not a Merkle tree (388's
-//! engine provides the per-account provable root).
+//! State root: SPEC 11's equation over stub components (accounts and markets are plain commitments, not trees;
+//! the withdrawal tree is SPEC 11's); 388's engine provides the per-account provable root.
 //!
 //! UNAUDITED PROTOTYPE.
 
-use super::{AuthorityError, BlockOutcome, Engine, InputOutcome, WithdrawalRecord};
+use super::{state_root_of, AuthorityError, BlockOutcome, Engine, InputOutcome, StateParts, WithdrawalRecord};
 use crate::actions::{field_addr, field_bool, field_u, verify_signed_action, ActionError};
 use crate::eip712::{digest, Domain, Reader, Registry, Val};
 use crate::genesis::{Genesis, NONCE_FUTURE_MS, NONCE_PAST_MS};
@@ -574,7 +574,8 @@ impl Engine for StubEngine {
     }
 
     fn state_root(&self) -> H256 {
-        keccak_parts(&[b"PosternPerps stub state v0", &self.serialize()])
+        // SPEC 11's equation over the stub's components, so the vault's stateRootOf holds for the stub too
+        state_root_of(self.height, self.time, self.next_deposit, self.next_forced, &self.state_parts())
     }
     fn height(&self) -> u64 {
         self.height
@@ -624,9 +625,36 @@ impl Engine for StubEngine {
     fn withdrawal(&self, id: u64) -> Option<WithdrawalRecord> {
         self.withdrawals.get(id as usize).cloned()
     }
-    fn escape_entries(&self) -> Vec<(Address, u64)> {
-        // stub: no positions, so what an account is owed is its balance (bounded by 2^62 at credit)
-        self.collateral.iter().map(|(a, v)| (*a, *v as u64)).collect()
+    fn state_parts(&self) -> StateParts {
+        let mut acc = Vec::new();
+        for (a, v) in &self.collateral {
+            acc.extend_from_slice(a);
+            acc.extend_from_slice(&v.to_be_bytes());
+        }
+        let mut mk = Vec::new();
+        for (m, p) in &self.prices {
+            mk.extend_from_slice(&m.to_be_bytes());
+            mk.extend_from_slice(&p.to_be_bytes());
+        }
+        let wl: Vec<H256> = self.withdrawals.iter().map(|w| w.leaf()).collect();
+        StateParts {
+            // stub commitments (not trees) for accounts and markets; the withdrawal tree is SPEC 11's
+            accounts_root: keccak_parts(&[b"stub accounts v0", &acc]),
+            markets_root: keccak_parts(&[b"stub markets v0", &mk]),
+            withdrawals_root: postern_perps_engine::merkle::root(&wl, 32),
+            next_order_id: self.next_order_id,
+            total_escape: self.collateral.values().sum(),
+            dust: 0,
+            aux_hash: keccak_parts(&[b"stub aux v0", &self.serialize()]),
+            withdrawals_total: self.withdrawals.iter().map(|w| w.amount).sum(),
+        }
+    }
+    fn withdrawal_proof(&self, id: u64, count: u64) -> Option<Vec<H256>> {
+        if id >= count || count as usize > self.withdrawals.len() {
+            return None;
+        }
+        let wl: Vec<H256> = self.withdrawals[..count as usize].iter().map(|w| w.leaf()).collect();
+        Some(postern_perps_engine::merkle::proof(&wl, 32, id as usize))
     }
     fn nonce_ok(&self, signer: &Address, nonce: u64, time: u64) -> Result<(), &'static str> {
         nonce_rule(self.nonces.get(signer), nonce, time)

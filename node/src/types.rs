@@ -46,7 +46,7 @@ impl DepositEvent {
     }
 }
 
-/// SPEC 14 kinds (engine input). The vault's event numbers them 1..3 (VAULT.md): `from_vault` maps them.
+/// SPEC 14 kinds (engine input), the same numbers in the vault's event since VAULT.md 0.2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForcedKind {
     CancelAll = 0,
@@ -63,18 +63,6 @@ impl ForcedKind {
             _ => None,
         }
     }
-    /// VAULT.md: 1 cancel-all, 2 close, 3 withdraw.
-    pub fn from_vault(v: u64) -> Option<ForcedKind> {
-        match v {
-            1 => Some(ForcedKind::CancelAll),
-            2 => Some(ForcedKind::Close),
-            3 => Some(ForcedKind::Withdraw),
-            _ => None,
-        }
-    }
-    pub fn vault_code(&self) -> u64 {
-        *self as u64 + 1
-    }
     pub fn name(&self) -> &'static str {
         match self {
             ForcedKind::CancelAll => "cancelAll",
@@ -89,13 +77,11 @@ pub struct ForcedEvent {
     pub index: u64,
     pub account: Address,
     pub kind: ForcedKind,
-    /// the vault's deadline (VAULT.md: L2 seconds), passed to the engine unchanged
+    /// the vault's deadline in L2 block SECONDS (VAULT.md 0.2), passed to the engine unchanged
     pub deadline: u64,
-    /// SPEC 14 `arg`: the gross amount for Withdraw (0 = all), the market id for Close (0 = all), 0 for CancelAll
+    /// SPEC 14 `arg`: the gross amount for Withdraw, 0 otherwise
     pub arg: u64,
     // ---- L2 metadata ----
-    pub market_id: u32,
-    pub amount: u64,
     pub head: H256,
     pub l2_block: u64,
     pub l2_block_hash: H256,
@@ -106,10 +92,6 @@ pub struct ForcedEvent {
 impl ForcedEvent {
     pub fn consensus_eq(&self, o: &ForcedEvent) -> bool {
         self.index == o.index && self.account == o.account && self.kind == o.kind && self.deadline == o.deadline && self.arg == o.arg
-    }
-    /// Deadline in engine milliseconds (the vault counts L2 seconds).
-    pub fn deadline_ms(&self) -> u64 {
-        self.deadline.saturating_mul(1000)
     }
 }
 
@@ -295,8 +277,6 @@ pub fn decode_inputs(types: &ActionTypes, buf: &[u8]) -> Result<Vec<Input>, Stri
                     kind,
                     deadline,
                     arg,
-                    market_id: 0,
-                    amount: 0,
                     head: [0u8; 32],
                     l2_block: 0,
                     l2_block_hash: [0u8; 32],
@@ -417,7 +397,7 @@ pub fn deposit_json(d: &DepositEvent) -> serde_json::Value {
 pub fn forced_json(f: &ForcedEvent) -> serde_json::Value {
     serde_json::json!({
         "index": f.index.to_string(), "account": to_hex(&f.account), "kind": f.kind.name(), "deadline": f.deadline,
-        "arg": f.arg.to_string(), "marketId": f.market_id, "amount": f.amount.to_string(), "head": to_hex(&f.head),
+        "arg": f.arg.to_string(), "head": to_hex(&f.head),
         "l2Block": f.l2_block, "l2BlockHash": to_hex(&f.l2_block_hash), "l2TxHash": to_hex(&f.l2_tx_hash), "logIndex": f.log_index
     })
 }

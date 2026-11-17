@@ -10,7 +10,7 @@
 //! UNAUDITED PROTOTYPE.
 
 use super::stub::nonce_rule;
-use super::{AuthorityError, BlockOutcome, Engine, InputOutcome, WithdrawalRecord};
+use super::{AuthorityError, BlockOutcome, Engine, InputOutcome, StateParts, WithdrawalRecord};
 use crate::actions::verify_signed_action;
 use crate::genesis::Genesis;
 use crate::types::{encode_inputs, Input};
@@ -128,10 +128,25 @@ impl Engine for RealEngine {
         let w = self.e.withdrawals.get(id as usize)?;
         Some(WithdrawalRecord { id: w.id, account: w.account, recipient: w.recipient, amount: w.amount, fee: self.g.withdrawal_fee as u64, height: w.height })
     }
-    fn escape_entries(&self) -> Vec<(Address, u64)> {
-        // user accounts only: the protocol fee, insurance and backstop system accounts are outside the escape
-        // tree (VAULT.md 5.3 rule 6 keeps the insurance fund outside); 388/390 to confirm for the fee account
-        (pe::engine::FIRST_USER..self.e.accounts.len() as u32).map(|ai| (self.e.accounts[ai as usize].address, self.e.escape_value(ai))).collect()
+    fn state_parts(&self) -> StateParts {
+        let total_escape: u128 = (0..self.e.accounts.len() as u32).map(|i| self.e.escape_value(i) as u128).sum();
+        StateParts {
+            accounts_root: pe::merkle::root(&self.e.account_leaves(), pe::engine::ACCOUNT_DEPTH),
+            markets_root: self.e.markets_root(),
+            withdrawals_root: pe::merkle::root(&self.e.withdrawal_leaves(), pe::engine::WITHDRAWAL_DEPTH),
+            next_order_id: self.e.next_order_id,
+            total_escape,
+            dust: self.e.dust as u128,
+            aux_hash: self.e.aux_hash(),
+            withdrawals_total: self.e.withdrawals.iter().map(|w| w.amount).sum(),
+        }
+    }
+    fn withdrawal_proof(&self, id: u64, count: u64) -> Option<Vec<H256>> {
+        let leaves = self.e.withdrawal_leaves();
+        if id >= count || count as usize > leaves.len() {
+            return None;
+        }
+        Some(pe::merkle::proof(&leaves[..count as usize], pe::engine::WITHDRAWAL_DEPTH, id as usize))
     }
     fn nonce_ok(&self, signer: &Address, nonce: u64, time: u64) -> Result<(), &'static str> {
         nonce_rule(self.e.nonces.get(signer), nonce, time)

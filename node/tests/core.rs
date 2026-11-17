@@ -3,8 +3,8 @@
 mod common;
 use common::*;
 use perps_node::checkpoint::{verify_checkpoint_json, verify_signatures, AddResult, CertError, CheckpointBody};
+#[allow(unused_imports)]
 use perps_node::engine::Engine;
-use perps_node::vaultfmt::sum_verify;
 use perps_node::log::block_digest;
 use perps_node::sequencer::Sequencer;
 use perps_node::sig::{key_address, sign};
@@ -44,16 +44,18 @@ fn deposit_withdraw_checkpoint_certificate_end_to_end() {
     let rec = n.seq.engine.withdrawal(0).unwrap();
     assert_eq!(rec.amount, 999_000_000, "SPEC S-9.2: the record carries gross minus the flat fee");
     assert_eq!(rec.fee, 1_000_000, "flat withdrawal fee from markets.json defaults");
-    let hashes: Vec<[u8; 32]> = cert["proof"]["hashes"].as_array().unwrap().iter().map(|p| parse_hex_fixed::<32>(p.as_str().unwrap()).unwrap()).collect();
-    let sums: Vec<u64> = cert["proof"]["sums"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().parse().unwrap()).collect();
-    assert!(sum_verify(&body.withdrawals_root, body.withdrawals_total, &rec.leaf(), rec.amount, 0, &hashes, &sums));
+    let sib: Vec<[u8; 32]> = cert["proof"]["siblings"].as_array().unwrap().iter().map(|p| parse_hex_fixed::<32>(p.as_str().unwrap()).unwrap()).collect();
+    assert_eq!(sib.len(), 32, "SPEC 11: exactly 32 siblings");
+    assert!(postern_perps_engine::merkle::verify(&rec.leaf(), 0, &sib, &body.withdrawals_root));
+    assert!(!postern_perps_engine::merkle::verify(&rec.leaf(), 1, &sib, &body.withdrawals_root), "wrong position refused");
+    assert_eq!(body.state_root(), n.seq.block(body.height).unwrap().unwrap().header.state_root, "components reproduce the replayed root");
     assert_eq!(body.withdrawals_total, 999_000_000);
     // chain heads in the checkpoint are the vault's, taken from the (checked) L2 events
-    assert_eq!(body.deposits_credited, 1);
+    assert_eq!(body.next_deposit_index, 1);
     assert_eq!(body.deposits_head, n.seq_view.lock().unwrap().deposits[&0].head);
     assert_eq!(body.forced_head, perps_node::vaultfmt::forced_head0(700770, &n.g.vault));
     // escape tree total = what accounts are owed (stub: balances), here the user and the fee account
-    assert_eq!(body.escape_total, 5_000_000_000 - 1_000_000_000 + 1_000_000);
+    assert_eq!(body.total_escape, 5_000_000_000 - 1_000_000_000 + 1_000_000);
     // the fee went to the owner's address account
     let fee_acc = perps_node::util::parse_address(perps_node::dev::OWNER_FEE_ADDRESS).unwrap();
     assert_eq!(n.seq.engine.account_json(&fee_acc)["collateral"], "1.000000");
@@ -208,7 +210,7 @@ fn forced_request_past_deadline_blocks_signing_until_processed() {
     n.deposit_everywhere(deposit(0, ua, 50_000_000));
     assert!(all_applied(&n.step()));
     // validators see a forced withdraw whose deadline has passed; the sequencer "censors" it (its view lacks it)
-    let f = ForcedEvent { index: 0, account: ua, kind: ForcedKind::Withdraw, deadline: 1, arg: 0, market_id: 0, amount: 0, head: keccak(b"fh0"), l2_block: 200, l2_block_hash: keccak(b"b200"), l2_tx_hash: keccak(b"t200"), log_index: 0 };
+    let f = ForcedEvent { index: 0, account: ua, kind: ForcedKind::Withdraw, deadline: 1, arg: 0, head: keccak(b"fh0"), l2_block: 200, l2_block_hash: keccak(b"b200"), l2_tx_hash: keccak(b"t200"), log_index: 0 };
     for v in &n.val_views {
         v.lock().unwrap().forced.insert(0, f.clone());
     }
@@ -223,7 +225,7 @@ fn forced_request_past_deadline_blocks_signing_until_processed() {
     assert!(rs.iter().all(|r| matches!(r, VResult::Applied { checkpoint: Some(_) })), "{rs:?}");
     assert!(n.seq.latest_final() > fin_before);
     let body = n.seq.checkpoint_for(n.seq.log.last_height).unwrap();
-    assert_eq!(body.forced_processed, 1);
+    assert_eq!(body.next_forced_index, 1);
     assert_eq!(body.withdrawal_count, 1);
     let rec = n.seq.engine.withdrawal(0).unwrap();
     assert_eq!((rec.recipient, rec.amount), (ua, 49_000_000), "forced withdraw: everything minus the flat fee, to the account itself");
@@ -254,7 +256,7 @@ fn checkpoint_signature_rules_match_the_vault() {
     assert!(verify_signatures(c, 5, &d, &stranger).is_err());
     // a signature over another body (a validator with another root) is refused by the aggregator
     let mut other = body.clone();
-    other.state_root = keccak(b"x");
+    other.accounts_root = keccak(b"x");
     let s_other = sign(&n.keys.validators[0], &other.digest(&n.g.vault_domain));
     assert!(n.seq.add_signature(1, s_other).is_err());
     // duplicates are idempotent
@@ -333,7 +335,7 @@ fn canonical_encoding_is_unique_and_roundtrips() {
     (d0.sender, d0.head, d0.l2_block, d0.l2_block_hash, d0.l2_tx_hash) = ([0; 20], [0; 32], 0, [0; 32], [0; 32]);
     let inputs = vec![
         Input::Deposit(d0),
-        Input::Forced(ForcedEvent { index: 0, account: ua, kind: ForcedKind::Close, deadline: 9, arg: 2, market_id: 0, amount: 0, head: [0; 32], l2_block: 0, l2_block_hash: [0; 32], l2_tx_hash: [0; 32], log_index: 0 }),
+        Input::Forced(ForcedEvent { index: 0, account: ua, kind: ForcedKind::Close, deadline: 9, arg: 2, head: [0; 32], l2_block: 0, l2_block_hash: [0; 32], l2_tx_hash: [0; 32], log_index: 0 }),
         Input::Action(place_order(&g, &u, ua, 5, 2, 7, 8, true)),
     ];
     let enc = encode_inputs(&g.types, &inputs).unwrap();
@@ -391,10 +393,12 @@ fn real_engine_deposit_order_withdraw_certificate_and_recovery() {
     assert_eq!(rec.amount, 999_000_000);
     let cert = n.seq.certificate(0).expect("certificate");
     let body = verify_checkpoint_json(&n.g, &cert["checkpoint"]).unwrap();
-    let hashes: Vec<[u8; 32]> = cert["proof"]["hashes"].as_array().unwrap().iter().map(|p| parse_hex_fixed::<32>(p.as_str().unwrap()).unwrap()).collect();
-    let sums: Vec<u64> = cert["proof"]["sums"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().parse().unwrap()).collect();
-    assert!(sum_verify(&body.withdrawals_root, body.withdrawals_total, &rec.leaf(), rec.amount, 0, &hashes, &sums));
-    assert!(body.escape_total >= 3_999_000_000 && body.escape_total <= 4_000_000_000, "escape {}", body.escape_total);
+    let sib: Vec<[u8; 32]> = cert["proof"]["siblings"].as_array().unwrap().iter().map(|p| parse_hex_fixed::<32>(p.as_str().unwrap()).unwrap()).collect();
+    assert_eq!(sib.len(), 32, "SPEC 11: exactly 32 siblings");
+    assert!(postern_perps_engine::merkle::verify(&rec.leaf(), 0, &sib, &body.withdrawals_root));
+    assert!(!postern_perps_engine::merkle::verify(&rec.leaf(), 1, &sib, &body.withdrawals_root), "wrong position refused");
+    assert_eq!(body.state_root(), n.seq.block(body.height).unwrap().unwrap().header.state_root, "components reproduce the replayed root");
+    assert!(body.total_escape >= 3_999_000_000 && body.total_escape <= 4_000_000_000, "escape {}", body.total_escape);
     for v in &n.vals {
         assert_eq!(v.engine.state_root(), n.seq.engine.state_root());
     }

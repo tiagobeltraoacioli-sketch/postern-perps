@@ -25,7 +25,7 @@ use crate::log::check_block_link;
 use crate::sig::key_address;
 use crate::types::{decode_inputs, Block, Input};
 use crate::util::{parse_hex_fixed, to_hex, Address, H256};
-use crate::vaultfmt::{deposit_head0, escape_leaf, forced_head0, sum_root};
+use crate::vaultfmt::{deposit_head0, forced_head0};
 use crate::watcher::{L2View, SharedView};
 use k256::ecdsa::SigningKey;
 use std::collections::BTreeMap;
@@ -50,9 +50,10 @@ pub fn is_checkpoint_height(g: &Genesis, height: u64, inputs: &[Input], created_
     height % g.checkpoint_interval == 0 || created_withdrawals || inputs.iter().any(|i| matches!(i, Input::Forced(_)))
 }
 
-/// The checkpoint body of VAULT.md 5.2 for the state after block `b`: engine counters and roots, the vault's
-/// chain heads after the credited deposits / processed forced requests (from the L2 view, whose events were
-/// checked against their own chain), and the withdrawal and escape sum trees (VAULT.md 5.5).
+/// The checkpoint body of VAULT.md 0.2 5.2 for the state after block `b`: the engine's state-root components,
+/// the vault's chain heads after the credited deposits / processed forced requests (from the L2 view, whose events
+/// were each checked against the chain), and the withdrawal count and total. Refused unless the components
+/// reproduce the block's state root (the equation the vault recomputes).
 pub fn checkpoint_body(g: &Genesis, e: &dyn Engine, b: &Block, view: &L2View) -> Result<CheckpointBody, String> {
     let dc = e.next_deposit_index();
     let fp = e.next_forced_index();
@@ -66,31 +67,33 @@ pub fn checkpoint_body(g: &Genesis, e: &dyn Engine, b: &Block, view: &L2View) ->
     } else {
         view.forced.get(&(fp - 1)).map(|f| f.head).ok_or("forced chain head not in the L2 view")?
     };
-    let n = e.withdrawal_count();
-    let mut wl = Vec::with_capacity(n as usize);
-    for i in 0..n {
-        let w = e.withdrawal(i).ok_or("withdrawal record missing")?;
-        wl.push((w.leaf(), w.amount));
-    }
-    let (withdrawals_root, withdrawals_total) = sum_root(&wl).ok_or("withdrawals total above u64")?;
-    let el: Vec<(H256, u64)> = e.escape_entries().into_iter().filter(|(_, v)| *v > 0).map(|(a, v)| (escape_leaf(&a, v), v)).collect();
-    let (escape_root, escape_total) = sum_root(&el).ok_or("escape total above u64")?;
-    Ok(CheckpointBody {
+    let p = e.state_parts();
+    let body = CheckpointBody {
         height: b.header.height,
         time: b.header.time,
-        state_root: b.header.state_root,
         log_hash: b.header.log_hash,
-        deposits_credited: dc,
+        accounts_root: p.accounts_root,
+        markets_root: p.markets_root,
+        withdrawals_root: p.withdrawals_root,
+        next_deposit_index: dc,
+        next_forced_index: fp,
+        next_order_id: p.next_order_id,
+        total_escape: p.total_escape,
+        dust: p.dust,
+        aux_hash: p.aux_hash,
         deposits_head,
-        forced_processed: fp,
         forced_head,
-        withdrawal_count: n,
-        withdrawals_total,
-        withdrawals_root,
-        escape_total,
-        escape_root,
-    })
+        withdrawal_count: e.withdrawal_count(),
+        withdrawals_total: p.withdrawals_total,
+    };
+    if body.state_root() != b.header.state_root {
+        return Err("the engine's state-root components do not reproduce the block's state root".into());
+    }
+    Ok(body)
 }
+
+/// Margin between "now on the L2" and the time a signed checkpoint reaches the vault (seconds).
+pub const FORCED_SUBMIT_MARGIN_S: u64 = 120;
 
 pub struct Validator {
     pub g: Arc<Genesis>,
@@ -216,13 +219,13 @@ impl Validator {
         if !is_checkpoint_height(&self.g, b.header.height, &inputs, !out.withdrawals.is_empty()) {
             return VResult::Applied { checkpoint: None };
         }
-        // forced-inclusion rule (the vault's acceptance rule 4, judged at the block time; the vault uses its own
-        // L2 timestamp, so this is the validator's best local view)
+        // forced-inclusion rule = the vault's acceptance rule 4, in L2 block SECONDS: the newest L2 block time
+        // this validator's endpoints report, plus a submission margin
         let body = {
             let v = self.view.lock().unwrap();
             let next = self.engine.next_forced_index();
             if let Some((i, f)) = v.forced.range(next..).next() {
-                if f.deadline_ms() <= b.header.time {
+                if f.deadline <= v.l2_time_s.saturating_add(FORCED_SUBMIT_MARGIN_S) {
                     return VResult::AppliedNotSigned(format!("forced request {i} is past its deadline and not processed: not signing"));
                 }
             }

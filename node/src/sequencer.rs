@@ -231,7 +231,7 @@ impl Sequencer {
                 };
                 let body = verify_checkpoint_json(&g, &j).map_err(|e| format!("checkpoints.jsonl: {e}"))?;
                 let b = s.log.read(body.height)?.ok_or("checkpoint above the log")?;
-                if b.header.log_hash != body.log_hash || b.header.state_root != body.state_root {
+                if b.header.log_hash != body.log_hash || b.header.state_root != body.state_root() {
                     return Err("checkpoints.jsonl does not match the log: refusing to start".into());
                 }
                 s.aggregator.by_height.remove(&body.height);
@@ -463,7 +463,7 @@ impl Sequencer {
         self.log.read(height)
     }
 
-    /// The withdrawal certificate (VAULT.md `withdraw`): the record, its sum-tree proof against the newest final
+    /// The withdrawal certificate (VAULT.md 0.2 `withdraw`): the record, its depth-32 SPEC 11 proof against the newest final
     /// checkpoint that contains it, and that checkpoint with exactly `threshold` ascending signatures.
     pub fn certificate(&self, id: u64) -> Option<serde_json::Value> {
         let rec = self.engine.withdrawal(id)?;
@@ -472,17 +472,12 @@ impl Sequencer {
         if id >= c.body.withdrawal_count {
             return None;
         }
-        let mut wl = Vec::with_capacity(c.body.withdrawal_count as usize);
-        for i in 0..c.body.withdrawal_count {
-            let w = self.engine.withdrawal(i)?;
-            wl.push((w.leaf(), w.amount));
-        }
-        let (hashes, sums) = crate::vaultfmt::sum_proof(&wl, id as usize)?;
+        let siblings = self.engine.withdrawal_proof(id, c.body.withdrawal_count)?;
         let cp = self.aggregator.checkpoint_json(&self.g, cp_h, None)?;
         Some(serde_json::json!({
             "digest": to_hex(&c.digest),
-            "record": {"index": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient), "amount": rec.amount.to_string()},
-            "proof": {"index": id.to_string(), "hashes": hashes.iter().map(|p| to_hex(p)).collect::<Vec<_>>(), "sums": sums.iter().map(|x| x.to_string()).collect::<Vec<_>>()},
+            "record": {"withdrawalId": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient), "amount": rec.amount.to_string(), "height": rec.height.to_string()},
+            "proof": {"index": id.to_string(), "siblings": siblings.iter().map(|p| to_hex(p)).collect::<Vec<_>>()},
             "leaf": to_hex(&rec.leaf()),
             "checkpoint": cp,
             "signatures": cp["signatures"].clone(),

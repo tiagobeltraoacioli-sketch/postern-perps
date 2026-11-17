@@ -2,57 +2,88 @@
 //! what the vault does (bridge `_checkSignatures` pattern: exactly `threshold` 65-byte signatures, strictly
 //! ascending signer addresses, each a committee member, low-s, v in {27, 28}).
 //!
-//! Digest: `docs/VAULT.md` v0.1 section 5.2 (agent 390): EIP-712 under the VAULT domain
+//! Digest: `docs/VAULT.md` v0.2 section 5.2 (agent 390, contracts 27c1969; vectors
+//! `contracts/test/vectors/vault-vectors.json`): EIP-712 under the VAULT domain
 //! `{name "PosternPerpsVault", version "1", chainId 700770, verifyingContract vault}`, primary type
-//! `Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)`.
-//! The engine's user-action domain has another `name` (`PosternPerps`), hence another separator: no user
-//! signature can be a checkpoint signature and vice versa.
+//! `Checkpoint(uint64 height,uint64 time,bytes32 logHash,bytes32 accountsRoot,bytes32 marketsRoot,bytes32 withdrawalsRoot,uint64 nextDepositIndex,uint64 nextForcedIndex,uint64 nextOrderId,uint128 totalEscape,uint128 dust,bytes32 auxHash,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal)`.
+//! The first twelve fields are the inputs of SPEC 11's `stateRoot` (the vault recomputes it); the node checks the
+//! same equation against the replayed block before signing (`CheckpointBody::state_root`).
+//! The engine's user-action domain has another `name` (`PosternPerps`), hence another separator.
 //!
 //! UNAUDITED PROTOTYPE.
 
 use crate::eip712::{digest, Domain};
 use crate::genesis::Genesis;
 use crate::sig::{recover, sign};
-use crate::util::{keccak, parse_hex_fixed, to_hex, word_u128, Address, H256};
+use crate::util::{keccak, keccak_parts, parse_hex_fixed, to_hex, word_u128, Address, H256};
 use k256::ecdsa::SigningKey;
 use std::collections::BTreeMap;
 
-pub const CHECKPOINT_TYPE: &str = "Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)";
+pub const CHECKPOINT_TYPE: &str = "Checkpoint(uint64 height,uint64 time,bytes32 logHash,bytes32 accountsRoot,bytes32 marketsRoot,bytes32 withdrawalsRoot,uint64 nextDepositIndex,uint64 nextForcedIndex,uint64 nextOrderId,uint128 totalEscape,uint128 dust,bytes32 auxHash,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal)";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointBody {
     pub height: u64,
     pub time: u64,
-    pub state_root: H256,
     pub log_hash: H256,
-    pub deposits_credited: u64,
+    pub accounts_root: H256,
+    pub markets_root: H256,
+    pub withdrawals_root: H256,
+    pub next_deposit_index: u64,
+    pub next_forced_index: u64,
+    pub next_order_id: u64,
+    pub total_escape: u128,
+    /// two's complement of the engine's i128 dust (be128 in systemHash, uint128 in the typed data)
+    pub dust: u128,
+    pub aux_hash: H256,
     pub deposits_head: H256,
-    pub forced_processed: u64,
     pub forced_head: H256,
     pub withdrawal_count: u64,
     pub withdrawals_total: u64,
-    pub withdrawals_root: H256,
-    pub escape_total: u64,
-    pub escape_root: H256,
 }
 
 impl CheckpointBody {
+    /// VAULT.md 5.2 / SPEC 11 state root from the first twelve fields.
+    pub fn state_root(&self) -> H256 {
+        let sys = keccak_parts(&[
+            b"PPv1sys",
+            &self.next_deposit_index.to_be_bytes(),
+            &self.next_forced_index.to_be_bytes(),
+            &self.next_order_id.to_be_bytes(),
+            &self.total_escape.to_be_bytes(),
+            &self.dust.to_be_bytes(),
+            &self.aux_hash,
+        ]);
+        keccak_parts(&[
+            b"PosternPerps/state/v1",
+            &self.height.to_be_bytes(),
+            &self.time.to_be_bytes(),
+            &self.accounts_root,
+            &self.markets_root,
+            &self.withdrawals_root,
+            &sys,
+        ])
+    }
+
     pub fn struct_hash(&self) -> H256 {
-        let mut b = Vec::with_capacity(32 * 14);
+        let mut b = Vec::with_capacity(32 * 17);
         b.extend_from_slice(&keccak(CHECKPOINT_TYPE.as_bytes()));
         b.extend_from_slice(&word_u128(self.height as u128));
         b.extend_from_slice(&word_u128(self.time as u128));
-        b.extend_from_slice(&self.state_root);
         b.extend_from_slice(&self.log_hash);
-        b.extend_from_slice(&word_u128(self.deposits_credited as u128));
+        b.extend_from_slice(&self.accounts_root);
+        b.extend_from_slice(&self.markets_root);
+        b.extend_from_slice(&self.withdrawals_root);
+        b.extend_from_slice(&word_u128(self.next_deposit_index as u128));
+        b.extend_from_slice(&word_u128(self.next_forced_index as u128));
+        b.extend_from_slice(&word_u128(self.next_order_id as u128));
+        b.extend_from_slice(&word_u128(self.total_escape));
+        b.extend_from_slice(&word_u128(self.dust));
+        b.extend_from_slice(&self.aux_hash);
         b.extend_from_slice(&self.deposits_head);
-        b.extend_from_slice(&word_u128(self.forced_processed as u128));
         b.extend_from_slice(&self.forced_head);
         b.extend_from_slice(&word_u128(self.withdrawal_count as u128));
         b.extend_from_slice(&word_u128(self.withdrawals_total as u128));
-        b.extend_from_slice(&self.withdrawals_root);
-        b.extend_from_slice(&word_u128(self.escape_total as u128));
-        b.extend_from_slice(&self.escape_root);
         keccak(&b)
     }
 
@@ -62,35 +93,46 @@ impl CheckpointBody {
 
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
-            "height": self.height, "time": self.time, "stateRoot": to_hex(&self.state_root), "logHash": to_hex(&self.log_hash),
-            "depositsCredited": self.deposits_credited, "depositsHead": to_hex(&self.deposits_head),
-            "forcedProcessed": self.forced_processed, "forcedHead": to_hex(&self.forced_head),
-            "withdrawalCount": self.withdrawal_count, "withdrawalsTotal": self.withdrawals_total.to_string(), "withdrawalsRoot": to_hex(&self.withdrawals_root),
-            "escapeTotal": self.escape_total.to_string(), "escapeRoot": to_hex(&self.escape_root)
+            "height": self.height, "time": self.time, "logHash": to_hex(&self.log_hash), "stateRoot": to_hex(&self.state_root()),
+            "accountsRoot": to_hex(&self.accounts_root), "marketsRoot": to_hex(&self.markets_root), "withdrawalsRoot": to_hex(&self.withdrawals_root),
+            "nextDepositIndex": self.next_deposit_index, "nextForcedIndex": self.next_forced_index, "nextOrderId": self.next_order_id.to_string(),
+            "totalEscape": self.total_escape.to_string(), "dust": self.dust.to_string(), "auxHash": to_hex(&self.aux_hash),
+            "depositsHead": to_hex(&self.deposits_head), "forcedHead": to_hex(&self.forced_head),
+            "withdrawalCount": self.withdrawal_count, "withdrawalsTotal": self.withdrawals_total.to_string()
         })
     }
 
     pub fn from_json(j: &serde_json::Value) -> Result<CheckpointBody, String> {
-        let u = |k: &str| -> Result<u64, String> {
+        let u = |k: &str| -> Result<u128, String> {
             let v = j.get(k).ok_or_else(|| format!("checkpoint.{k}"))?;
-            v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())).ok_or_else(|| format!("checkpoint.{k}"))
+            v.as_u64().map(|x| x as u128).or_else(|| v.as_str().and_then(|s| s.parse().ok())).ok_or_else(|| format!("checkpoint.{k}"))
         };
+        let u64f = |k: &str| -> Result<u64, String> { u64::try_from(u(k)?).map_err(|_| format!("checkpoint.{k} above u64")) };
         let h = |k: &str| -> Result<H256, String> { parse_hex_fixed::<32>(j.get(k).and_then(|v| v.as_str()).ok_or_else(|| format!("checkpoint.{k}"))?) };
-        Ok(CheckpointBody {
-            height: u("height")?,
-            time: u("time")?,
-            state_root: h("stateRoot")?,
+        let b = CheckpointBody {
+            height: u64f("height")?,
+            time: u64f("time")?,
             log_hash: h("logHash")?,
-            deposits_credited: u("depositsCredited")?,
-            deposits_head: h("depositsHead")?,
-            forced_processed: u("forcedProcessed")?,
-            forced_head: h("forcedHead")?,
-            withdrawal_count: u("withdrawalCount")?,
-            withdrawals_total: u("withdrawalsTotal")?,
+            accounts_root: h("accountsRoot")?,
+            markets_root: h("marketsRoot")?,
             withdrawals_root: h("withdrawalsRoot")?,
-            escape_total: u("escapeTotal")?,
-            escape_root: h("escapeRoot")?,
-        })
+            next_deposit_index: u64f("nextDepositIndex")?,
+            next_forced_index: u64f("nextForcedIndex")?,
+            next_order_id: u64f("nextOrderId")?,
+            total_escape: u("totalEscape")?,
+            dust: u("dust")?,
+            aux_hash: h("auxHash")?,
+            deposits_head: h("depositsHead")?,
+            forced_head: h("forcedHead")?,
+            withdrawal_count: u64f("withdrawalCount")?,
+            withdrawals_total: u64f("withdrawalsTotal")?,
+        };
+        if let Some(sr) = j.get("stateRoot").and_then(|v| v.as_str()) {
+            if parse_hex_fixed::<32>(sr)? != b.state_root() {
+                return Err("stateRoot field does not equal the root of the checkpoint's components".into());
+            }
+        }
+        Ok(b)
     }
 }
 

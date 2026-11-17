@@ -48,6 +48,7 @@ async fn main() {
     match cmd.as_str() {
         "dev" => dev(a).await,
         "verify-log" => verify_log(a),
+        "validator" => remote_validator(a).await,
         "live" => {
             eprintln!("live mode is not available in this UNAUDITED prototype (operator key files, reviewed deployment)");
             std::process::exit(2);
@@ -60,12 +61,42 @@ async fn main() {
     }
 }
 
+/// Dev: one validator process (`--index i` of the seed's throwaway committee) following `--sequencer URL`.
+async fn remote_validator(a: HashMap<String, String>) {
+    let seed = a.get("seed").cloned().unwrap_or_else(|| "dev".into());
+    let n: usize = get(&a, "validators", 7);
+    let (g, keys, checked) = perps_node::dev::dev_genesis_real(&seed, n, get(&a, "threshold", 5), get(&a, "checkpoint-interval", 10), get(&a, "genesis-time", 0));
+    let i: usize = get(&a, "index", 0);
+    let view = Arc::new(Mutex::new(L2View::default()));
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+    if let Some(s) = a.get("l2") {
+        let v: Vec<String> = s.split(',').map(|x| x.to_string()).collect();
+        tokio::spawn(watcher::run(WatcherConfig::new([v[0].clone(), v[1].clone()], g.vault), view.clone(), rx.clone()));
+    }
+    let e = Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked).expect("engine"));
+    let v = perps_node::validator::Validator::new(g.clone(), keys.validators[i].clone(), e, view, a.get("data").map(PathBuf::from)).expect("validator");
+    let base = a.get("sequencer").cloned().unwrap_or_else(|| "http://127.0.0.1:48900".into());
+    if let Err(e) = perps_node::node::run_remote_validator(base, v, rx).await {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
 fn verify_log(a: HashMap<String, String>) {
     let seed = a.get("seed").cloned().unwrap_or_else(|| "dev".into());
-    let (g, k) = dev_genesis(&seed, get(&a, "validators", 7), get(&a, "threshold", 5), get(&a, "checkpoint-interval", 10), get(&a, "genesis-time", 0));
+    let (n, th, ci, gt) = (get(&a, "validators", 7), get(&a, "threshold", 5), get(&a, "checkpoint-interval", 10), get(&a, "genesis-time", 0));
+    let (g, k, e): (Arc<perps_node::genesis::Genesis>, _, Box<dyn Engine>) = if a.get("engine").map(|s| s.as_str()).unwrap_or("real") == "real" {
+        let (g, k, c) = perps_node::dev::dev_genesis_real(&seed, n, th, ci, gt);
+        let e = Box::new(perps_node::engine::real::RealEngine::new(g.clone(), c).expect("engine"));
+        (g, k, e)
+    } else {
+        let (g, k) = dev_genesis(&seed, n, th, ci, gt);
+        let e = Box::new(StubEngine::new(g.clone()));
+        (g, k, e)
+    };
     let data = PathBuf::from(a.get("data").expect("--data"));
     let view = Arc::new(Mutex::new(L2View::default()));
-    match Sequencer::open(g.clone(), k.sequencer, Box::new(StubEngine::new(g.clone())), data, view) {
+    match Sequencer::open(g.clone(), k.sequencer, e, data, view) {
         Ok(s) => {
             println!(
                 "{}",
