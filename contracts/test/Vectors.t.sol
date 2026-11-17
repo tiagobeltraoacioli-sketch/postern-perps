@@ -87,3 +87,36 @@ contract PerpsVaultVectors is Base {
         );
     }
 }
+
+interface StoreVm {
+    function store(address target, bytes32 slot, bytes32 value) external;
+}
+
+/// 388's shared forced-request vector (engine/vectors/forced-vectors.json, codex/perps-engine-20261117 e2fca75):
+/// reproduced by the vault's own `requestForced` chain at the vector's vault address on chain 700770.
+contract PerpsVaultForcedVector is Base {
+    function test_forced_vector_388() public {
+        _setUpVault();
+        vm.chainId(700770);
+        address at = address(0x00000000000000000000000000000000000Ba417);
+        vm.etch(at, address(vault).code); // same immutables (token, forcedDelay 2 days), empty storage
+        vault = PerpsVault(at);
+        address acct = address(0x4be5Ca6bcF47515945697c1451676b7A3971FbCA);
+        uint256 t0 = 1794966400 - 2 days;
+        vm.warp(t0);
+        _deposit(acct, acct, 10 * USDC);
+        vm.prank(acct);
+        vault.requestForced(0, 0); // deadline 1794966400
+        // let request 0 count as processed (latest.nextForcedIndex = 1; slot 13, bytes 24..31) so the account may
+        // open its next request, as after an accepted checkpoint
+        StoreVm(address(vm)).store(at, bytes32(uint256(13)), bytes32(uint256(1) << 192));
+        vm.warp(t0 + 1);
+        vm.prank(acct);
+        vault.requestForced(2, 5_000_000); // deadline 1794966401
+        assertEq(vault.forcedDeadline(0), 1794966400, "deadline 0");
+        assertEq(vault.forcedDeadline(1), 1794966401, "deadline 1");
+        assertEq(
+            vault.forcedHead(2), 0xef4758f64316a851cda4dbd78f4627774502320f46836b5255e365dfcff61be3, "388 forcedHead2"
+        );
+    }
+}
