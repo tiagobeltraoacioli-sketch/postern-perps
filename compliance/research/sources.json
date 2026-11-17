@@ -1,0 +1,93 @@
+{
+  "schema": "postern-perps/sources",
+  "version": "0.2.0",
+  "note": "Every fact relied on by compliance/ and docs/MARKETS.md, with the exact sentence read and the read date. Read anonymously. A fact not in this file is not relied on. UNAUDITED prototype; legal items are for counsel.",
+  "sources": [
+    {
+      "id": "S-HL-FEES",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Fees",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Fees are based on your rolling 14 day volume and are assessed at the end of each day in UTC.",
+        "Perps fee tiers, base rate: tier 0 taker 0.045% maker 0.015%; tier 1 >5M 0.040% / 0.012%; tier 2 >25M 0.035% / 0.008%; tier 3 >100M 0.030% / 0.004%; tier 4 >500M 0.028% / 0.000%; tier 5 >2B 0.026% / 0.000%; tier 6 >7B 0.024% / 0.000% (table rows)."
+      ]
+    },
+    {
+      "id": "S-HL-FUND",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Funding",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/funding",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The funding rate on Hyperliquid is paid every hour.",
+        "For consistency with CEXs, interest rate component is predetermined at 0.01% every 8 hours, which is 0.00125% every hour, or 11.6% APR paid to short.",
+        "The funding rate formula applies to 8 hour funding rate. However, funding is paid every hour at one eighth of the computed rate for each hour.",
+        "The specific formula is `Funding Rate (F) = Average Premium Index (P) + clamp (interest rate - Premium Index (P), -0.0005, 0.0005)`. The premium is sampled every 5 seconds and averaged over the hour.",
+        "Funding on Hyperliquid is capped at 0.5%/hour."
+      ]
+    },
+    {
+      "id": "S-HL-MT",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Margin tiers",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/margin-tiers",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "`maintenance_margin_rate(tier = n) = (Initial Margin Rate at Maximum leverage at tier n) / 2` . For example, at 20x max leverage, `maintenance_margin_rate = 2.5%`.",
+        "BTC: 0-150M max leverage 40; >150M 20. ETH: 0-100M 25; >100M 15. SOL: 0-70M 20; >70M 10 (table rows, Mainnet Margin Tiers)."
+      ]
+    },
+    {
+      "id": "S-HL-LIQ",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Liquidations",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "If the account equity drops below 2/3 of the maintenance margin without successful liquidation through the book, a backstop liquidation happens through the liquidator vault.",
+        "Unlike CEXs there is no clearance fee on liquidations.",
+        "For liquidatable positions larger than 100k USDC (10k USDC on testnet for easier testing), only 20% of the position will be sent as a market liquidation order to the book."
+      ]
+    },
+    {
+      "id": "S-HL-MARK",
+      "publisher": "Hyperliquid (documentation)",
+      "title": "Robust price indices",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/robust-price-indices",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Oracle prices are updated by the validators approximately once every three seconds.",
+        "Mark price is an unbiased and robust estimate of the fair perp price, and is used for margining, liquidations, triggering TP/SL, and computing unrealized pnl."
+      ]
+    },
+    {
+      "id": "S-DYDX-FEES",
+      "publisher": "dYdX (documentation)",
+      "title": "Rewards, Fees and Parameters",
+      "url": "https://docs.dydx.xyz/concepts/trading/rewards",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "Users are eligible for lower fees based on their 30 day trading volume across sub accounts and markets",
+        "Tier 1 < $1M taker 5.0 bps maker 1.0; 2 >= $1M 4.5 / 1.0; 3 >= $5M 4.0 / 0.5; 4 >= $25M 3.5 / 0; 5 >= $50M 3.0 / 0; 6 >= $100M 2.5 / -0.7; 7 >= $200M 2.5 / -1.1 (table rows)."
+      ]
+    },
+    {
+      "id": "S-KRAKEN-OHLC",
+      "publisher": "Kraken (public REST API)",
+      "title": "OHLC data",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=<XBTUSD|ETHUSD|SOLUSD>&interval=<60|1440>",
+      "read_utc": "2026-11-17T04:07Z",
+      "recorded": "compliance/research/marketdata/20261117/kraken_*.json"
+    },
+    {
+      "id": "S-CB-CANDLES",
+      "publisher": "Coinbase Exchange (public REST API)",
+      "title": "Product candles",
+      "url": "https://api.exchange.coinbase.com/products/<BTC-USD|ETH-USD|SOL-USD>/candles?granularity=<3600|86400>",
+      "read_utc": "2026-11-17T04:07Z",
+      "recorded": "compliance/research/marketdata/20261117/cb_*.json"
+    }
+  ]
+}
