@@ -1,6 +1,6 @@
 {
   "schema": "postern-perps/jurisdiction-research",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "date": "2026-11-17",
   "note": "Hand-curated research input of compliance/tools/build_geoblock.py (agent 392). Every entry names its sources (ids in sources.json). Every ISO 3166-1 code NOT listed here becomes restricted-review / not-researched (denied). UNAUDITED; DRAFT FOR COUNSEL; not legal advice.",
   "countries": {
@@ -248,6 +248,50 @@
       "counsel": [
         "Q-5"
       ]
+    },
+    "AU": {
+      "tier": "blocked",
+      "reasons": [
+        "retail-leverage-limit"
+      ],
+      "sources": [
+        "S-ASIC-21-060"
+      ],
+      "confidence": "medium",
+      "note": "NEW in 0.2: retail CFD leverage on crypto-assets is limited far below this venue's 10x-20x; blocked (stricter than review) until counsel decides",
+      "counsel": [
+        "Q-7"
+      ]
+    },
+    "SG": {
+      "tier": "blocked",
+      "reasons": [
+        "retail-leverage-limit",
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-MAS-2022"
+      ],
+      "confidence": "medium",
+      "note": "NEW in 0.2: leverage for retail cryptocurrency trading disallowed for DPT service providers",
+      "counsel": [
+        "Q-7"
+      ]
+    },
+    "JP": {
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ],
+      "sources": [
+        "S-FSA-592"
+      ],
+      "confidence": "medium",
+      "note": "warnings to unregistered (including foreign-based) operators; derivatives fall under the financial instruments business registration",
+      "counsel": [
+        "Q-7"
+      ]
     }
   },
   "groups": {
@@ -382,7 +426,8 @@
     "Q-3": "United States: do the 2026 CFTC developments (perpetuals on registered venues; foreign-futures relief through a U.S. FCM) change anything for an unregistered venue? Assumed no.",
     "Q-4": "EU/EEA: does offering crypto perpetuals to EU residents from Panama without solicitation require MiFID II authorisation (reverse solicitation limits)?",
     "Q-5": "Panama: does serving Panamanian residents require a licence (operator's home jurisdiction)? Not researched; denied meanwhile.",
-    "Q-6": "Syria and the occupied regions of Zaporizhzhia and Kherson: current EU/UK/UN status; kept blocked."
+    "Q-6": "Syria and the occupied regions of Zaporizhzhia and Kherson: current EU/UK/UN status; kept blocked.",
+    "Q-7": "Australia, Singapore, Japan: do the retail leverage limits and registration regimes reach an offshore venue that does not solicit there; is a professional-investor route relevant? Blocked or denied meanwhile."
   },
   "candidates_for_counsel": {
     "note": "Not 'allowed': countries a later research pass should look at first, because peer venues serve them. Listing here changes nothing (they remain restricted-review).",

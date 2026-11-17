@@ -24,7 +24,7 @@
     "anonymizer": "Trading is not available through a VPN, proxy or Tor. You can still cancel orders, reduce or close positions and withdraw.",
     "sanctioned": "This address cannot use PosternDEX Perpetuals."
   },
-  "restrictedSummary": "Not available in, among others, the United States and its territories, Canada, the United Kingdom, Brazil, mainland China, Cuba, Iran, North Korea, Syria, Russia, Belarus, Myanmar and the Crimea, Sevastopol, Donetsk, Luhansk, Zaporizhzhia and Kherson regions of Ukraine; and, until counsel decides, in every other country.",
+  "restrictedSummary": "Not available in, among others, the United States and its territories, Canada, the United Kingdom, Brazil, mainland China, Australia, Singapore, Cuba, Iran, North Korea, Syria, Russia, Belarus, Myanmar and the Crimea, Sevastopol, Donetsk, Luhansk, Zaporizhzhia and Kherson regions of Ukraine; and, until counsel decides, in every other country.",
   "documents": {
     "terms": "compliance/legal/terms-of-use.md",
     "risk": "compliance/legal/risk-disclosure.md",

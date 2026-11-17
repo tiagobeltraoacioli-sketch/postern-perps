@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: Terms of Use
 
-Document id: `TOU-0.1-20261117`. Status: DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype: nothing is live.
+Document id: `TOU-0.2-20261117`. Status: DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype: nothing is live.
 This is a structure with the clauses the system needs; every clause is for counsel to accept, rewrite or remove.
 Placeholders: `TBD-owner` (facts), `TBD-counsel` (legal choices).
 
@@ -14,7 +14,7 @@ how the roles of Bloch Inc, the sequencer operator and the validators are descri
 
 ## 2. Acceptance
 
-By connecting a wallet and signing the attestation (section 4) you accept these Terms (`TOU-0.1-20261117`) and the
+By connecting a wallet and signing the attestation (section 4) you accept these Terms (`TOU-0.2-20261117`) and the
 Risk Disclosure (`RISK-0.2-20261117`). A new version is shown to you and must be accepted again before you place a
 new order.
 
@@ -23,7 +23,7 @@ new order.
 You may not use the Interface to open or increase positions or to deposit if you are a resident of, located in, or
 incorporated or established in a jurisdiction listed as restricted (the current list is published with its version
 at `TBD-owner` and includes the United States and its territories, Canada, the United Kingdom, Brazil, mainland
-China, Cuba, Iran, North Korea, Syria, Russia, Belarus, Myanmar and the Crimea, Sevastopol, Donetsk, Luhansk,
+China, Australia, Singapore, Cuba, Iran, North Korea, Syria, Russia, Belarus, Myanmar and the Crimea, Sevastopol, Donetsk, Luhansk,
 Zaporizhzhia and Kherson regions of Ukraine), or if you are on a sanctions list or acting for such a person. The
 Interface uses your network location and refuses access from VPNs, proxies and Tor. If you are restricted, you may
 still cancel orders, reduce or close positions and withdraw, except where `TBD-counsel` decides otherwise for

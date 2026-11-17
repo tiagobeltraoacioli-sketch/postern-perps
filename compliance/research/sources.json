@@ -284,6 +284,40 @@
       "url": "file:///usr/share/zoneinfo/iso3166.tab (copied to compliance/research/iso3166.tab)",
       "read_utc": "2026-11-17",
       "quotes": []
+    },
+    {
+      "id": "S-ASIC-21-060",
+      "publisher": "Australian Securities and Investments Commission",
+      "title": "21-060MR ASIC's CFD product intervention order takes effect",
+      "url": "https://www.asic.gov.au/about-asic/news-centre/find-a-media-release/2021-releases/21-060mr-asic-s-cfd-product-intervention-order-takes-effect",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The maximum CFD leverage available to retail clients will range from 30:1 to a 2:1, depending on the underlying asset class.",
+        "A CFD is a leveraged derivative contract that allows a client to speculate in the change in value of an underlying asset, such as foreign exchange rates, stock market indices, single equities, commodities or cryptoassets."
+      ],
+      "note": "The 2:1 limit for crypto-asset CFDs and the extension of the order to 2027-05-23 are known from a search summary only (not text-read): UNVERIFIED detail"
+    },
+    {
+      "id": "S-MAS-2022",
+      "publisher": "Monetary Authority of Singapore",
+      "title": "MAS proposes measures to reduce risks to consumers from cryptocurrency trading and enhance standards of stablecoin-related activities (2022)",
+      "url": "https://www.mas.gov.sg/news/media-releases/2022/mas-proposes-measures-to-reduce-risks-to-consumers-from-cryptocurrency-trading-and-enhance-standards-of-stablecoin-related-activities",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "They must also disallow the use of credit facilities and leverage by retail consumers for cryptocurrency trading."
+      ],
+      "note": "a proposal (2022); the final guidelines PS-G03 (2024) are reported by a search summary to bar DPT service providers from derivatives with retail customers: UNVERIFIED"
+    },
+    {
+      "id": "S-FSA-592",
+      "publisher": "Financial Services Agency, Japan",
+      "title": "FSA Weekly Review No.592 (June 27, 2024)",
+      "url": "https://www.fsa.go.jp/en/newsletter/weekly2024/592.html",
+      "read_utc": "2026-11-17",
+      "quotes": [
+        "The FSA and the Kanto Local Finance Bureau issued warnings to entities that are operating financial instruments businesses without proper registration.",
+        "The FSA issued a warning to LBank Exchange that is operating crypto-asset (virtual currency) exchange business without proper registration in violation of the \"Payment Services Act.\""
+      ]
     }
   ]
 }

@@ -20,7 +20,8 @@ RES = os.path.join(ROOT, "research")
 OUT = os.path.join(ROOT, "geoblock.json")
 OUT_MD = os.path.join(ROOT, "jurisdictions.md")
 STRICTNESS = {"allowed": 0, "restricted-review": 1, "blocked": 2}
-REASONS_ADDED = ["sanctions-crypto-services-prohibition", "residual-sanctions", "fatf-call-for-action"]
+REASONS_ADDED = ["sanctions-crypto-services-prohibition", "residual-sanctions", "fatf-call-for-action",
+                 "retail-leverage-limit"]
 
 
 def load(name):
@@ -70,7 +71,7 @@ def build():
     subs = {code: entry(src["name"], src) for code, src in res["subdivisions"].items()}
     out = {
         "schema": base["schema"],
-        "version": "0.2.0",
+        "version": res["version"],
         "generated_utc": res["date"],
         "status": ("DRAFT FOR COUNSEL. UNAUDITED prototype. Not legal advice. v0.2: every ISO 3166-1 code listed; "
                    "researched entries carry source ids (compliance/research/sources.json, exact sentences); every "

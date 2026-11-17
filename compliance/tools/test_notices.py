@@ -35,7 +35,7 @@ NAMES = {  # the words the texts use for each blocked code
     "US": "United States", "PR": "territories", "GU": "territories", "VI": "territories", "AS": "territories",
     "MP": "territories", "UM": "territories", "CA": "Canada", "GB": "United Kingdom", "BR": "Brazil",
     "CN": "China", "CU": "Cuba", "IR": "Iran", "KP": "North Korea", "SY": "Syria", "RU": "Russia",
-    "BY": "Belarus", "MM": "Myanmar", "UA-43": "Crimea", "UA-40": "Sevastopol", "UA-14": "Donetsk",
+    "BY": "Belarus", "MM": "Myanmar", "AU": "Australia", "SG": "Singapore", "UA-43": "Crimea", "UA-40": "Sevastopol", "UA-14": "Donetsk",
     "UA-09": "Luhansk", "UA-23": "Zaporizhzhia", "UA-65": "Kherson",
 }
 
