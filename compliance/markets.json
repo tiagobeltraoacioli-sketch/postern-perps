@@ -1,0 +1,173 @@
+{
+  "schema": "postern-perps/markets",
+  "version": "0.2.0",
+  "date": "2026-11-17",
+  "status": "UNAUDITED prototype. Launch-candidate market table proposed by agent 392; every number is explained in docs/MARKETS.md with its source. Nothing here is legal advice; listing any market in any jurisdiction is for counsel.",
+  "conventions": {
+    "spec": "docs/SPEC.md v0.1 (agent 388): fixed scales PRICE_SCALE 1e8, SIZE_SCALE 1e8, USDC_SCALE 1e6, rates in ppm (1e-6), funding rates in RATE_SCALE 1e9. Decimal strings here are converted by the engine's genesis converter with exact parsing (S-1.2): a value with more fractional digits than its scale is REJECTED, never rounded.",
+    "fieldNames": "Field names equal the per-market fields of SPEC section 10 (Genesis). API names: tickSize = tick, stepSize = step, minOrderSize = minSize, maxOrderSize = maxSize, openInterestCap = oiCap.",
+    "units": {
+      "tick": "USD per 1 whole base unit (decimal string)",
+      "step": "base units (decimal string)",
+      "minSize": "base units",
+      "maxSize": "base units, per order",
+      "oiCap": "base units: OI(m) = sum of long sizes (SPEC S-4.8)",
+      "tiers.floor": "USDC (decimal string): position notional where the tier starts; schedule is continuous (SPEC 6.2)",
+      "imfPpm, mmfPpm, takerFeePpm, makerFeePpm, liquidationFeePpm": "parts per million of notional",
+      "markBandBps, marketSlippageBps, oracle.agreeBps, oracle.jumpBps": "basis points",
+      "impactNotional": "USD (decimal string)",
+      "interest, maxFundingRate": "per funding interval, RATE_SCALE 1e9 (12500 = 0.00125% per hour)",
+      "fundingIntervalMs, oracle.maxStalenessMs": "milliseconds"
+    },
+    "priceDecimals/sizeDecimals": "DISPLAY precision only; each equals the number of fractional digits of tick / step (SPEC section 1)."
+  },
+  "collateral": {
+    "symbol": "bUSDC",
+    "decimals": 6,
+    "chainId": 700770,
+    "note": "Wrapped USDC of the Bloch bridge on the Bloch L2. Its own risks (issuer freeze of USDC, bridge pause) are disclosed in compliance/legal/risk-disclosure.md."
+  },
+  "markets": [
+    {
+      "marketId": 1,
+      "symbol": "BTC-USD",
+      "base": "BTC",
+      "priceDecimals": 1,
+      "sizeDecimals": 4,
+      "tick": "0.5",
+      "step": "0.0001",
+      "minSize": "0.0002",
+      "maxSize": "10",
+      "oiCap": "30",
+      "maxLeverage": 20,
+      "tiers": [
+        {
+          "floor": "0",
+          "imfPpm": 50000,
+          "mmfPpm": 25000
+        },
+        {
+          "floor": "500000",
+          "imfPpm": 100000,
+          "mmfPpm": 50000
+        },
+        {
+          "floor": "2000000",
+          "imfPpm": 200000,
+          "mmfPpm": 100000
+        }
+      ],
+      "takerFeePpm": 450,
+      "makerFeePpm": 150,
+      "liquidationFeePpm": 5000,
+      "markBandBps": 50,
+      "marketSlippageBps": 500,
+      "impactNotional": "10000",
+      "fundingIntervalMs": 3600000,
+      "interest": 12500,
+      "fundingClamp": 62500,
+      "maxFundingRate": 1000000,
+      "oracle": {
+        "minSources": 3,
+        "agreeBps": 100,
+        "jumpBps": 500,
+        "maxStalenessMs": 10000,
+        "confirmRounds": 3
+      }
+    },
+    {
+      "marketId": 2,
+      "symbol": "ETH-USD",
+      "base": "ETH",
+      "priceDecimals": 2,
+      "sizeDecimals": 3,
+      "tick": "0.05",
+      "step": "0.001",
+      "minSize": "0.006",
+      "maxSize": "200",
+      "oiCap": "500",
+      "maxLeverage": 12,
+      "tiers": [
+        {
+          "floor": "0",
+          "imfPpm": 83333,
+          "mmfPpm": 41667
+        },
+        {
+          "floor": "250000",
+          "imfPpm": 100000,
+          "mmfPpm": 50000
+        },
+        {
+          "floor": "1000000",
+          "imfPpm": 200000,
+          "mmfPpm": 100000
+        }
+      ],
+      "takerFeePpm": 450,
+      "makerFeePpm": 150,
+      "liquidationFeePpm": 5000,
+      "markBandBps": 50,
+      "marketSlippageBps": 500,
+      "impactNotional": "10000",
+      "fundingIntervalMs": 3600000,
+      "interest": 12500,
+      "fundingClamp": 62500,
+      "maxFundingRate": 1000000,
+      "oracle": {
+        "minSources": 3,
+        "agreeBps": 100,
+        "jumpBps": 500,
+        "maxStalenessMs": 10000,
+        "confirmRounds": 3
+      }
+    },
+    {
+      "marketId": 3,
+      "symbol": "SOL-USD",
+      "base": "SOL",
+      "priceDecimals": 3,
+      "sizeDecimals": 2,
+      "tick": "0.005",
+      "step": "0.01",
+      "minSize": "0.14",
+      "maxSize": "2500",
+      "oiCap": "6500",
+      "maxLeverage": 10,
+      "tiers": [
+        {
+          "floor": "0",
+          "imfPpm": 100000,
+          "mmfPpm": 50000
+        },
+        {
+          "floor": "100000",
+          "imfPpm": 200000,
+          "mmfPpm": 100000
+        },
+        {
+          "floor": "400000",
+          "imfPpm": 333334,
+          "mmfPpm": 166667
+        }
+      ],
+      "takerFeePpm": 450,
+      "makerFeePpm": 150,
+      "liquidationFeePpm": 5000,
+      "markBandBps": 50,
+      "marketSlippageBps": 500,
+      "impactNotional": "5000",
+      "fundingIntervalMs": 3600000,
+      "interest": 12500,
+      "fundingClamp": 62500,
+      "maxFundingRate": 1000000,
+      "oracle": {
+        "minSources": 3,
+        "agreeBps": 100,
+        "jumpBps": 800,
+        "maxStalenessMs": 10000,
+        "confirmRounds": 3
+      }
+    }
+  ]
+}

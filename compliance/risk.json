@@ -1,0 +1,63 @@
+{
+  "schema": "postern-perps/risk",
+  "version": "0.2.0",
+  "date": "2026-11-17",
+  "status": "UNAUDITED prototype. Global risk and fee parameters proposed by agent 392; reasons and sources in docs/MARKETS.md. Values marked TBD-owner need the owner's money or decision.",
+  "global": {
+    "withdrawalFee": "1",
+    "withdrawalFeeUnit": "USDC (decimal string), flat, deducted from the gross Withdraw.amount (SPEC S-9.2)",
+    "minFeeSweep": "100",
+    "minFeeSweepUnit": "USDC; PROTOCOL_FEE balance swept daily to feeRecipient when at least this (SPEC S-9.3)",
+    "feeRecipient": "0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544",
+    "feeRecipientChainId": 700770,
+    "depositFee": "0",
+    "maxFutureMs": 1000,
+    "maxAgeMs": 6000
+  },
+  "feeTiers": {
+    "window": "rolling 14 UTC days of the account's own taker + maker notional (agents count toward their main account)",
+    "status": "PROPOSAL for SPEC open item O-4 (volume tiers). SPEC v0.1 applies tier 0 to everyone until 388 adds tiers.",
+    "rebates": "none (maker fee never below 0 in v0.2)",
+    "tiers": [
+      { "tier": 0, "minVolume14d": "0", "takerFeePpm": 450, "makerFeePpm": 150 },
+      { "tier": 1, "minVolume14d": "5000000", "takerFeePpm": 400, "makerFeePpm": 120 },
+      { "tier": 2, "minVolume14d": "25000000", "takerFeePpm": 350, "makerFeePpm": 80 },
+      { "tier": 3, "minVolume14d": "100000000", "takerFeePpm": 300, "makerFeePpm": 40 },
+      { "tier": 4, "minVolume14d": "500000000", "takerFeePpm": 280, "makerFeePpm": 0 }
+    ]
+  },
+  "insuranceFund": {
+    "account": "INSURANCE (system account 0x...0002, SPEC section 8)",
+    "inflows": ["liquidation fees (liquidationFeePpm of liquidated notional, from remaining equity, never below 0)", "rounding dust (SPEC S-0.3)", "seed deposit"],
+    "outflows": ["deficits of accounts liquidated past bankruptcy (SPEC 6.3 step 5)", "isolated-margin funding shortfalls (SPEC S-7.3)"],
+    "seedRequired": "60000",
+    "seedUnit": "USDC; formula and per-market terms in docs/MARKETS.md section 5; computed 57241 by compliance/tools/check_params.py at the oiCap values of markets.json 0.2.0 and the 2026-11-17 reference prices, rounded up to the next 5000 for price drift",
+    "seedFunder": "TBD-owner",
+    "withdrawals": "none: the insurance fund has no key and no withdrawal path in v0.2 (a change needs a new genesis)",
+    "launchGate": "trading does not open (markets stay halted) until INSURANCE.balance >= seedRequired and BACKSTOP equity >= its seed (go/no-go item; engine enforcement is a request to 388)",
+    "oiCapRule": "raising an oiCap requires INSURANCE.balance >= sum over markets of oiCapUsd(m) * max(0, stress1hBps(m) - mmfBps_tier0(m)) / 10000 at the new caps (checked off-chain at genesis/upgrade by tools; engine enforcement is a request to 388)"
+  },
+  "backstop": {
+    "account": "BACKSTOP (system account 0x...0003, SPEC section 8)",
+    "role": "takes the part of a liquidation the book did not fill, at the bankruptcy price, only while its own equity covers its own maintenance requirement (SPEC 6.3 step 3); else ADL",
+    "seedRequired": "TBD-owner",
+    "seedProposal": "at least 25% of the largest single-market oiCap notional at tier-0 IMF: 25% of the BTC-USD oiCap notional (0.25 * 1945745 = 486436 USDC at the 2026-11-17 reference price) at the tier-0 IMF of 5% needs 24322 USDC: proposed seed 25000 USDC",
+    "positionLimitPerMarket": "the backstop takes over at most 25% of oiCap(m) in any market (proposal to 388; above it, ADL)",
+    "unwind": "proposal to 388: the backstop's positions are offered as reduce-only limit orders at mark +/- markBandBps; never at a loss beyond its own bankruptcy",
+    "profitsTo": "stay in BACKSTOP (capacity); no owner withdrawal path in v0.2"
+  },
+  "adl": {
+    "rule": "SPEC 6.4: last resort only, after the book and the backstop; ranking profitRatio * leverage; every ADL fill is an event naming both accounts; disclosed in compliance/legal/risk-disclosure.md"
+  },
+  "invariantsChecked": [
+    "R-1 every mmfPpm > markBandBps * 100 (SPEC S-5.3)",
+    "R-2 every imfPpm = 2 * mmfPpm (Decided: maintenance = half of initial, the convention of both benchmarks), rounded up for odd values",
+    "R-3 tiers ascending in floor, imf and mmf non-decreasing",
+    "R-4 maxLeverage = floor(10^6 / imfPpm of tier 0)",
+    "R-5 maxFundingRate * 24 < (imfPpm - mmfPpm of tier 0) * 1000 (funding alone cannot move a position from initial to maintenance within one day)",
+    "R-6 mmfPpm of tier 0 >= stress1hBps * 100 / 2 (maintenance covers at least half of the worst observed one-hour adverse move on either venue; the rest is the insurance fund's)",
+    "R-7 minSize * reference price >= 10 USD, a multiple of step; maxSize <= oiCap; tick and step exact in the fixed scales",
+    "R-8 takerFeePpm >= makerFeePpm >= 0 at every fee tier; tier 0 equals markets.json fees",
+    "R-9 feeRecipient = 0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544"
+  ]
+}
