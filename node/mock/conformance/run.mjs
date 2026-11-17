@@ -45,8 +45,11 @@ const be = (v, n) => {
   for (let i = n - 1; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; }
   return b;
 };
+export function stateRootOfForTest(c) {
+  return stateRootOf(c);
+}
 function stateRootOf(c) {
-  const sys = keccak256(concat(enc.encode('PPv1sys'), be(c.nextDepositIndex, 8), be(c.nextForcedIndex, 8), be(c.nextOrderId, 8), be(c.totalEscape, 16), be(c.dust, 16), unhex(c.auxHash)));
+  const sys = keccak256(concat(enc.encode('PPv1sys'), be(c.nextDepositIndex, 8), be(c.nextForcedIndex, 8), be(c.nextOrderId, 8), be(c.totalEscape, 16), be(c.dust, 16), unhex(c.auxHash), be(c.withdrawalCount, 8), be(c.withdrawalsTotal, 8)));
   return hex(keccak256(concat(enc.encode('PosternPerps/state/v1'), be(c.height, 8), be(c.time, 8), unhex(c.accountsRoot), unhex(c.marketsRoot), unhex(c.withdrawalsRoot), sys)));
 }
 
@@ -206,7 +209,7 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
   } catch (e) {
     why = e.message;
   }
-  ok('checkpoint stateRoot = SPEC 11 equation over its first twelve fields', sr !== null && sr === C.stateRoot, `${sr} vs ${C.stateRoot}`);
+  ok('checkpoint stateRoot = SPEC 11 equation (systemHash with withdrawalCount and withdrawalsTotal, VAULT.md 64072cb)', sr !== null && sr === C.stateRoot, `${sr} vs ${C.stateRoot}`);
   ok('withdrawalCount 0 means withdrawalsTotal 0 (VAULT.md 5.3 rule 5)', C.withdrawalCount !== 0 || C.withdrawalsTotal === '0');
   ok('checkpoint has at least threshold signatures', C.signatures.length >= committee.body.threshold);
   ok('checkpoint signatures strictly ascending by validator', C.signatures.every((s, i) => i === 0 || s.validator > C.signatures[i - 1].validator));

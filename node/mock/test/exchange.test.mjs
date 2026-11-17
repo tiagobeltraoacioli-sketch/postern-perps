@@ -158,3 +158,17 @@ test('protocol fees accrue to the PROTOCOL_FEE system account (SPEC 8), never to
   assert.ok(x.account(FEE_ACCOUNT).collateral > before);
   assert.equal(FEE_ACCOUNT, '0x0000000000000000000000000000000000000001');
 });
+
+test('state root and chain heads reproduce the vault vectors (contracts/test/vectors, VAULT.md 64072cb, SPEC 0.1.5)', async () => {
+  const { stateRootOf, chainHead0 } = await import('../lib/exchange.mjs');
+  const { stateRootOfForTest } = await import('../conformance/run.mjs');
+  const { keccak256: k, hex: h } = await import('../lib/keccak.mjs');
+  const V = JSON.parse(readFileSync(new URL('../../../contracts/test/vectors/vault-vectors.json', import.meta.url)));
+  const kv = (s) => { const m = /^keccak256\('(.*)'\)$/.exec(s); return m ? h(k(new TextEncoder().encode(m[1]))) : s; };
+  const c = Object.fromEntries(Object.entries(V.inputs.checkpoint).map(([key, v]) => [key, kv(v)]));
+  assert.equal(stateRootOf(c), V.outputs.stateRoot, 'mock');
+  assert.equal(stateRootOfForTest(c), V.outputs.stateRoot, 'conformance suite (independent transcription)');
+  assert.equal(V.chainId, 700770);
+  assert.equal(chainHead0('PosternPerps.deposit.v1', V.vault), V.outputs.depositHead0);
+  assert.equal(chainHead0('PosternPerps.forced.v1', V.vault), V.outputs.forcedHead0);
+});
