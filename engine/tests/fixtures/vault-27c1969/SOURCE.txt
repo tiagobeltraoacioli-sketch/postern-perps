@@ -1,0 +1,1 @@
+Copied unchanged from postern-perps codex/perps-contracts-20261117 at 27c1969 (agent 390), contracts/test/vectors/vault-vectors.json.

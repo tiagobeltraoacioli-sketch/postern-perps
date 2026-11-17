@@ -1,0 +1,1 @@
+Copied unchanged from postern-perps codex/perps-compliance-20261117 at 47f95bd (agent 392), compliance/markets.json and compliance/risk.json 0.2.1, for the converter test. The owner of these files is 392.
