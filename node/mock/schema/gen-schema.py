@@ -46,7 +46,11 @@ D["Status"]=obj({"name":{"type":"string"},"version":{"type":"string"},"apiVersio
  "committee":obj({"n":R("Int"),"threshold":R("Int"),"online":R("Int")}),"vaultMode":enum("normal","paused","escape","unknown"),
  "l2":obj({"finalizedBlock":R("Int"),"lastDepositBlock":R("Int"),"endpointsAgree":{"type":"boolean"}})})
 D["CheckpointSig"]=obj({"validator":R("Address"),"signature":R("Sig")})
-D["Checkpoint"]=obj({"height":R("Int"),"time":R("Ms"),"blockHash":R("Hash"),"stateRoot":R("Hash"),"logHash":R("Hash"),"withdrawalsRoot":R("Hash"),"depositsCredited":R("Int"),"forcedProcessed":R("Int"),"digest":R("Hash"),"threshold":R("Int"),"final":{"type":"boolean"},"signatures":arr(R("CheckpointSig"))})
+D["Checkpoint"]=obj({"height":R("Int"),"time":R("Ms"),"blockHash":R("Hash"),"stateRoot":R("Hash"),"logHash":R("Hash"),
+ "accountsRoot":R("Hash"),"marketsRoot":R("Hash"),"withdrawalsRoot":R("Hash"),"nextDepositIndex":R("Int"),"nextForcedIndex":R("Int"),"nextOrderId":R("U64"),
+ "totalEscape":{"type":"string","pattern":"^(0|[1-9][0-9]{0,38})$"},"dust":{"type":"string","pattern":"^(0|[1-9][0-9]{0,38})$"},"auxHash":R("Hash"),
+ "depositsHead":R("Hash"),"forcedHead":R("Hash"),"withdrawalCount":R("Int"),"withdrawalsTotal":R("U64"),
+ "digest":R("Hash"),"threshold":R("Int"),"final":{"type":"boolean"},"signatures":arr(R("CheckpointSig"))})
 D["Committee"]=obj({"threshold":R("Int"),"validators":arr(R("Address"),minItems=1),"setHash":R("Hash")})
 D["BlockInput"]={"oneOf":[
  obj({"kind":{"const":"action"},"account":R("Address"),"signer":R("Address"),"type":{"type":"string"},"message":{"type":"object"},"signature":R("Sig")},opt=("signer",)),
@@ -116,6 +120,6 @@ D["WsControl"]={"oneOf":[
 D["WsMessage"]={"anyOf":[R("WsData"),R("WsControl")]}
 D["ActionRequest"]={"type":"object","properties":{"type":{"type":"string","pattern":"^[A-Z][A-Za-z]+$"},"message":{"type":"object"},"signature":R("Sig"),"wire":{"type":"boolean"}},"required":["type","message","signature"],"additionalProperties":False}
 schema={"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"postern-perps/api/0.1","title":"PosternDEX Perpetuals API v0.1 (UNAUDITED prototype)",
- "description":"Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries every field of the signed digest (389 proposal B) so anyone can recompute it; VAULT.md (390) will extend it. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
+ "description":"Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries the sixteen fields of the VAULT.md v0.2 digest (as 389's node b170e74 serialises them) so anyone can recompute the digest and the SPEC 11 state-root equation. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
  "$defs":D}
 json.dump(schema,open(sys.argv[1],'w'),indent=1)

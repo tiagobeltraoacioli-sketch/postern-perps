@@ -110,9 +110,15 @@ export function status(x, mode, pendingOverride) {
   };
 }
 export function checkpoint(x, cp) {
+  // VAULT.md 5.2 fields with the node's JSON types (389 b170e74 checkpoint.rs): u64 counters that fit 2^53 as
+  // numbers, nextOrderId / totalEscape / dust / withdrawalsTotal as decimal strings.
+  const f = cp.fields;
   return {
-    height: cp.height, time: cp.time, blockHash: cp.blockHash, stateRoot: cp.stateRoot, logHash: cp.logHash,
-    withdrawalsRoot: cp.withdrawalsRoot, depositsCredited: cp.depositsCredited, forcedProcessed: cp.forcedProcessed,
+    height: cp.height, time: cp.time, blockHash: cp.blockHash, stateRoot: cp.stateRoot, logHash: f.logHash,
+    accountsRoot: f.accountsRoot, marketsRoot: f.marketsRoot, withdrawalsRoot: f.withdrawalsRoot,
+    nextDepositIndex: Number(f.nextDepositIndex), nextForcedIndex: Number(f.nextForcedIndex), nextOrderId: f.nextOrderId,
+    totalEscape: f.totalEscape, dust: f.dust, auxHash: f.auxHash, depositsHead: f.depositsHead, forcedHead: f.forcedHead,
+    withdrawalCount: Number(f.withdrawalCount), withdrawalsTotal: f.withdrawalsTotal,
     digest: cp.digest, threshold: cp.threshold, final: cp.final, signatures: x.checkpointSignatures(cp),
   };
 }

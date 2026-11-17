@@ -82,11 +82,29 @@ export function verifyMerkle(leaf, proof, root) {
 }
 
 const VAULT_DOMAIN = (vault) => ({ name: 'PosternPerpsVault', version: '1', chainId: 700770, verifyingContract: vault });
-// 389's proposal (B) in the cross-area log (03:50 UTC); docs/VAULT.md (390) decides. PROVISIONAL.
+// docs/VAULT.md v0.2 section 5.2 (390, contracts 27c1969; the node 389 b170e74 signs the same 16 fields).
 export const CHECKPOINT_FIELDS = [
-  { name: 'height', type: 'uint64' }, { name: 'time', type: 'uint64' }, { name: 'stateRoot', type: 'bytes32' },
-  { name: 'logHash', type: 'bytes32' }, { name: 'withdrawalsRoot', type: 'bytes32' },
-  { name: 'depositsCredited', type: 'uint64' }, { name: 'forcedProcessed', type: 'uint64' }];
+  { name: 'height', type: 'uint64' }, { name: 'time', type: 'uint64' }, { name: 'logHash', type: 'bytes32' },
+  { name: 'accountsRoot', type: 'bytes32' }, { name: 'marketsRoot', type: 'bytes32' }, { name: 'withdrawalsRoot', type: 'bytes32' },
+  { name: 'nextDepositIndex', type: 'uint64' }, { name: 'nextForcedIndex', type: 'uint64' }, { name: 'nextOrderId', type: 'uint64' },
+  { name: 'totalEscape', type: 'uint128' }, { name: 'dust', type: 'uint128' }, { name: 'auxHash', type: 'bytes32' },
+  { name: 'depositsHead', type: 'bytes32' }, { name: 'forcedHead', type: 'bytes32' },
+  { name: 'withdrawalCount', type: 'uint64' }, { name: 'withdrawalsTotal', type: 'uint64' }];
+const word = (v) => {
+  const b = new Uint8Array(32);
+  let x = BigInt(v);
+  for (let i = 31; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; }
+  return b;
+};
+const be128 = (v) => word(v).slice(16);
+const tag32 = (t) => { const b = new Uint8Array(32); b.set(enc.encode(t)); return b; };
+/** VAULT.md 5.4 chain heads: head(0) = keccak(abi.encode(bytes32 tag, chainid, vault)). */
+export const chainHead0 = (tag, vault) => hex(keccak256(concat(tag32(tag), word(700770), word(BigInt(vault)))));
+/** VAULT.md 5.2 / SPEC 11: stateRoot from the first twelve checkpoint fields. */
+export function stateRootOf(f) {
+  const sys = keccak256(concat(enc.encode('PPv1sys'), be64(f.nextDepositIndex), be64(f.nextForcedIndex), be64(f.nextOrderId), be128(f.totalEscape), be128(f.dust), unhex(f.auxHash)));
+  return hex(keccak256(concat(enc.encode('PosternPerps/state/v1'), be64(f.height), be64(f.time), unhex(f.accountsRoot), unhex(f.marketsRoot), unhex(f.withdrawalsRoot), sys)));
+}
 // Mock withdrawal record (VAULT.md decides the real one). PROVISIONAL.
 export const WITHDRAWAL_FIELDS = [
   { name: 'withdrawalId', type: 'uint64' }, { name: 'account', type: 'address' }, { name: 'recipient', type: 'address' },
@@ -123,6 +141,8 @@ export class Exchange {
     this.vaultMode = 'normal';
     this.pending = [];
     this.acks = new Map();
+    this.depositsHead = chainHead0('PosternPerps.deposit.v1', this.vault); // VAULT.md 5.4
+    this.forcedHead = chainHead0('PosternPerps.forced.v1', this.vault);
     this.nonceBySigner = new Map(); // per signer: its 64 highest used nonces, ascending (SPEC 2.5)
     this.ids = { order: 9_912_000n, trade: 771_000n, fill: 5_512_000n, withdrawal: 70n, deposit: 40n, forced: 0n };
     this.depositsCredited = 0n;
@@ -856,6 +876,7 @@ export class Exchange {
           d.status = 'credited';
           d.creditedHeight = height;
           this.credit(acc, d.amount);
+          this.depositsHead = hex(keccak256(concat(unhex(this.depositsHead), word(this.depositsCredited), word(BigInt(acc.address)), word(d.amount))));
           this.depositsCredited += 1n;
           inputs.push({ kind: 'deposit', payload: { depositIndex: String(this.depositsCredited - 1n), account: acc.address, amount: String(d.amount) } });
           ev.deposits(acc, d);
@@ -905,9 +926,10 @@ export class Exchange {
     const prevLogHash = this.lastLogHash;
     const logHash = hex(keccak256(concat(unhex(prevLogHash), be64(height), be64(time), keccak256(unhex(inputsEncoded)))));
     const leaves = this.accountLeaves();
-    const stateRoot = merkle(leaves.map((l) => l.leaf)).root;
+    const st = this.stateFields(height, time, logHash, leaves);
+    const stateRoot = st.stateRoot;
     const hash = hex(keccak256(concat(unhex(logHash), unhex(stateRoot))));
-    const block = { height, time, prevLogHash, logHash, stateRoot, hash, inputs, inputsEncoded, leaves, _sig: null };
+    const block = { height, time, prevLogHash, logHash, stateRoot, hash, inputs, inputsEncoded, leaves, st, _sig: null };
     this.lastLogHash = logHash;
     this.blocks.set(height, block);
     if (this.blocks.size > this.maxBlocks) this.blocks.delete(height - this.maxBlocks);
@@ -946,24 +968,46 @@ export class Exchange {
     }
     return out;
   }
-  checkpoint(b, ev) {
+  /**
+   * The sixteen checkpoint fields of a block (VAULT.md 5.2) and the SPEC 11 state-root equation over them. The
+   * subtrees (accounts, markets, withdrawals) are the mock's own Merkle format (README "Fidelity"); the equation, the
+   * system hash, the chain heads and the withdrawal count and total are VAULT.md's.
+   */
+  stateFields(height, time, logHash, leaves) {
     const wds = [];
     const CERT = new Set(['paid', 'delayed', 'submitted', 'certified', 'finalized']);
     for (const a of this.accounts.values()) {
       for (const w of a.withdrawals) {
-        if (w.requestedHeight > b.height) continue;
+        if (w.requestedHeight > height) continue;
         if (w.demo ? CERT.has(w.target) : !['requested', 'rejected'].includes(w.status)) wds.push(w);
       }
     }
     wds.sort((x, y) => (x.withdrawalId < y.withdrawalId ? -1 : 1));
-    const wLeaves = wds.map((w) => this.withdrawalLeaf(w));
-    const wTree = merkle(wLeaves);
-    const message = { height: String(b.height), time: String(b.time), stateRoot: b.stateRoot, logHash: b.logHash, withdrawalsRoot: wTree.root, depositsCredited: String(this.depositsCredited), forcedProcessed: String(this.forcedProcessed) };
-    const digestBytes = typedDataHash(VAULT_DOMAIN(this.vault), 'Checkpoint', CHECKPOINT_FIELDS, message);
+    const wTree = merkle(wds.map((w) => (w._leaf ??= this.withdrawalLeaf(w))));
+    const marketLeaves = [...this.markets.values()].sort((x, y) => x.id - y.id).map((m) => h32(canonical({ mockLeaf: 'market-v0', marketId: m.id, index: m.index, mark: m.mark, status: m.status })));
+    let totalEscape = 0n;
+    for (const a of this.accounts.values()) {
+      if (a.address === this.liquidity || a.address === FEE_ACCOUNT) continue;
+      const g = this.margins(a);
+      if (g.equity > 0n) totalEscape += g.equity;
+    }
+    const f = {
+      height: String(height), time: String(time), logHash,
+      accountsRoot: merkle(leaves.map((l) => l.leaf)).root, marketsRoot: merkle(marketLeaves).root, withdrawalsRoot: wTree.root,
+      nextDepositIndex: String(this.depositsCredited), nextForcedIndex: String(this.forcedProcessed), nextOrderId: String(this.ids.order + 1n),
+      totalEscape: String(totalEscape), dust: '0', auxHash: ZERO32,
+      depositsHead: this.depositsHead, forcedHead: this.forcedHead,
+      withdrawalCount: String(wds.length), withdrawalsTotal: String(wds.reduce((t, w) => t + w.amount, 0n)),
+    };
+    return { fields: f, stateRoot: stateRootOf(f), wTree, wds };
+  }
+  checkpoint(b, ev) {
+    const { fields, wTree, wds } = b.st;
+    const digestBytes = typedDataHash(VAULT_DOMAIN(this.vault), 'Checkpoint', CHECKPOINT_FIELDS, fields);
     // Exactly `threshold` signatures, sorted by validator address ascending; the signing subset rotates by height.
     const k = b.height % this.committee.length;
     const signers = [...this.committee.slice(k), ...this.committee.slice(0, k)].slice(0, this.threshold).sort((x, y) => (x.address < y.address ? -1 : 1));
-    const cp = { height: b.height, time: b.time, blockHash: b.hash, stateRoot: b.stateRoot, logHash: b.logHash, withdrawalsRoot: wTree.root, depositsCredited: Number(this.depositsCredited), forcedProcessed: Number(this.forcedProcessed), digest: hex(digestBytes), threshold: this.threshold, final: true, signers, _sigs: null, leaves: b.leaves, wTree, wds };
+    const cp = { height: b.height, time: b.time, blockHash: b.hash, stateRoot: b.stateRoot, logHash: b.logHash, fields, withdrawalsRoot: wTree.root, digest: hex(digestBytes), threshold: this.threshold, final: true, signers, _sigs: null, leaves: b.leaves, wTree, wds };
     this.checkpoints.push(cp);
     if (this.checkpoints.length > 500) this.checkpoints.shift();
     for (const [i, w] of wds.entries()) {

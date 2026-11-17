@@ -45,5 +45,10 @@ test('a crossed book is caught', { timeout: 240_000 }, () =>
 
 test('a server that breaks an assumption fails the run with a reason, never aborts it', { timeout: 240_000 }, () =>
   withMutation((x) => {
-    for (const cp of x.checkpoints) cp.withdrawalsRoot = undefined;
+    for (const cp of x.checkpoints) cp.fields = { ...cp.fields, withdrawalsRoot: undefined };
   }, [/checkpoint digest recomputed|matches Checkpoint/]));
+
+test('a checkpoint whose stateRoot does not follow from its fields is caught', { timeout: 240_000 }, () =>
+  withMutation((x) => {
+    for (const cp of x.checkpoints) cp.fields = { ...cp.fields, accountsRoot: '0x' + '77'.repeat(32) };
+  }, [/stateRoot = SPEC 11 equation/, /digest recomputed/]));

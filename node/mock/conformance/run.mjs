@@ -2,7 +2,12 @@
 // Shared API conformance tests for the PosternDEX Perpetuals node: run against the mock (node/mock/server.mjs) or
 // the real node in dev mode, unchanged. UNAUDITED prototype.
 //
-//   node node/mock/conformance/run.mjs --base http://127.0.0.1:49300 [--mock] [--schema FILE] [--json]
+//   node node/mock/conformance/run.mjs --base http://127.0.0.1:49300 [--mock] [--funded [LABEL]] [--schema FILE] [--json]
+//   node node/mock/conformance/run.mjs --print-accounts [--funded LABEL]
+//
+// Real node: checks that need an account with collateral (agents, price-0 MALFORMED, book deltas) are SKIPPED, never
+// passed, unless --funded: then the suite signs as the throwaway account derived from LABEL (default 'funded';
+// address from --print-accounts), which the operator funds through the dev vault on the L2 before the run.
 //
 // Every response is validated against the API schema (node/api/schema.json when it exists, else the draft
 // node/mock/schema/api.schema.json) and against semantic rules the schema cannot express (book order, tick and
@@ -27,10 +32,24 @@ const be64 = (v) => {
   new DataView(b.buffer).setBigUint64(0, BigInt(v));
   return b;
 };
+// docs/VAULT.md v0.2 section 5.2 (390 27c1969): the sixteen fields the committee signs; the first twelve are the
+// inputs of SPEC 11's stateRoot. Transcribed independently of the mock's code.
 const CHECKPOINT_FIELDS = [
-  { name: 'height', type: 'uint64' }, { name: 'time', type: 'uint64' }, { name: 'stateRoot', type: 'bytes32' },
-  { name: 'logHash', type: 'bytes32' }, { name: 'withdrawalsRoot', type: 'bytes32' },
-  { name: 'depositsCredited', type: 'uint64' }, { name: 'forcedProcessed', type: 'uint64' }];
+  ['height', 'uint64'], ['time', 'uint64'], ['logHash', 'bytes32'], ['accountsRoot', 'bytes32'], ['marketsRoot', 'bytes32'],
+  ['withdrawalsRoot', 'bytes32'], ['nextDepositIndex', 'uint64'], ['nextForcedIndex', 'uint64'], ['nextOrderId', 'uint64'],
+  ['totalEscape', 'uint128'], ['dust', 'uint128'], ['auxHash', 'bytes32'], ['depositsHead', 'bytes32'], ['forcedHead', 'bytes32'],
+  ['withdrawalCount', 'uint64'], ['withdrawalsTotal', 'uint64']].map(([name, type]) => ({ name, type }));
+const be = (v, n) => {
+  const b = new Uint8Array(n);
+  let x = BigInt(v);
+  for (let i = n - 1; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; }
+  return b;
+};
+function stateRootOf(c) {
+  const sys = keccak256(concat(enc.encode('PPv1sys'), be(c.nextDepositIndex, 8), be(c.nextForcedIndex, 8), be(c.nextOrderId, 8), be(c.totalEscape, 16), be(c.dust, 16), unhex(c.auxHash)));
+  return hex(keccak256(concat(enc.encode('PosternPerps/state/v1'), be(c.height, 8), be(c.time, 8), unhex(c.accountsRoot), unhex(c.marketsRoot), unhex(c.withdrawalsRoot), sys)));
+}
+
 
 export function schemaPath(explicit) {
   if (explicit) return explicit;
@@ -47,15 +66,26 @@ export async function runConformance(base, opts = {}) {
     // the reason; it never passes by aborting.
     results.push({ name: 'suite aborted', ok: false, detail: String(e?.stack ?? e).slice(0, 400) });
   }
-  const failed = results.filter((r) => !r.ok);
-  return { total: results.length, passed: results.length - failed.length, failed, results };
+  const failed = results.filter((r) => r.ok === false);
+  const skipped = results.filter((r) => r.ok === null);
+  return { total: results.length, passed: results.filter((r) => r.ok === true).length, failed, skipped, results };
 }
 
-async function suite(base, { mock = false, schema, runId = String(Date.now()) } = {}, results) {
+/** The deterministic account a real-node run uses with --funded (fund it on the L2 vault first). */
+export const fundedAccount = (label = 'funded') => addressOf(keyOf(label));
+
+async function suite(base, { mock = false, schema, runId = String(Date.now()), funded = null } = {}, results) {
   const V = new Validator(JSON.parse(readFileSync(schemaPath(schema), 'utf8')));
   const ok = (name, cond, detail = '') => {
     results.push({ name, ok: !!cond, detail: cond ? '' : String(detail).slice(0, 400) });
     return !!cond;
+  };
+  // A check that needs a funded account on a real node: SKIPPED (never passed) without --funded.
+  const canFund = mock || funded !== null;
+  const needsFunds = (name) => {
+    if (canFund) return true;
+    results.push({ name: `${name} (needs a funded account: --funded)`, ok: null, detail: 'skipped' });
+    return false;
   };
   const valid = (name, def, body) => {
     const e = V.validateDef(def, body);
@@ -165,11 +195,19 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()) } 
   const vaultDomain = { name: 'PosternPerpsVault', version: '1', chainId: 700770, verifyingContract: status.body.network.vault };
   let digest = null, why = '';
   try {
-    digest = hex(typedDataHash(vaultDomain, 'Checkpoint', CHECKPOINT_FIELDS, { height: String(C.height), time: String(C.time), stateRoot: C.stateRoot, logHash: C.logHash, withdrawalsRoot: C.withdrawalsRoot, depositsCredited: String(C.depositsCredited), forcedProcessed: String(C.forcedProcessed) }));
+    digest = hex(typedDataHash(vaultDomain, 'Checkpoint', CHECKPOINT_FIELDS, Object.fromEntries(CHECKPOINT_FIELDS.map((f) => [f.name, typeof C[f.name] === 'number' ? String(C[f.name]) : C[f.name]]))));
   } catch (e) {
     why = `cannot recompute: ${e.message}`;
   }
-  ok('checkpoint digest recomputed from its fields (vault domain)', digest !== null && digest === C.digest, why || `${digest} vs ${C.digest}`);
+  ok('checkpoint digest recomputed from its sixteen fields (VAULT.md 5.2, vault domain)', digest !== null && digest === C.digest, why || `${digest} vs ${C.digest}`);
+  let sr = null;
+  try {
+    sr = stateRootOf(C);
+  } catch (e) {
+    why = e.message;
+  }
+  ok('checkpoint stateRoot = SPEC 11 equation over its first twelve fields', sr !== null && sr === C.stateRoot, `${sr} vs ${C.stateRoot}`);
+  ok('withdrawalCount 0 means withdrawalsTotal 0 (VAULT.md 5.3 rule 5)', C.withdrawalCount !== 0 || C.withdrawalsTotal === '0');
   ok('checkpoint has at least threshold signatures', C.signatures.length >= committee.body.threshold);
   ok('checkpoint signatures strictly ascending by validator', C.signatures.every((s, i) => i === 0 || s.validator > C.signatures[i - 1].validator));
   ok('every checkpoint signer is in the committee', C.signatures.every((s) => committee.body.validators.includes(s.validator)));
@@ -275,7 +313,11 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()) } 
   valid('GET /v1/geo', 'GeoStatus', geo.body);
 
   // ---------- actions: admission ----------
-  const main = keyOf(`main/${runId}`), mainAddr = addressOf(main);
+  const main = funded !== null && !mock ? keyOf(funded) : keyOf(`main/${runId}`), mainAddr = addressOf(main);
+  if (funded !== null && !mock) {
+    const fa = await get(`/v1/accounts/${mainAddr}`);
+    ok(`--funded account ${mainAddr} has collateral (fund it on the vault before the run)`, fa.status === 200 && !/^-|^0(\.0*)?$/.test(fa.body?.collateral ?? '0'), JSON.stringify(fa.body).slice(0, 200));
+  }
   const other = keyOf(`other/${runId}`);
   const T = () => get('/v1/status').then((r) => r.body.time);
   const typed = (type, msg) => typedDataHash(domain, type, eip.body.types[type], msg);
@@ -334,22 +376,30 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()) } 
   const rpo = await post('/v1/actions?wait=included', signed('PlaceOrder', po, main), hdr);
   valid('PlaceOrder ack', 'ActionAck', rpo.body);
   ok('PlaceOrder included within 2 s with an engine result', rpo.body?.status === 'included' && typeof rpo.body?.result?.ok === 'boolean', JSON.stringify(rpo.body));
-  // 9. price 0 is MALFORMED (SPEC 2.3: no "any price" order)
-  const p0 = { ...po, nonce: nextNonce(), orderType: 1, timeInForce: 1, price: '0' };
-  const r0 = await post('/v1/actions?wait=included', signed('PlaceOrder', p0, main), hdr);
-  ok('market order with price 0 never executes (MALFORMED)', r0.body?.error?.code === 'MALFORMED' || r0.body?.result?.error === 'MALFORMED', JSON.stringify(r0.body));
-  // 10. agents: approve, act, and the agent cannot withdraw
-  const agentKey = keyOf(`agent/${runId}`), agentAddr = addressOf(agentKey);
-  const T0 = BigInt(await T());
-  const ra = await post('/v1/actions?wait=included', signed('ApproveAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr, name: 'conformance', expiresAt: String(T0 + 86_400_000n) }, main), hdr);
-  ok('ApproveAgent included and applied', ra.body?.status === 'included' && ra.body?.result?.ok === true, JSON.stringify(ra.body));
-  let an = BigInt(await T());
-  const ra2 = await post('/v1/actions', signed('CancelAll', { account: mainAddr, nonce: String(an++), marketId: 0 }, agentKey), hdr);
-  ok('agent CancelAll accepted', ra2.status === 200, JSON.stringify(ra2.body));
-  await expectError('agent Withdraw', post('/v1/actions', signed('Withdraw', { account: mainAddr, nonce: String(an++), amount: '2000000', recipient: agentAddr }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
-  await expectError('agent ApproveAgent', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: String(an++), agent: addressOf(keyOf(`agent2/${runId}`)), name: 'x', expiresAt: String(T0 + 1000n) }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
-  const ags = await get(`/v1/accounts/${mainAddr}/agents`);
-  ok('approved agent listed', ags.body?.agents?.some((g) => g.agent === agentAddr));
+  // 9. price 0 is MALFORMED (SPEC 2.3: no "any price" order); a real engine checks the account first
+  if (needsFunds('market order with price 0 never executes (MALFORMED)')) {
+    const p0 = { ...po, nonce: nextNonce(), orderType: 1, timeInForce: 1, price: '0' };
+    const r0 = await post('/v1/actions?wait=included', signed('PlaceOrder', p0, main), hdr);
+    ok('market order with price 0 never executes (MALFORMED)', r0.body?.error?.code === 'MALFORMED' || r0.body?.result?.error === 'MALFORMED', JSON.stringify(r0.body));
+  }
+  // 10. agents: approve, act, and the agent cannot withdraw; revoked at the end (at most 4 agents per account)
+  if (needsFunds('agent approval, agent rights and listing')) {
+    const agentKey = keyOf(`agent/${runId}`), agentAddr = addressOf(agentKey);
+    const T0 = BigInt(await T());
+    const ra = await post('/v1/actions?wait=included', signed('ApproveAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr, name: 'conformance', expiresAt: String(T0 + 600_000n) }, main), hdr);
+    ok('ApproveAgent included and applied', ra.body?.status === 'included' && ra.body?.result?.ok === true, JSON.stringify(ra.body));
+    let an = BigInt(await T());
+    const ra2 = await post('/v1/actions', signed('CancelAll', { account: mainAddr, nonce: String(an++), marketId: 0 }, agentKey), hdr);
+    ok('agent CancelAll accepted', ra2.status === 200, JSON.stringify(ra2.body));
+    await expectError('agent Withdraw', post('/v1/actions', signed('Withdraw', { account: mainAddr, nonce: String(an++), amount: '2000000', recipient: agentAddr }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
+    await expectError('agent ApproveAgent', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: String(an++), agent: addressOf(keyOf(`agent2/${runId}`)), name: 'x', expiresAt: String(T0 + 1000n) }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
+    const ags = await get(`/v1/accounts/${mainAddr}/agents`);
+    ok('approved agent listed', ags.body?.agents?.some((g) => g.agent === agentAddr));
+    const rv = await post('/v1/actions?wait=included', signed('RevokeAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr }, main), hdr);
+    ok('RevokeAgent included and applied', rv.body?.status === 'included' && rv.body?.result?.ok === true, JSON.stringify(rv.body));
+    const ags2 = await get(`/v1/accounts/${mainAddr}/agents`);
+    ok('revoked agent no longer listed', !ags2.body?.agents?.some((g) => g.agent === agentAddr));
+  }
   await checkInputs('after actions', true);
 
   // ---------- geoblocking (mock and dev: the country comes from X-Mock-Country) ----------
@@ -397,11 +447,11 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()) } 
   }
 
   // ---------- WebSocket ----------
-  await wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel: () => signed('CancelAll', { account: mainAddr, nonce: nextNonce(), marketId: 0 }, main), mock });
+  await wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel: () => signed('CancelAll', { account: mainAddr, nonce: nextNonce(), marketId: 0 }, main), signedRest: () => signed('PlaceOrder', { ...po, nonce: nextNonce() }, main), mock, canFund, needsFunds });
 
 }
 
-async function wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel, mock }) {
+async function wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel, signedRest, mock, canFund, needsFunds }) {
   const url = base.replace(/^http/, 'ws') + '/v1/ws' + (mock ? '?country=ZZ' : '');
   const ws = new WebSocket(url);
   const msgs = [];
@@ -438,6 +488,12 @@ async function wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel,
   ws.send(JSON.stringify({ op: 'action', id: 9, request: signedCancel() }));
   ok('ws action op answered with actionResult', !!(await wait((m) => m.op === 'actionResult' && m.id === 9)));
   if (mock) await fetch(base + '/mock/scenario?step=10');
+  else if (canFund) {
+    // A real node's book moves only with actions: rest an order far from the mark (a delta), then cancel it.
+    ws.send(JSON.stringify({ op: 'action', id: 10, request: signedRest() }));
+    await wait((m) => m.channel === 'book' && m.type === 'delta', 6000);
+    ws.send(JSON.stringify({ op: 'action', id: 11, request: signedCancel() }));
+  }
   await wait((m) => m.channel === 'book' && m.type === 'delta', 6000);
   // Every message validates; book deltas chain by prevSeq from the snapshot.
   const bad = msgs.map((m) => [m, V.validateDef('WsMessage', m)]).filter(([, e]) => e.length);
@@ -449,7 +505,7 @@ async function wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel,
     if (d.data.prevSeq !== seq) chain = false;
     seq = d.data.seq;
   }
-  ok(`ws book deltas chain by prevSeq from the snapshot (${deltas.length} deltas)`, chain);
+  if (needsFunds('ws book deltas chain by prevSeq from the snapshot')) ok(`ws book deltas chain by prevSeq from the snapshot (${deltas.length} deltas)`, chain);
   ws.close();
 }
 
@@ -457,11 +513,18 @@ async function wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel,
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n, d) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : d);
-  const r = await runConformance(opt('base', 'http://127.0.0.1:49300'), { mock: args.includes('--mock'), schema: opt('schema', undefined) });
+  if (args.includes('--print-accounts')) {
+    process.stdout.write(`${JSON.stringify({ funded: fundedAccount(args.includes('--funded') && args[args.indexOf('--funded') + 1] && !args[args.indexOf('--funded') + 1].startsWith('--') ? args[args.indexOf('--funded') + 1] : 'funded') })}\n`);
+    process.exit(0);
+  }
+  const fv = args.includes('--funded') ? args[args.indexOf('--funded') + 1] : null;
+  const funded = args.includes('--funded') ? (!fv || fv.startsWith('--') ? 'funded' : fv) : null;
+  const r = await runConformance(opt('base', 'http://127.0.0.1:49300'), { mock: args.includes('--mock'), schema: opt('schema', undefined), funded });
   if (args.includes('--json')) process.stdout.write(JSON.stringify(r, null, 1) + '\n');
   else {
     for (const f of r.failed) process.stdout.write(`FAIL ${f.name}: ${f.detail}\n`);
-    process.stdout.write(`conformance: ${r.passed}/${r.total} checks passed (schema ${schemaPath(opt('schema', undefined))})\n`);
+    for (const f of r.skipped) process.stdout.write(`SKIP ${f.name}\n`);
+    process.stdout.write(`conformance: ${r.passed}/${r.total} checks passed, ${r.failed.length} failed, ${r.skipped.length} skipped (schema ${schemaPath(opt('schema', undefined))})\n`);
   }
   process.exit(r.failed.length ? 1 : 0);
 }
