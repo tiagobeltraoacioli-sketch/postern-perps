@@ -532,9 +532,8 @@ fn r395_37_waiting_for_the_own_l2_view_does_not_make_a_block_late() {
 
 /// VAULT 0.2 forced input through the REAL engine's decoder. FAILS against engine 5a50d58, whose tag 0x03 still
 /// carries the vault's superseded v0.1 fields (kind, u32 marketId, u64 amount, deadline): the engine refuses the
-/// node's VAULT 0.2 bytes. Un-ignore when 388 aligns tag 0x03 (cross-area, 390 08:45 line).
+/// node's VAULT 0.2 bytes. Passes since engine e2fca75 (SPEC 0.1.6).
 #[test]
-#[ignore = "fails until 388 aligns engine tag 0x03 with VAULT 0.2; run with --ignored"]
 fn forced_vault_0_2_input_accepted_by_the_real_engine() {
     let mut n = net_real("forced-real", 1);
     let u = user(70);
@@ -548,6 +547,26 @@ fn forced_vault_0_2_input_accepted_by_the_real_engine() {
     }
     let r = n.seq.produce(now());
     assert!(r.is_ok(), "the engine refused the node's VAULT 0.2 forced input: {:?}", r.err());
+    assert_eq!(n.seq.engine.next_forced_index(), 1, "received");
+    assert_eq!(n.seq.engine.forced_processed(), 1, "processed (CancelAll)");
+    let rs: Vec<VResult> = { let b = n.seq.block(n.seq.log.last_height).unwrap().unwrap(); n.vals.iter_mut().map(|v| v.process(&b, now())).collect() };
+    assert!(rs.iter().all(|r| matches!(r, VResult::Applied { checkpoint: Some(_) })), "{rs:?}");
+}
+
+/// 388's shared vector `engine/vectors/forced-vectors.json` (e2fca75): the node's VAULT 0.2 forced chain
+/// reproduces forcedHead(2) byte for byte.
+#[test]
+fn forced_chain_reproduces_388_shared_vector() {
+    let j: serde_json::Value = serde_json::from_slice(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../engine/vectors/forced-vectors.json")).unwrap()).unwrap();
+    let vault = perps_node::util::parse_address(j["vault"].as_str().unwrap()).unwrap();
+    let mut h = perps_node::vaultfmt::forced_head0(j["chainId"].as_u64().unwrap(), &vault);
+    for r in j["requests"].as_array().unwrap() {
+        let acc = perps_node::util::parse_address(r["account"].as_str().unwrap()).unwrap();
+        let p = |k: &str| r[k].as_u64().or_else(|| r[k].as_str().and_then(|s| s.parse().ok())).unwrap();
+        h = perps_node::vaultfmt::forced_head_next(&h, p("index"), &acc, p("kind"), p("deadline"), p("arg"));
+    }
+    assert_eq!(to_hex(&h), j["forcedHead2"].as_str().unwrap());
+    assert_eq!(to_hex(&h), "0xef4758f64316a851cda4dbd78f4627774502320f46836b5255e365dfcff61be3");
 }
 
 /// R395-38 (395, Medium): first-seen keyed by height let a placeholder block (seen early, never applicable)
