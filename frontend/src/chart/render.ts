@@ -177,7 +177,7 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
       if (!(c.v > 0)) continue;
       const h = Math.max(1 / dpr, (c.v / s.volMax) * band);
       const x = snap(slotX(slots[i], view, plotW) - vw / 2, dpr);
-      ctx.fillStyle = withAlpha(c.c >= c.o ? p.up : p.down, s.stale && i === cs.length - 1 ? 0.12 : 0.26);
+      ctx.fillStyle = withAlpha(c.c >= c.o ? p.up : p.down, s.stale && i === cs.length - 1 ? 0.08 : 0.17);
       ctx.fillRect(x, snap(plotH - h, dpr), vw, plotH - snap(plotH - h, dpr));
       drawn.volumes++;
     }
@@ -303,6 +303,8 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
     for (const v of s.priceTicks.values) {
       const y = toY(v);
       if (y < s.fontPx / 2 || y > plotH - s.fontPx / 2) continue;
+      // A tick label never shows half-covered under a tag.
+      if (s.tags.some((t) => Math.abs(t.y - y) < s.tagH / 2 + s.fontPx / 2)) continue;
       fillTabular(ctx, formatNumber(v, s.priceTicks.decimals), ax + 8, y, 'left');
     }
   }
@@ -345,6 +347,17 @@ function drawAxisTag(ctx: Ctx, s: Scene, tag: PlacedTag, text: string) {
   const x = s.plotW + 1;
   const w = s.axisW - 2;
   const y = tag.y - h / 2;
+  // Name of a live price (the levels carry theirs in the label at the left).
+  const name = tag.kind === 'mark' ? 'Mark' : tag.kind === 'index' ? 'Index' : tag.kind === 'last' ? 'Last' : null;
+  if (name) {
+    ctx.font = font(s, 600, s.fontPx - 1);
+    ctx.textBaseline = 'middle';
+    const nw = tabularWidth(ctx, name) + 10;
+    ctx.fillStyle = withAlpha(s.palette.bg, 0.85);
+    ctx.fillRect(s.plotW - nw - 2, tag.y - h / 2 + 3, nw, h - 6);
+    ctx.fillStyle = st.fill === s.palette.surface ? st.ink : st.fill;
+    fillTabular(ctx, name, s.plotW - 7, tag.y + 0.5, 'right');
+  }
   // Leader from the price to a displaced tag.
   if (!tag.pinned && Math.abs(tag.y - tag.priceY) > 1) {
     ctx.strokeStyle = st.line;
