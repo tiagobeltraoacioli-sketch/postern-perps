@@ -1,0 +1,3359 @@
+{
+ "about": "Conformance vectors of the access decision (src/decide.mjs; the Rust port in rust/ runs the same file). Expectations are written by hand from the rules in DESIGN.md, not computed by the code under test. list: fixture = fixtures/geoblock.fixture.json, real = ../geoblock.json, null = no list. sanctions: fresh = fixtures/sanctions-fixture.json, null = none.",
+ "sanctionsBuiltMs": 1794873600000,
+ "cases": [
+  {
+   "name": "allowed country, attested, order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false,
+    "reasons": []
+   }
+  },
+  {
+   "name": "allowed country, no attestation, order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": false,
+    "code": "ATTESTATION_REQUIRED",
+    "httpStatus": 403,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "allowed country, invalid attestation, order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "invalid"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "ATTESTATION_REQUIRED",
+    "httpStatus": 403,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "allowed country, no attestation, cancel",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "allowed country, no attestation, withdraw",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "recipient",
+      "address": "0x00000000000000000000000000000000000000b2"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "blocked country BR, order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION"
+    ]
+   }
+  },
+  {
+   "name": "blocked country BR, cancel: exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "blocked country BR, cancel all: exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelAll"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "blocked country BR, reduce-only order: exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": true
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "blocked country BR, withdraw: exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "recipient",
+      "address": "0x00000000000000000000000000000000000000b2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "blocked country BR, approve agent refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "ApproveAgent"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "agent",
+      "address": "0x00000000000000000000000000000000000000b2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "blocked country BR, update margin refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "UpdateMargin"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "blocked country BR, update leverage refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "UpdateLeverage"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "blocked country BR, revoke agent refused (not in 0.1.1 exit list)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "RevokeAgent"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "agent",
+      "address": "0x00000000000000000000000000000000000000b2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "unlisted country DE denied by default",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "DE",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION"
+    ]
+   }
+  },
+  {
+   "name": "lowercase country code normalised (cn)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "cn",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION"
+    ]
+   }
+  },
+  {
+   "name": "no country",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": null,
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "XX (no data)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "XX",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "ZZ reserved code",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "ZZ",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "T1 (Tor per Cloudflare), order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "T1",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "ANONYMIZER_TOR",
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "T1, cancel: exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "T1",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "three-letter country refused as unknown",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PAN",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "untrusted geo source in live mode",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": false
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "UNTRUSTED_GEO_SOURCE",
+     "UNKNOWN_COUNTRY"
+    ]
+   }
+  },
+  {
+   "name": "untrusted geo source in dev mode (mock header)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "dev",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": false
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "country with restricted subdivisions, subdivision unknown",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "UA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "SUBDIVISION_UNKNOWN"
+    ]
+   }
+  },
+  {
+   "name": "restricted subdivision UA-43",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "UA",
+     "subdivision": "UA-43",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION_SUBDIVISION"
+    ]
+   }
+  },
+  {
+   "name": "restricted subdivision UA-43 lowercase",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "UA",
+     "subdivision": "ua-43",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION_SUBDIVISION"
+    ]
+   }
+  },
+  {
+   "name": "restricted subdivision UA-65, withdraw exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "UA",
+     "subdivision": "UA-65",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "unrestricted subdivision UA-30",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "UA",
+     "subdivision": "UA-30",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false,
+    "reasons": []
+   }
+  },
+  {
+   "name": "subdivision of another country",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": "BR-SP",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "GEO_INCONSISTENT"
+    ]
+   }
+  },
+  {
+   "name": "malformed subdivision",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": "PA_8",
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "GEO_INCONSISTENT"
+    ]
+   }
+  },
+  {
+   "name": "VPN in an allowed country",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": true,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "ANONYMIZER_VPN"
+    ]
+   }
+  },
+  {
+   "name": "VPN, withdraw: exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": true,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "Tor signal from the exit list",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": true,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "ANONYMIZER_TOR"
+    ]
+   }
+  },
+  {
+   "name": "hosting IP, API, attested allowed residence",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false,
+    "reasons": []
+   }
+  },
+  {
+   "name": "hosting IP, UI, attested",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "ui",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "ANONYMIZER_HOSTING"
+    ]
+   }
+  },
+  {
+   "name": "hosting IP, API, not attested",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "ANONYMIZER_HOSTING"
+    ]
+   }
+  },
+  {
+   "name": "hosting IP, API, attested residence UA (has restricted subdivisions)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "UA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "ANONYMIZER_HOSTING"
+    ]
+   }
+  },
+  {
+   "name": "hosting IP, API, attested residence BR",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "BR"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "RESIDENCE_DECLARED_RESTRICTED",
+     "ANONYMIZER_HOSTING"
+    ]
+   }
+  },
+  {
+   "name": "allowed IP, attested residence BR",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "BR"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "RESIDENCE_DECLARED_RESTRICTED"
+    ]
+   }
+  },
+  {
+   "name": "allowed IP, attested residence unlisted DE",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "DE"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "RESIDENCE_DECLARED_RESTRICTED"
+    ]
+   }
+  },
+  {
+   "name": "allowed IP, attested residence BR, withdraw exit-only",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "BR"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "allowed IP, expired attestation declaring BR does not restrict, but is not valid",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "expired",
+     "residenceCountry": "BR"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "ATTESTATION_REQUIRED",
+    "httpStatus": 403,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "signals unknown in live mode",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": null,
+     "vpnProxy": null,
+     "hosting": null
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "SIGNALS_UNAVAILABLE"
+    ]
+   }
+  },
+  {
+   "name": "signals missing in live mode",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": null,
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "SIGNALS_UNAVAILABLE"
+    ]
+   }
+  },
+  {
+   "name": "signals unknown in dev mode",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "dev",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": null,
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "sanctioned account, allowed country",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "SANCTIONED"
+    ]
+   }
+  },
+  {
+   "name": "sanctioned recipient, exit-only withdraw from BR refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "recipient",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "sanctioned agent in ApproveAgent",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "ApproveAgent"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "agent",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "sanctioned signer, cancel refused too",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "signer",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "sanctioned address in upper case",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x983A81CA6FB1E441266D2FBCB7D8E530AC2E05A2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "sanctioned address in EIP-55 checksum case",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "mixed case with a wrong checksum is malformed",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05A2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "address too short",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "unknown address role",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "friend",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "action without any address",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "stale sanctions list, order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1795050000000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONS_UNAVAILABLE",
+    "httpStatus": 503,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "stale sanctions list, cancel still allowed",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1795050000000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "stale sanctions list, revoke agent still allowed",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1795050000000,
+    "action": {
+     "type": "RevokeAgent"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     },
+     {
+      "role": "agent",
+      "address": "0x00000000000000000000000000000000000000b2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "stale sanctions list, withdraw refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1795050000000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONS_UNAVAILABLE",
+    "httpStatus": 503,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "stale sanctions list still refuses its addresses",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1795050000000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "sanctions clock before the build time is not fresh",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794873599999,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONS_UNAVAILABLE",
+    "httpStatus": 503,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "no sanctions list in live mode, withdraw",
+   "list": "fixture",
+   "sanctions": null,
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Withdraw"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONS_UNAVAILABLE",
+    "httpStatus": 503,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "no sanctions list in dev mode, order",
+   "list": "fixture",
+   "sanctions": null,
+   "request": {
+    "mode": "dev",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": null
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "no geoblock list, cancel",
+   "list": null,
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelAll"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_LIST_UNAVAILABLE",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "no geoblock list, order",
+   "list": null,
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "LIST_UNAVAILABLE",
+    "httpStatus": 503,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "public read from a blocked country",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "read",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "addresses": [],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "deposit credit, clean depositor (no IP exists)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "deposit",
+    "geo": {
+     "country": null,
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "addresses": [
+     {
+      "role": "depositor",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "deposit credit, sanctioned depositor",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "deposit",
+    "geo": {
+     "country": null,
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "addresses": [
+     {
+      "role": "depositor",
+      "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "deposit credit, stale sanctions",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "deposit",
+    "geo": {
+     "country": null,
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1795050000000,
+    "addresses": [
+     {
+      "role": "depositor",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "SANCTIONS_UNAVAILABLE",
+    "httpStatus": 503,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "unknown action type",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "Deposit"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "PlaceOrder without reduceOnly",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "PlaceOrder reduceOnly as a string",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": "true"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "unknown mode",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "test",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "unknown surface",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "cli",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "edge: deferred attestation, order",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": "deferred"
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "edge: deferred attestation, hosting on API passes to the node",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": "deferred"
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK",
+    "httpStatus": 200,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "edge: deferred attestation, hosting on UI refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "ui",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": "deferred"
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "real list 0.1.1: no allowed entry yet, PA order denied (the PA residence attestation is restricted too)",
+   "list": "real",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION",
+     "RESIDENCE_DECLARED_RESTRICTED"
+    ]
+   }
+  },
+  {
+   "name": "real list 0.1.1: BR cancel exit-only",
+   "list": "real",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "CancelOrder"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "real list 0.1.1: UA without subdivision",
+   "list": "real",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "UA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false,
+    "reasons": [
+     "JURISDICTION",
+     "SUBDIVISION_UNKNOWN",
+     "RESIDENCE_DECLARED_RESTRICTED"
+    ]
+   }
+  }
+ ]
+}

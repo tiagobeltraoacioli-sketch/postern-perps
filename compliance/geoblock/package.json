@@ -6,6 +6,6 @@
   "type": "module",
   "license": "UNLICENSED",
   "exports": { ".": "./src/index.mjs", "./edge": "./edge/worker.mjs" },
-  "scripts": { "test": "node --test test/" },
+  "scripts": { "test": "node --test test/*.test.mjs" },
   "engines": { "node": ">=20" }
 }

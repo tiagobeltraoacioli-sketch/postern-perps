@@ -1,0 +1,232 @@
+{
+  "schema": "postern-perps/geoblock",
+  "version": "0.1.1",
+  "generated_utc": "2026-11-17",
+  "status": "TEST FIXTURE ONLY (agent 397). A copy of 392's geoblock.json 0.1.1 with three countries marked 'allowed' so that the allow paths can be tested. These 'allowed' entries are NOT a statement about any country; the real list (compliance/geoblock.json) has no allowed entry.",
+  "rule": "Deny by default. A request is allowed only if its ISO 3166-1 alpha-2 country is listed with tier 'allowed' AND its ISO 3166-2 subdivision (when known) is not listed in 'subdivisions' as blocked AND no anonymizer rule denies it. Any country not listed, an unknown country (missing header, 'XX', 'T1', private or unresolvable IP), and tier 'restricted-review' are all denied.",
+  "tiers": {
+    "blocked": {
+      "effect": "deny",
+      "meaning": "No access to trading at all (no order, no deposit credit, no wallet connection in the UI). Read-only public market data and the escape-hatch/withdraw-only flow remain: see compliance/geoblock/DESIGN.md."
+    },
+    "restricted-review": {
+      "effect": "deny",
+      "meaning": "Counsel must decide. Denied until decided."
+    },
+    "allowed": {
+      "effect": "allow",
+      "meaning": "No restriction identified in the research at the stated confidence; counsel confirms before launch."
+    }
+  },
+  "default_tier": "restricted-review",
+  "unknown_country_effect": "deny",
+  "reason_categories": [
+    "retail-crypto-derivatives-ban",
+    "authorisation-required",
+    "general-crypto-ban",
+    "comprehensive-sanctions",
+    "regulator-enforcement-offshore-perps",
+    "not-researched"
+  ],
+  "countries": {
+    "US": {
+      "name": "United States",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ]
+    },
+    "PR": {
+      "name": "Puerto Rico (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ]
+    },
+    "GU": {
+      "name": "Guam (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ]
+    },
+    "VI": {
+      "name": "U.S. Virgin Islands (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ]
+    },
+    "AS": {
+      "name": "American Samoa (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ]
+    },
+    "MP": {
+      "name": "Northern Mariana Islands (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ]
+    },
+    "UM": {
+      "name": "U.S. Minor Outlying Islands",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ]
+    },
+    "CA": {
+      "name": "Canada (all provinces and territories)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ]
+    },
+    "GB": {
+      "name": "United Kingdom",
+      "tier": "blocked",
+      "reasons": [
+        "retail-crypto-derivatives-ban"
+      ]
+    },
+    "BR": {
+      "name": "Brazil",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ]
+    },
+    "CU": {
+      "name": "Cuba",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "IR": {
+      "name": "Iran",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "KP": {
+      "name": "North Korea",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "SY": {
+      "name": "Syria",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "RU": {
+      "name": "Russia",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "BY": {
+      "name": "Belarus",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "CN": {
+      "name": "China (mainland)",
+      "tier": "blocked",
+      "reasons": [
+        "general-crypto-ban"
+      ]
+    },
+    "PA": {
+      "name": "Panama (FIXTURE allowed)",
+      "tier": "allowed",
+      "reasons": []
+    },
+    "CH": {
+      "name": "Switzerland (FIXTURE allowed)",
+      "tier": "allowed",
+      "reasons": []
+    },
+    "UA": {
+      "name": "Ukraine (FIXTURE allowed, to exercise subdivisions)",
+      "tier": "allowed",
+      "reasons": []
+    }
+  },
+  "subdivisions": {
+    "UA-43": {
+      "name": "Crimea (Ukraine, occupied)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "UA-40": {
+      "name": "Sevastopol (Ukraine, occupied)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "UA-14": {
+      "name": "Donetsk oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "UA-09": {
+      "name": "Luhansk oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "UA-23": {
+      "name": "Zaporizhzhia oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    },
+    "UA-65": {
+      "name": "Kherson oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ]
+    }
+  },
+  "anonymizers": {
+    "tor": "deny",
+    "vpn_proxy": "deny",
+    "hosting": "deny-ui-allow-api-with-attested-account"
+  },
+  "denied_policy": {
+    "policy": "exit_only",
+    "exit_only_actions": [
+      "CancelOrder",
+      "CancelAll",
+      "PlaceOrder(reduceOnly=true)",
+      "Withdraw"
+    ],
+    "refused_actions": "every other action type, deposit credit to a new account included",
+    "public_reads": "market data, node status and account reads are not geoblocked",
+    "sanctioned_address_policy": "frozen: an address on the sanctions list (compliance/geoblock/sanctions) is refused for EVERY action, exit-only included (HTTP 451 SANCTIONED); what happens to funds already inside is for counsel",
+    "note": "For counsel: whether exit-only may stay open for tier-'blocked' entries whose reason is comprehensive-sanctions."
+  }
+}

@@ -1,0 +1,249 @@
+{
+ "generator": "tools/gen-attestation-vectors.mjs with @noble/curves 1.8.0 and @noble/hashes 1.8.0 (independent implementation)",
+ "domain": {
+  "name": "PosternPerps Attestation",
+  "version": "1",
+  "chainId": 7007701
+ },
+ "domainSeparator": "0xc73f49d85c00b00be51d433de39e0bee11e0dc80dbb5e9c07d50c2e6a8488f59",
+ "typeHash": "0xe17b313011bbfbbfb8d242836fda0e3108271cabb1bfa11eb27bd65bae7f70de",
+ "statement": {
+  "id": "fixture-attestation/0.1",
+  "text": "FIXTURE statement for tests only (not the real text, which is agent 392's): I am not a resident of a restricted jurisdiction.",
+  "hash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6"
+ },
+ "accounts": [
+  "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+  "0x0d11e3b6817af03bd5459aeda81e121a9cb1a626"
+ ],
+ "keccakVectors": [
+  {
+   "input": "0x",
+   "keccak256": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+  },
+  {
+   "input": "0x03",
+   "keccak256": "0x69c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e287"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6ad",
+   "keccak256": "0x00ef96af9cf4b24c7f269d922294444a197d0a33638c2e56634c57e892103a8f"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4",
+   "keccak256": "0x742061bcad767ed4c4f5883b1dcb1aad11afdcc140dc469d953759b127b9f9ed"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bb",
+   "keccak256": "0xe3371f61e770abf254c34239c3b0099ad90594507415bc81dd0a10b9692bbf2a"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e65",
+   "keccak256": "0x4401c4afbe16ff911bdbf2d38e556e5b861f3fdf0f9d4306b1c46f6ae4f73584"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c",
+   "keccak256": "0xac141fd7b0a0ffcd2e967254d508da3ec616596493c36fa304425647d90e6de5"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930",
+   "keccak256": "0xfa75f2293be9f9a14dcdeeff53f7b91ff6a2b1331b13886e69077ab1cf8252a9"
+  },
+  {
+   "input": "0x030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f464d54",
+   "keccak256": "0x80cdc8dd52cbb3dbaea8f383209893fa2bb52efbd5aedbb4b26dcfe307fcdc9b"
+  }
+ ],
+ "vectors": [
+  {
+   "name": "valid",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec37960e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b51c",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "valid",
+    "signer": "0x58842f84f33fd12835d5b2e9869281a9063dafda"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "high-s twin of a valid signature is refused (EIP-2)",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec3799f1c7fb288bf9fefecd1984c296a3833ead1b77de23e9a73aab6a3ceacb7578c1b",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "v = 0/1 form is refused (only 27/28)",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec37960e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b501",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "flipped v recovers another key: signer is not the account",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec37960e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b51b",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "signed by another key for this account",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x4a8d740ff18d5b3062fb5f3c98dd6b0bf4f1d31e7a6e52de9195ea42223858ee3a875615aa32bdb9aeee1b9ece710835290ce06111ac457e2294b821a83ef11b1b",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "residence changed after signing",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "CH",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec37960e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b51c",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0xb39c8007735465aaf98da17eac5acc67b0802c4c85dfd6eebb77b17eaf827ccd"
+  },
+  {
+   "name": "expired",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec37960e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b51c",
+   "nowMs": 1826409600001,
+   "expect": {
+    "status": "expired",
+    "signer": "0x58842f84f33fd12835d5b2e9869281a9063dafda"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "issued in the future beyond skew",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x0dfa7127ce022098e3617b62c81f805e194688e17a4b16d4868f8c227b4ec37960e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b51c",
+   "nowMs": 1794873299999,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "validity longer than 400 days",
+   "message": {
+    "account": "0x0d11e3b6817af03bd5459aeda81e121a9cb1a626",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1829520000000"
+   },
+   "signature": "0xd6e3b0129af428fd6b2a627e0adee8435a0fd8081e8df5bef84361b6d7d91ec10a363529369aff7edbcc1fe88c60694618155dbe1f8bf7e6c44f8a13d50cd5231b",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x00b411192fd3380a43e0e0d8c7f6533621f6d26cad5402ab4004c31fc3b7ca50"
+  },
+  {
+   "name": "r = 0 refused",
+   "message": {
+    "account": "0x58842f84f33fd12835d5b2e9869281a9063dafda",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "PA",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x000000000000000000000000000000000000000000000000000000000000000060e3804d77406010132e67b3d695c7cacfdd2568cd0a05c8151bbabe237ee9b51c",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "invalid"
+   },
+   "digest": "0x62faf274f08c354f69be717457ee74d5d3dc022c73d24f6fc7689c779e9405b8"
+  },
+  {
+   "name": "second account valid",
+   "message": {
+    "account": "0x0d11e3b6817af03bd5459aeda81e121a9cb1a626",
+    "statementId": "fixture-attestation/0.1",
+    "statementHash": "0x1bb3fc8dfa7e7e8802ca3a0186a706f4365ca26e7de639b882d7ee7b101f10c6",
+    "residenceCountry": "BR",
+    "issuedAt": "1794873600000",
+    "expiresAt": "1826409600000"
+   },
+   "signature": "0x40c29aaab998a8f8b49aae636dd457d0f1e1fc5d2cee280d796fc3d51b1e8b84504a9fa69899e927583241bfb16f041901029464711cf9acafc82708f6ed3df31c",
+   "nowMs": 1794880000000,
+   "expect": {
+    "status": "valid",
+    "signer": "0x0d11e3b6817af03bd5459aeda81e121a9cb1a626"
+   },
+   "digest": "0xf83ed89e30add0bf7a5d6829c35aa37cb576fec652f8403a8ab2a1880d3dbd0b"
+  }
+ ]
+}

@@ -71,13 +71,23 @@ export function evaluateGeo(list, req) {
       reasons.push('SUBDIVISION_UNKNOWN');
     }
   }
+  // A valid attestation declaring a residence the list denies closes access whatever the IP says (a resident
+  // travelling to an allowed country, or using one): the declaration can only add a refusal, never remove one.
+  const att = req.attestation;
+  if (att && att.status === 'valid' && typeof att.residenceCountry === 'string') {
+    const e = list.countries[att.residenceCountry];
+    const eff = e ? e.effect : TIERS[list.defaultTier];
+    if (eff !== 'allow') reasons.push('RESIDENCE_DECLARED_RESTRICTED');
+  }
   const sig = req.signals ?? {};
   for (const [k, code] of [['tor', 'ANONYMIZER_TOR'], ['vpnProxy', 'ANONYMIZER_VPN'], ['hosting', 'ANONYMIZER_HOSTING']]) {
     const v = sig[k];
     if (v === true) {
       if (k === 'hosting' && list.anonymizers.hosting === 'deny-ui-allow-api-with-attested-account'
-          && req.surface === 'api' && attestedResidenceAllowed(list, req.attestation)) {
-        continue; // hosting IP on the API with a valid attestation of an allowed residence
+          && req.surface === 'api' && (req.attestation === 'deferred' || attestedResidenceAllowed(list, req.attestation))) {
+        // hosting IP on the API with a valid attestation of an allowed residence; 'deferred' = the edge, which
+        // holds no attestation records, passes the request on with host=1 and the node judges the attestation
+        continue;
       }
       if (!reasons.includes(code)) reasons.push(code);
     } else if (v !== false && live) {
@@ -105,7 +115,8 @@ function isExitAction(list, action) {
  * req: { mode: 'live'|'dev', surface: 'api'|'ui', kind: 'action'|'read'|'deposit',
  *        action?: {type, reduceOnly?}, geo?: {country, subdivision, trusted}, signals?: {tor, vpnProxy, hosting},
  *        addresses?: [{role, address}], sanctions?: SanctionsSet|null, nowMs?: number,
- *        attestation?: {status: 'valid'|'missing'|'invalid'|'expired', residenceCountry?}|null,
+ *        attestation?: {status: 'valid'|'missing'|'invalid'|'expired', residenceCountry?}|'deferred'|null,
+ *          ('deferred' only at the edge: the node, which holds the records, re-decides with the real value),
  *        requireAttestation?: boolean (default: true in live, false in dev) }
  * `list` may be null (missing or refused list): then only reads and no-value actions pass.
  */
@@ -169,7 +180,7 @@ export function decide(list, req) {
   // 6. attestation for actions that open or change exposure (exit actions never need it)
   const requireAtt = typeof req.requireAttestation === 'boolean' ? req.requireAttestation : mode === 'live';
   const exitLike = action.type === 'PlaceOrder' ? action.reduceOnly === true : ['CancelOrder', 'CancelAll', 'Withdraw', 'RevokeAgent'].includes(action.type);
-  if (requireAtt && !exitLike && req.attestation?.status !== 'valid') {
+  if (requireAtt && !exitLike && req.attestation !== 'deferred' && req.attestation?.status !== 'valid') {
     return { ...refuse(out, 'ATTESTATION_REQUIRED', 403, req.attestation?.status ?? 'missing'), reasons: ['ATTESTATION_REQUIRED'] };
   }
   return { ...out, allow: true, code: 'OK', httpStatus: 200 };
