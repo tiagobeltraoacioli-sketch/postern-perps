@@ -1,9 +1,11 @@
-# VAULT.md: PerpsVault, the collateral custody of PosternDEX Perpetuals (v0.1)
+# VAULT.md: PerpsVault, the collateral custody of PosternDEX Perpetuals (v0.2)
 
 **STATUS: PROTOTYPE, UNAUDITED. Not deployed, not for deployment.** The perpetuals are not deployed this round (legal
 review first). Owner: agent 390 (continues 352). Source: `contracts/src/PerpsVault.sol`; tests: `contracts/test/`.
-Formats here are the vault side of `docs/SPEC.md` (agent 388); where SPEC.md does not yet define them, this file
-proposes them (cross-area log, 2026-11-17 04:55 UTC) and SPEC.md either adopts them or a change is agreed there.
+v0.2 (2026-11-17) adopts SPEC.md 0.1.1 section 11 byte for byte (trees, leaves, state root) and fixes reviewer 395's
+R395-23..27 (section 11 below). Shared vectors: `contracts/test/vectors/vault-vectors.json` (pinned by
+`contracts/test/Vectors.t.sol`; the withdrawal leaf and the empty depth-32 root were re-derived independently with
+`cast keccak`). The engine (388) and the node (389) must reproduce every output there.
 
 ## 1. What it is
 
@@ -12,14 +14,14 @@ One contract on the Bloch L2 (EVM, chain id 700770) holding the collateral token
 vault never trusts the sequencer. Funds leave only:
 
 1. against a **checkpoint** signed by `threshold` of a validator committee fixed at deployment, through a **withdrawal
-   record** proven by a Merkle sum-tree proof, or
-2. in **escape mode**, against the last accepted checkpoint's escape tree, or as a refund of a deposit the last
-   checkpoint did not credit (from the vault's own records, no committee input).
+   record** of the engine's withdrawal tree proven by a depth-32 Merkle proof, or
+2. in **escape mode**, against the last accepted checkpoint's account tree (`escapeValue`, pro rata), or as a refund
+   of a deposit the last checkpoint did not credit (from the vault's own records, no committee input).
 
 There is no owner, admin, upgrade, setter, signer replacement, rescue or administrator mint. Every limit is fixed in
-the constructor. Protocol fees are not taken by the vault: they accrue in the engine to the fee account, which is the
-owner's address `0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544` (immutable `feeRecipient`), and the vault pays that
-account's records only to that address.
+the constructor. Protocol fees are not taken by the vault: they accrue in the engine to the keyless system account
+`PROTOCOL_FEE` (`0x…0001`, SPEC 8), whose records and escape share the vault pays only to the owner's address
+`0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544` (immutable `feeRecipient`).
 
 ## 2. Reused from the bridge's reviewed vault (`ProvenanceSourceVault`, bloch-l2-bridge `cc2511a`)
 
@@ -33,7 +35,7 @@ account's records only to that address.
 | One reentrancy guard on every state-changing entry point | `nonReentrant` | same |
 | Immutable fee recipient, never a guardian, never the token or the vault | constructor, R310-2 | constructor |
 | Recipient never zero, the vault or the token (F171-7 class) | `_checkRelease` | `withdraw`, `claimEscape` |
-| Ids bound to their position so one item cannot take another's slot (F111-F1 class) | deposit id top bytes = nonce | withdrawal leaf binds `index`; proof position must equal it |
+| Ids bound to their position so one item cannot take another's slot (F111-F1 class) | deposit id top bytes = nonce | withdrawal leaf binds `withdrawalId`, the proof's position is that id; account leaf binds `index`, its position |
 | Deposit hash chain checked against what the other side credited (D6 / mint chain) | `depositHead`, `provenanceMatches` | `depositHead`; a checkpoint must name the vault's own head after the deposits it credited |
 
 Not reused, with the reason: the light-client switch (no proof system for the engine exists; a later step), the
@@ -53,50 +55,51 @@ Refused (InvalidConfiguration) unless: token has code and `decimals() == 6`; `fe
 not the vault, not a guardian; 1 <= n <= 16 validators, sorted strictly ascending; `2 <= threshold <= n` and
 `2 * threshold > n`; `threshold <= unpauseThreshold <= n`; `cap > 0`; `0 < minDeposit <= cap`;
 `0 < windowLimit <= cap`; `windowSeconds > 0`; `0 < largeThreshold <= windowLimit`; `0 < largeDelay <= 14 days`;
-`1 hour <= forcedDelay <= 7 days`; `1 day <= escapeDelay <= 30 days` and `escapeDelay >= forcedDelay`; guardians:
+`1 day <= forcedDelay <= 7 days` (R395-25: it must exceed the worst L2 finality lag accepted); `forcedDelay <=
+escapeDelay <= 30 days`; `feeRecipient` above `0xffff`; guardians:
 at most 7, sorted, not validators; no guardians means `pauseDuration == pauseCooldown == 0`; otherwise
 `0 < pauseDuration <= 14 days` and `pauseCooldown >= pauseDuration`.
 
 Proposed launch values (technical proposal; caps and windows are owner decisions, listed in section 10):
 7 validators, threshold 5, unpauseThreshold 6, 3 guardians, pauseDuration 2 days, pauseCooldown 2 days,
 cap 1,000,000 USDC, minDeposit 10 USDC, windowLimit 250,000 USDC per 1 day, largeThreshold 50,000 USDC,
-largeDelay 1 day, forcedDelay 1 day, escapeDelay 7 days.
+largeDelay 1 day, forcedDelay 2 days, escapeDelay 7 days (`contracts/deploy/vault.config.json`).
 
 ## 4. ABI
 
 | Function | Who | Effect |
 |---|---|---|
-| `deposit(uint64 amount, address account) returns (uint64 index)` | anyone, after `approve` | Pulls `amount` (exact balance delta), credits `account` in the engine after L2 finality. Refused in escape, while paused, below `minDeposit`, above `cap` of custody, for account 0 / vault / token. |
-| `requestForced(uint8 kind, uint32 marketId, uint64 amount) returns (uint64 index)` | an account that deposited, for itself | Forced request with `deadline = now + forcedDelay`. Kinds: 1 cancel all orders, 2 close positions (`marketId` 0 = every market), 3 withdraw `amount` (0 = everything withdrawable; pays the account itself; `marketId` must be 0). One open request per account. Refused in escape. |
+| `deposit(uint64 amount, address account) returns (uint64 index)` | anyone, after `approve` | Pulls `amount` (exact balance delta), credits `account` in the engine after L2 finality. Refused in escape, while paused, below `minDeposit`, above `cap` of custody, for the vault, the token or any keyless account (`<= 0xffff`, so SPEC 8's system accounts cannot be funded through the vault in v0.2: nothing could refund them). |
+| `requestForced(uint8 kind, uint64 arg) returns (uint64 index)` | an account that deposited, for itself | SPEC 14 kinds: 0 CancelAll, 1 CloseAll, 2 Withdraw (`arg` = gross amount, pays the account itself); `arg` must be 0 otherwise. `deadline = block.timestamp + forcedDelay` (L2 seconds, counted from the request's own block). One open request per account. Refused in escape. |
 | `submitCheckpoint(Checkpoint cp, bytes[] signatures)` | anyone (a relayer) | Accepts the checkpoint (rules in 5.3). Refused in escape. Not stopped by a pause. |
-| `withdraw(uint64 seq, Withdrawal w, SumProof proof, uint64 want) returns (bytes32 key)` | anyone | Registers record `w` proven against accepted checkpoint `seq` (1-based) and pays up to `want` to `w.recipient` now if ready, not paused and the bucket allows; otherwise it stays registered. |
+| `withdraw(uint64 seq, Withdrawal w, bytes32[] siblings, uint64 want) returns (bytes32 key)` | anyone | `Withdrawal = (uint64 withdrawalId, address account, address recipient, uint64 amount, uint64 height)`. Registers the record proven against accepted checkpoint `seq` (1-based; `withdrawalId < withdrawalCountAt[seq]`) and pays up to `want` to `recipient` now if ready, not paused and the bucket allows; otherwise it stays registered. |
 | `release(bytes32 key, uint64 want)` | anyone | Pays min(`want`, remainder, bucket) of a registered payout to its recipient. Reverts `NotRegistered`, `Paused`, `NotReady`, `RateLimited` (bucket empty), `InvalidWithdrawal` (nothing left or `want` 0). |
 | `guardianPause()` | a guardian | Pauses payouts and deposits for `pauseDuration` (chain rules of section 2). |
 | `unpause(uint64 count, uint256 validUntil, bytes[] signatures)` | anyone with `unpauseThreshold` signatures | Ends pause `count` early; guardians then wait `pauseCooldown`. |
 | `triggerEscape()` | anyone | Enters escape (one way) if `escapeReason() != 0`. |
-| `claimEscape(address account, uint64 amount, SumProof proof, uint64 want) returns (bytes32 key)` | anyone, pays `account` | In escape: registers `account`'s escape balance from the latest checkpoint, pays up to `want` now as `withdraw` does. |
+| `claimEscape(Account a, bytes32[] siblings, uint64 want) returns (bytes32 key)` | anyone, pays the account | `Account = (address account, uint32 index, int128 balance, uint64 escapeValue, bytes32 positionsHash)` (SPEC 0.1.1 leaf). In escape: registers `escapeValue * escapePayable / totalEscape` (rounded down) and pays up to `want` now. Keyless accounts pay `feeRecipient`: PROTOCOL_FEE at once, INSURANCE and BACKSTOP only 90 days after escape began. |
 | `refundDeposit(uint64 index, address account, uint64 amount)` | anyone, pays `account` | In escape: refunds deposit `index >= latest.depositsCredited`, verified against the vault's own chain. No bucket, delay or pause (no committee input). |
-| `sweepEscapeSurplus() returns (uint64)` | anyone, pays `feeRecipient` | In escape, 90 days after it began, once: pays what no claim can reach (engine insurance fund, donations). Every amount still claimable stays. |
+| `sweepEscapeSurplus() returns (uint64)` | anyone, pays `feeRecipient` | In escape, 90 days after it began, once: pays what no claim can reach (rounding, donations). Every amount still claimable (including unproven escape shares) stays. |
 
 Views: `custody()`, `reserved()`, `availableToRelease()`, `paused()`, `inEscape()`, `escapeReason()` (0 none,
 1 silence, 2 overdue forced request), `depositHead(n)`, `forcedHead(n)`, `depositTotalAt(n)`, `forcedDeadline(i)`,
 `latest()`, `checkpointCount()`, `withdrawalsRootAt(seq)`, `withdrawalCountAt(seq)`, `withdrawalsTotalAt(seq)`,
-`payouts(key)`, `withdrawalKey(index)`, `escapeKey(account)`, `checkpointDigest(cp)`, `unpauseDigest(count,
-validUntil)`, `withdrawalLeaf(w)`, `escapeLeaf(account, amount)`, `nodeHash(...)`, `sumRoot(leaf, sum, proof)`,
-`depositLink(...)`, `forcedLink(...)`, `domainSeparator()`.
+`payouts(key)`, `withdrawalKey(id)`, `escapeKey(account)`, `checkpointDigest(cp)`, `stateRootOf(cp)`,
+`unpauseDigest(count, validUntil)`, `domainSeparator()`, `escapePayable()`. Leaf, node and chain-link formulas are
+internal (contract size) and given exactly in section 5 and the vectors.
 
 Events (exact signatures, for the node's watcher 389):
 
 ```
 Deposit(uint64 indexed index, address indexed account, address indexed sender, uint64 amount, bytes32 head)
-ForcedRequest(uint64 indexed index, address indexed account, uint8 kind, uint32 marketId, uint64 amount, uint64 deadline, bytes32 head)
-CheckpointAccepted(uint64 indexed seq, uint64 indexed height, bytes32 stateRoot, bytes32 withdrawalsRoot, bytes32 escapeRoot)
+ForcedRequest(uint64 indexed index, address indexed account, uint8 kind, uint64 deadline, uint64 arg, bytes32 head)
+CheckpointAccepted(uint64 indexed seq, uint64 indexed height, bytes32 stateRoot, bytes32 withdrawalsRoot)
 PayoutRegistered(bytes32 indexed key, address indexed recipient, uint64 total, uint64 readyAt)
 Paid(bytes32 indexed key, address indexed recipient, uint64 amount)
 Refunded(uint64 indexed index, address indexed account, uint64 amount)
 GuardianPaused(address indexed guardian, uint64 indexed pauseCount, uint64 pausedUntil)
 Unpaused(uint64 indexed pauseCount, uint64 guardianBlockedUntil)
-EscapeTriggered(uint64 at, uint8 reason, uint64 checkpointSeq)
+EscapeTriggered(uint64 at, uint8 reason, uint64 checkpointSeq, uint64 payable_, uint128 totalEscape)
 SurplusSwept(address indexed recipient, uint64 amount)
 ```
 
@@ -116,33 +119,38 @@ refuses old signatures), `verifyingContract` = the vault. This is a different do
 ### 5.2 Checkpoint
 
 ```
-Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal,bytes32 withdrawalsRoot,uint64 escapeTotal,bytes32 escapeRoot)
+Checkpoint(uint64 height,uint64 time,bytes32 logHash,bytes32 accountsRoot,bytes32 marketsRoot,bytes32 withdrawalsRoot,uint64 nextDepositIndex,uint64 nextForcedIndex,uint64 nextOrderId,uint128 totalEscape,uint128 dust,bytes32 auxHash,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal)
 ```
 
-digest = `keccak256(0x19 0x01 || domainSeparator || keccak256(abi.encode(CHECKPOINT_TYPEHASH, fields...)))`.
+digest = `keccak256(0x19 0x01 || domainSeparator || keccak256(abi.encode(CHECKPOINT_TYPEHASH, 16 fields...)))`
+(17 words). The first twelve fields are exactly the inputs of SPEC 11's `stateRoot`; the vault recomputes it
+(`stateRootOf`) and stores and emits it, so the roots it pays against are the ones inside the state root the
+validators replayed:
 
-| Field | Meaning (engine side defined in SPEC.md) |
-|---|---|
-| `height`, `time` | engine block height and time (ms) of the state |
-| `stateRoot`, `logHash` | the engine state root and input-log hash at `height` (SPEC.md; nonzero state root) |
-| `depositsCredited`, `depositsHead` | number of vault deposits the engine has credited (in vault index order) and the vault's deposit chain head after that many |
-| `forcedProcessed`, `forcedHead` | number of forced requests the engine has processed (in index order) and the forced chain head after that many |
-| `withdrawalCount`, `withdrawalsTotal`, `withdrawalsRoot` | the append-only withdrawal sum tree over every record ever (index 0..count-1): leaf count, sum of amounts, root (0 iff count 0) |
-| `escapeTotal`, `escapeRoot` | the escape sum tree: per account the balance it receives if escape starts at this checkpoint; total and root (root 0 means no account, total 0) |
+```
+systemHash = keccak256("PPv1sys" || be64 nextDepositIndex || be64 nextForcedIndex || be64 nextOrderId || be128 totalEscape || be128 dust || auxHash)
+stateRoot  = keccak256("PosternPerps/state/v1" || be64 height || be64 time || accountsRoot || marketsRoot || withdrawalsRoot || systemHash)
+```
+
+The last four fields are outside the state root: `depositsHead` / `forcedHead` are the vault's own chain heads after
+`nextDepositIndex` / `nextForcedIndex` items (validators compute them from the vault's events at the L2 finalized
+tag; the vault compares them with what it accumulated itself, R395-1, coordinator decision 2026-11-17);
+`withdrawalCount` / `withdrawalsTotal` are the number and sum of records in the withdrawal tree (388: please add
+both to `systemHash` in SPEC 0.2 so they are inside the state root too).
 
 ### 5.3 Acceptance rules (`submitCheckpoint`)
 
 Refused (`InvalidCheckpoint`, `Insolvent` or `InvalidCertificate`) unless all hold:
 
-1. not in escape; `height > 0`; after the first, `height` and `time` strictly above the latest's; `stateRoot != 0`;
-2. `latest.depositsCredited <= depositsCredited <= depositCount` and `depositsHead == depositHead(depositsCredited)`;
-3. `latest.forcedProcessed <= forcedProcessed <= forcedCount` and `forcedHead == forcedHead(forcedProcessed)`;
-4. no request is left past its deadline: `forcedProcessed == forcedCount` or
-   `block.timestamp <= forcedDeadline[forcedProcessed]`;
-5. withdrawals append-only as far as the vault can see: count and total never decrease; the same count means the same
-   root and total; root 0 iff count 0; count 0 means total 0; escape root 0 means escape total 0;
-6. solvency: `escapeTotal + (withdrawalsTotal - withdrawnTotal) + (depositedTotal - depositTotalAt[depositsCredited])
-   <= custody()`;
+1. not in escape; `height > 0`; after the first, `height` and `time` strictly above the latest's;
+2. `latest.nextDepositIndex <= nextDepositIndex <= depositCount` and `depositsHead == depositHead(nextDepositIndex)`;
+3. `latest.nextForcedIndex <= nextForcedIndex <= forcedCount` and `forcedHead == forcedHead(nextForcedIndex)`;
+4. no request is left past its deadline: `nextForcedIndex == forcedCount` or
+   `block.timestamp <= forcedDeadline[nextForcedIndex]`;
+5. withdrawals append-only as far as the vault can see: count and total never decrease; after the first checkpoint
+   the same count means the same root and the same total; count 0 means total 0;
+6. solvency: `(withdrawalsTotal - withdrawnTotal) + (depositedTotal - depositTotalAt[nextDepositIndex]) <= custody()`
+   (escape values are NOT in this test since v0.2, R395-23: they are paid pro rata, section 7);
 7. `threshold` valid signatures (section 2) over the digest.
 
 ### 5.4 Chains
@@ -151,31 +159,32 @@ Refused (`InvalidCheckpoint`, `Insolvent` or `InvalidCertificate`) unless all ho
 depositHead(0) = keccak256(abi.encode(bytes32("PosternPerps.deposit.v1"), chainid, vault))
 depositHead(i+1) = keccak256(abi.encode(depositHead(i), uint256(i), address account, uint256(amount)))
 forcedHead(0)  = keccak256(abi.encode(bytes32("PosternPerps.forced.v1"), chainid, vault))
-forcedHead(i+1) = keccak256(abi.encode(forcedHead(i), uint256(i), address account, uint256(kind), uint256(marketId), uint256(amount), uint256(deadline)))
+forcedHead(i+1) = keccak256(abi.encode(forcedHead(i), uint256(i), address account, uint256(kind), uint256(deadline), uint256(arg)))
 ```
 
-`bytes32("...")` is the ASCII text left-aligned and zero-padded. Each event carries the new head, so the watcher can
-check its own computation per event; the engine credits `account` (never `sender`).
+`bytes32("...")` is the ASCII text left-aligned and zero-padded. Each event carries the new head, so the watcher checks
+its own computation per event; the engine credits `account` (never `sender`). SPEC 3.2's input payloads carry the same
+fields (tag 0x02: index, account, amount; tag 0x03: index, account, kind, deadline, arg).
 
-### 5.5 Merkle sum trees
+### 5.5 Merkle trees (SPEC 11, adopted)
 
 ```
-withdrawal leaf = keccak256(abi.encode(bytes32("PosternPerps.withdrawal.v1"), uint256(index), address account, address recipient, uint256(amount)))   (160 bytes)
-escape leaf     = keccak256(abi.encode(bytes32("PosternPerps.escape.v1"), address account, uint256(amount)))                                         (96 bytes)
-node            = keccak256(abi.encodePacked(bytes1(0x01), bytes32 leftHash, uint64 leftSum, bytes32 rightHash, uint64 rightSum))                  (81 bytes)
-node sum        = leftSum + rightSum (must fit uint64)
-empty leaf      = (hash 0x00..00, sum 0)
+leaf  = keccak256(0x00 || data)        node = keccak256(0x01 || left || right)      Z(0) = 0x00..00, Z(i+1) = node(Z(i), Z(i))
+withdrawal data = "PPv1wdrl" || be64 withdrawalId || account:20 || recipient:20 || be64 amount || be64 height
+account data    = "PPv1acct" || account:20 || be32 index || be128 balance (two's complement) || be64 escapeValue || positionsHash:32
 ```
 
-A tree is the complete binary tree over the leaves padded with empty leaves to a power of two (one leaf: the root is
-the leaf). Proof = `(uint64 index, bytes32[] hashes, uint64[] sums)`, sibling of the leaf level first; bit `i` of
-`index` set means the running node is the right child at level `i`; `index < 2^depth`; depth <= 48. The vault
-recomputes the root hash and total and requires both to equal the checkpoint's. Preimage lengths differ (160, 96, 81
-bytes), so a node is never accepted as a leaf or a leaf of one tree as a leaf of the other.
+Both trees have depth 32; a proof is exactly 32 siblings, bottom-up; bit `i` of the position (withdrawalId, account
+index) set means the running node is the right child at level `i`; positions are below 2^32.
 
-Withdrawal tree: positional by record index; append-only across checkpoints (the engine never rewrites a record); a
-record's proof index must equal its `index`. Escape tree: any order (the engine's account order); one leaf per
-account; a claim is keyed by account, so a duplicate leaf pays once.
+Why v0.2 dropped v0.1's Merkle sum trees (the argument the brief requires for removing a property): a sum tree
+guaranteed that the leaves of a signed root add up to the signed total, so no claimant could find the money gone. That
+only matters when the committee signs a dishonest tree, and a committee that does so can equally give itself every
+leaf; the vault's real guarantees do not depend on it and are all kept: the sum of registered withdrawal records is
+bounded by `withdrawalsTotal` (counter), escape payouts by `escapePayable <= pool` (counter), and `owed <= custody`
+at every state (invariant test). What was gained: one tree format with the engine, roots bound into the replayed
+state root (which v0.1 did not check at all), and proofs taken directly from the engine's `account_proof` /
+`withdrawal_proof`. Reviewer 395 asked for exactly this alignment (R395-27).
 
 ### 5.6 Unpause
 
@@ -184,7 +193,7 @@ account; a claim is keyed by account, so a duplicate leaf pays once.
 ## 6. Payout rules
 
 - **Registration** (`withdraw`, `claimEscape`) proves the item, checks the totals (sum of registered withdrawal
-  records <= the newest `withdrawalsTotal`; sum of escape claims <= `escapeTotal`), and records `Payout(recipient,
+  records <= the newest `withdrawalsTotal`; sum of escape payouts <= `escapePayable`), and records `Payout(recipient,
   total, paid 0, readyAt)`, `readyAt = now + largeDelay` if `total >= largeThreshold`, else now. A key registers once
   (`withdrawalKey(index)`, `escapeKey(account)`): a record paid against one checkpoint cannot be paid against a later
   one.
@@ -192,7 +201,8 @@ account; a claim is keyed by account, so a duplicate leaf pays once.
   above the window limit is therefore paid in parts (no item is ever unpayable because of its size, unlike the
   bridge's burn above `bucketCapacity`); a record at or above `largeThreshold` waits its delay for every part
   (splitting does not bypass the delay).
-- **Fee account**: a withdrawal record whose `account == feeRecipient` must have `recipient == feeRecipient`.
+- **Fee account**: a withdrawal record of `PROTOCOL_FEE` (`0x…0001`) must have `recipient == feeRecipient`; no
+  record of another keyless account, and no record to a keyless recipient (`<= 0xffff`), is paid.
 - A guardian pause stops payments and deposits only. It never stops checkpoint acceptance (a guardian could otherwise
   starve forced requests into escape), forced requests, the escape trigger, registration or refunds.
 
@@ -207,29 +217,28 @@ chain head); that the engine actually cancelled, closed or withdrew is a propert
 validator checks by replay (SPEC.md must state the processing rule: 388). Spam bound: one open request per account and
 only accounts that deposited at least `minDeposit` once.
 
-**Escape** (one way) is due when `block.timestamp >= lastCheckpointAt + escapeDelay` (no checkpoint accepted; before
-any checkpoint, measured from deployment) or a forced request is past its deadline unprocessed by the latest
-checkpoint. In escape: checkpoints, deposits and forced requests stop; withdrawal records of every accepted checkpoint
-stay payable (they were debited from the escape balances before their checkpoint); each account claims its escape
-balance from the latest checkpoint; deposits with index >= `latest.depositsCredited` are refunded to the credited
-account from the vault's own chain; after 90 days the surplus (custody no claim can reach: the engine's insurance
-fund, donations) can be swept once to `feeRecipient`.
+**Escape** (one way) is due when a forced request is past its deadline unprocessed by the latest checkpoint, or,
+once at least one checkpoint was accepted, when `block.timestamp >= lastCheckpointAt + escapeDelay` (R395-24: a
+vault deployed before launch cannot be pushed into escape by silence; a depositor whose deposit the committee never
+credits still exits through a forced request). At the trigger the vault fixes `pool = custody - (withdrawalsTotal -
+withdrawnTotal) - (depositedTotal - depositTotalAt[nextDepositIndex])` and `escapePayable = min(pool,
+totalEscape)`. In escape: checkpoints, deposits and forced requests stop; certified withdrawal records stay payable
+in full; deposits with index >= `nextDepositIndex` are refunded in full from the vault's own chain; each account
+claims `floor(escapeValue * escapePayable / totalEscape)` from the latest account tree (SPEC 11's pro-rata rule,
+`min(1, pool / totalEscape)`, with the pool net of what is owed in full, as R395-18 asked); keyless accounts' shares
+pay `feeRecipient` (PROTOCOL_FEE at once, INSURANCE and BACKSTOP after 90 days); after 90 days the surplus
+(rounding, donations) can be swept once to `feeRecipient`. A forced request the engine could not execute must not
+be counted as processed (coordinator decision on R395-5: not consumed), so it runs into its deadline and opens
+escape; the vault sees only the count and head, so that rule lives in SPEC 14 and the validators (388/389).
 
-**Escape balance rule** (vault-side requirement; the engine rule belongs to SPEC.md, 388): the escape tree holds, per
-account, the account's equity if every position were closed at the checkpoint's mark price, floored at zero, with
-any shortfall covered first by the insurance fund and then by a stated haircut, and the fee account's balance;
-`escapeTotal` plus the unregistered withdrawal records plus uncredited deposits must fit in custody, which the vault
-enforces (rule 6). The insurance fund is outside the tree.
-
-**Solvency proof (the property the tests check).** Let `owed = (escapeTotal - escapeClaimedTotal) + (withdrawalsTotal
-- withdrawnTotal) + (depositedTotal - depositTotalAt[credited] - refundedTotal)` for the latest checkpoint. (a) At
-acceptance `owed <= custody()` (rule 6). (b) A deposit raises `custody` and the uncredited term by the same amount;
-a registration raises `committedOut` (lowers `custody`) and lowers its term by the same amount; a refund likewise; the
-surplus sweep lowers `custody` to exactly the unregistered remainder. So `owed <= custody()` holds at every state.
-(c) `balance >= custody() + reserved` holds at every state (deposits add to both, registrations move custody to
-reserved, payments lower reserved and the balance equally; transfers are balance-checked). Hence every claim the latest
-checkpoint admits can be registered, and every registered payout can be paid: no claim race, even if a later claimant
-comes last. With the sum tree the leaves of a valid root sum to exactly the committed total, so all of them fit.
+**Solvency proof (the property the tests check).** Let `owed = (escapePayable - escapeClaimedTotal) +
+(withdrawalsTotal - withdrawnTotal) + (depositedTotal - depositTotalAt[nextDepositIndex] - refundedTotal)` for the
+latest checkpoint (`escapePayable` is 0 before escape). (a) At acceptance `owed <= custody()` (rule 6); at the
+trigger `escapePayable <= pool` keeps it. (b) Deposits raise `custody` and the uncredited term equally;
+registrations and refunds lower both equally; the surplus sweep lowers `custody` to exactly the unregistered
+remainder. (c) `balance >= custody() + reserved` at every state (transfers are balance-checked). Hence every claim the
+latest checkpoint admits can be registered and every registered payout paid; the escape payouts sum to at most the
+pool (rounding down).
 
 ## 8. Trust model (honest list)
 
@@ -246,26 +255,57 @@ comes last. With the sum tree the leaves of a valid root sum to exactly the comm
   deposits `minDeposit` can force that outcome during any committee outage longer than `forcedDelay`.
 - **Escape at a bad checkpoint**: the escape tree is the committee's; a colluding quorum that stops signing chooses
   the tree users escape with (same trust as above).
+- **Underwater accounts** (R395-23): checkpoints stay acceptable; in escape everyone shares the shortfall pro rata
+  unless the engine's escape values already charge it to INSURANCE first (SPEC 6.3 order; 388).
 - **A checkpoint with height or time at `2^64 - 1`** blocks every later checkpoint (they must be higher): the venue goes
   to escape after `escapeDelay`. Only a quorum can sign it; validators must refuse such fields (SPEC.md bound).
 
-## 9. Not done / not proven
+## 9. Gas and size (Foundry 1.7.1, solc 0.8.24, optimizer runs 1, shanghai; Mac, 2026-11-17)
+
+Runtime 18,600 bytes (EIP-170 limit 24,576); creation 4,291,195 gas with 7 validators and 3 guardians (the L2's
+per-transaction cap is 15,000,000, bloch-l2-evm `docs/L2-MAINNET-GO-LIVE-V21.md` K8; the test keeps the older
+5,000,000 bound). Per call (gas report of the unit suite, median): `deposit` 186,746; `submitCheckpoint` 272,730 (5
+signatures); `withdraw` 68,860 (register + pay, depth-32 proof; max 180,810); `release` 75,628; `claimEscape`
+159,616; `refundDeposit` 39,074; `requestForced` 49,610; `triggerEscape` 66,346; `guardianPause` 54,294; `unpause`
+55,641 (6 signatures). Not measured on the Bloch L2 itself.
+
+## 10. Tests (contracts/, `forge test --offline`)
+
+50 tests: 40 unit/fuzz (`PerpsVault.t.sol`: configuration refusals; deposits and hostile tokens; checkpoint
+signatures, domain, fields, state-root equation, append-only, solvency, R395-23 pro rata; withdrawals: tamper,
+positions, siblings, depth, old checkpoints, fee account, recipients, large delay, bucket parts; guardians;
+forced requests; escape: overdue, silence rules, claims, refunds, certified records, parts, keyless shares,
+unproven shares, surplus; re-entrancy; tree round-trip fuzz), 2 silence/keyless tests, 5 invariants (128 runs x 64
+calls, handler with an honest engine model and a colluding committee), 1 escape end-to-end fuzz, 1 creation-gas test,
+1 vector test.
+
+## 11. Findings addressed
+
+| ID | Status in v0.2 |
+|---|---|
+| R395-1 (vault half) | deposit and forced chain heads checked against the vault's own accumulation (since v0.1) |
+| R395-18 | pool net of records and uncredited deposits; system accounts' shares defined |
+| R395-23 | escape values out of the acceptance test; pro-rata pool; test `test_R395_23_...` |
+| R395-24 | silence escape only after a first checkpoint; test `test_escape_after_silence_and_what_stops` |
+| R395-25 | `forcedDelay >= 1 day`, proposal 2 days; finality-based start not measurable on chain (stated) |
+| R395-26 | keyless addresses never paid; shares to `feeRecipient`; keyless deposits refused |
+| R395-27, R395-30 (vault side) | formats = SPEC 0.1.1; vectors file; node must adopt the event signatures and the 16-field checkpoint |
+
+## 12. Not done / not proven
 
 1. UNAUDITED; no external review yet (agent 395 is the internal reviewer).
-2. The engine side (SPEC.md trees, escape balance rule, forced processing rule, binding of the vault address and chain
-   id in the engine genesis so one engine cannot serve two vaults: bridge finding class D3) is not written yet (388).
-3. No on-chain cancel of a fraudulent queued large payout (guardians can only pause, by the brief); the delay buys
-   watchers g * `pauseDuration` at most. A proof-of-fraud freeze (two conflicting checkpoints at one height) is a
-   possible strict strengthening, not built.
-4. No light-client / validity proof of the engine; the committee is trusted (section 8).
-5. Tested with a 6-decimal mock token that has bUSDC's transfer semantics, not with `BridgedStablecoinV3` bytecode on a
-   private Bloch L2; no anvil rehearsal with the real node yet.
-6. Insurance-fund leftover in escape goes to `feeRecipient` after 90 days: an owner decision (section 10).
-7. Gas is measured in Foundry, not on the Bloch L2.
-8. The backstop liquidity vault (BRIEF-PERPS item 1) has depositors of its own; their share in escape is the engine's
-   accounting (leaves of the escape tree), not modelled here.
+2. The engine side must match the vectors (388) and the node must sign the 16-field checkpoint, decode these events
+   and compare forced deadlines with L2 time in seconds (389); not yet checked end to end.
+3. No on-chain cancel of a fraudulent queued large payout (guardians can only pause); a proof-of-fraud freeze (two
+   conflicting checkpoints at one height) would be a strict strengthening, not built.
+4. No validity proof of the engine; the committee is trusted (section 8).
+5. Tested with a 6-decimal mock token that has bUSDC's transfer semantics, not with `BridgedStablecoinV3` bytecode on
+   a private Bloch L2; the deploy script was not yet rehearsed on anvil.
+6. INSURANCE/BACKSTOP escape shares and the surplus go to `feeRecipient` after 90 days: an owner decision.
+7. Gas measured in Foundry only.
+8. BACKSTOP depositors (SPEC O-3) cannot fund through the vault in v0.2.
 
-## 10. Owner inputs
+## 13. Owner inputs
 
 - Cap, window limit and window, large threshold and delay, forced and escape delays (section 3 proposals).
 - The 7 validator addresses and 3 guardian addresses (`TBD-owner`; generated by their holders, never by an agent).

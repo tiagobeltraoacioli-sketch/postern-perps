@@ -12,7 +12,7 @@ optimizer = true
 # Measured, not assumed: creation must stay far below the L2's per-transaction gas cap (see docs/VAULT.md, "Gas").
 optimizer_runs = 1
 bytecode_hash = "none"
-fs_permissions = [{ access = "read", path = "./test/vectors" }]
+fs_permissions = [{ access = "read", path = "./test/vectors" }, { access = "read", path = "./deploy" }]
 
 [profile.default.fuzz]
 runs = 512

@@ -337,7 +337,7 @@ contract PerpsVaultEscapeEndToEnd is Base {
         vm.warp(block.timestamp + 90 days);
         for (uint256 k; k < h.keyCount(); ++k) h.release(k);
         assertEq(vault.reserved(), 0, "all registered payouts paid");
-        (,,,,, uint64 wTotal, uint64 eTotal,,) = vault.latest();
+        (,,,,, uint64 wTotal, uint128 eTotal,,) = vault.latest();
         assertEq(vault.escapePayable(), eTotal, "honest engine: the pool covers every escape value");
         assertEq(vault.escapeClaimedTotal(), eTotal, "every escape balance claimed");
         assertEq(vault.withdrawnTotal(), wTotal, "every certified record paid");

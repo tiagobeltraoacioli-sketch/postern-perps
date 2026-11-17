@@ -230,6 +230,7 @@ abstract contract Base {
         cp.marketsRoot = keccak256(abi.encode("markets", height));
         cp.nextOrderId = height * 10;
         cp.dust = 7;
+        cp.auxHash = keccak256(abi.encode("aux", height));
         cp.nextDepositIndex = vault.depositCount();
         cp.depositsHead = vault.depositHead(cp.nextDepositIndex);
         cp.nextForcedIndex = vault.forcedCount();
@@ -259,16 +260,15 @@ abstract contract Base {
     {
         a.account = accts[i];
         a.index = uint32(i);
-        a.balance = bals[i];
+        a.balance = int128(int64(bals[i])) - 5; // a balance unequal to the escape value (unrealized PnL)
         a.escapeValue = bals[i];
         a.positionsHash = keccak256(abi.encode("positions", accts[i]));
-        a.height = 42;
     }
 
     function _aLeaf(PerpsVault.Account memory a) internal pure returns (bytes32) {
         return keccak256(
             abi.encodePacked(
-                bytes1(0x00), "PPv1acct", a.account, a.index, a.balance, a.escapeValue, a.positionsHash, a.height
+                bytes1(0x00), "PPv1acct", a.account, a.index, a.balance, a.escapeValue, a.positionsHash
             )
         );
     }

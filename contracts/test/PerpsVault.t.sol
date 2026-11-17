@@ -303,7 +303,13 @@ contract PerpsVaultTest is Base {
         PerpsVault.Checkpoint memory cp = _basicCheckpoint();
         bytes32 sys = keccak256(
             abi.encodePacked(
-                bytes7("PPv1sys"), cp.nextDepositIndex, cp.nextForcedIndex, cp.nextOrderId, cp.totalEscape, cp.dust
+                bytes7("PPv1sys"),
+                cp.nextDepositIndex,
+                cp.nextForcedIndex,
+                cp.nextOrderId,
+                cp.totalEscape,
+                cp.dust,
+                cp.auxHash
             )
         );
         bytes32 expected = keccak256(

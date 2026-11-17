@@ -61,7 +61,7 @@ contract PerpsVault {
     bytes32 public constant CHECKPOINT_TYPEHASH = keccak256(
         "Checkpoint(uint64 height,uint64 time,bytes32 logHash,bytes32 accountsRoot,bytes32 marketsRoot,"
         "bytes32 withdrawalsRoot,uint64 nextDepositIndex,uint64 nextForcedIndex,uint64 nextOrderId,"
-        "uint64 totalEscape,uint128 dust,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,"
+        "uint128 totalEscape,uint128 dust,bytes32 auxHash,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,"
         "uint64 withdrawalsTotal)"
     );
     bytes32 public constant UNPAUSE_TYPEHASH = keccak256("Unpause(uint64 pauseCount,uint256 validUntil)");
@@ -119,7 +119,7 @@ contract PerpsVault {
         uint64 nextForcedIndex;
         uint64 withdrawalCount;
         uint64 withdrawalsTotal;
-        uint64 totalEscape;
+        uint128 totalEscape;
         bytes32 accountsRoot;
         bytes32 stateRoot;
     }
@@ -198,8 +198,9 @@ contract PerpsVault {
         uint64 nextDepositIndex;
         uint64 nextForcedIndex;
         uint64 nextOrderId;
-        uint64 totalEscape;
+        uint128 totalEscape;
         uint128 dust;
+        bytes32 auxHash;
         bytes32 depositsHead;
         bytes32 forcedHead;
         uint64 withdrawalCount;
@@ -215,14 +216,13 @@ contract PerpsVault {
         uint64 height;
     }
 
-    /// SPEC 11 account leaf data.
+    /// SPEC 11 (0.1.1) account leaf data.
     struct Account {
         address account;
         uint32 index;
-        uint64 balance;
+        int128 balance;
         uint64 escapeValue;
         bytes32 positionsHash;
-        uint64 height;
     }
 
     // ------------------------------------------------------------------ events
@@ -236,7 +236,7 @@ contract PerpsVault {
     event Refunded(uint64 indexed index, address indexed account, uint64 amount);
     event GuardianPaused(address indexed guardian, uint64 indexed pauseCount, uint64 pausedUntil);
     event Unpaused(uint64 indexed pauseCount, uint64 guardianBlockedUntil);
-    event EscapeTriggered(uint64 at, uint8 reason, uint64 checkpointSeq, uint64 payable_, uint64 totalEscape);
+    event EscapeTriggered(uint64 at, uint8 reason, uint64 checkpointSeq, uint64 payable_, uint128 totalEscape);
     event SurplusSwept(address indexed recipient, uint64 amount);
 
     // ------------------------------------------------------------------ errors
@@ -387,6 +387,7 @@ contract PerpsVault {
                     cp.nextOrderId,
                     cp.totalEscape,
                     cp.dust,
+                    cp.auxHash,
                     cp.depositsHead,
                     cp.forcedHead,
                     cp.withdrawalCount,
@@ -397,12 +398,14 @@ contract PerpsVault {
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
     }
 
-    /// @notice SPEC 11: `stateRoot = H("PosternPerps/state/v1" || be64 height || be64 time || accountsRoot ||
+    /// @notice SPEC 11 (0.1.1): `stateRoot = H("PosternPerps/state/v1" || be64 height || be64 time || accountsRoot ||
     ///         marketsRoot || withdrawalsRoot || systemHash)`, `systemHash = H("PPv1sys" || be64 nextDepositIndex ||
-    ///         be64 nextForcedIndex || be64 nextOrderId || be64 totalEscape || be128 dust)`.
+    ///         be64 nextForcedIndex || be64 nextOrderId || be128 totalEscape || be128 dust || auxHash)`.
     function stateRootOf(Checkpoint calldata cp) public pure returns (bytes32) {
         bytes32 systemHash = keccak256(
-            abi.encodePacked("PPv1sys", cp.nextDepositIndex, cp.nextForcedIndex, cp.nextOrderId, cp.totalEscape, cp.dust)
+            abi.encodePacked(
+                "PPv1sys", cp.nextDepositIndex, cp.nextForcedIndex, cp.nextOrderId, cp.totalEscape, cp.dust, cp.auxHash
+            )
         );
         return keccak256(
             abi.encodePacked(
@@ -463,7 +466,7 @@ contract PerpsVault {
     function _accountLeaf(Account calldata a) internal pure returns (bytes32) {
         return keccak256(
             abi.encodePacked(
-                bytes1(0x00), "PPv1acct", a.account, a.index, a.balance, a.escapeValue, a.positionsHash, a.height
+                bytes1(0x00), "PPv1acct", a.account, a.index, a.balance, a.escapeValue, a.positionsHash
             )
         );
     }
@@ -674,7 +677,7 @@ contract PerpsVault {
         if (reason == 0) revert EscapeNotDue();
         uint64 pool = custody() - (latest.withdrawalsTotal - withdrawnTotal)
             - (depositedTotal - depositTotalAt[latest.nextDepositIndex]);
-        escapePayable = pool < latest.totalEscape ? pool : latest.totalEscape;
+        escapePayable = pool < latest.totalEscape ? pool : uint64(latest.totalEscape);
         escapeAt = uint64(block.timestamp);
         emit EscapeTriggered(escapeAt, reason, checkpointCount, escapePayable, latest.totalEscape);
     }
