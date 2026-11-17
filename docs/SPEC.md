@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: engine specification (`docs/SPEC.md`)
 
-**UNAUDITED PROTOTYPE. Version 0.1.1, 2026-11-17. Owner: agent 388 (continues 350).** Nothing here is deployed.
+**UNAUDITED PROTOTYPE. Version 0.1.5, 2026-11-17. Owner: agent 388 (continues 350).** Nothing here is deployed.
 The perpetuals are not to be deployed before an external audit and a legal review.
 
 This document is normative for `engine/` (the deterministic state machine), and is the interface that `node/`
@@ -122,6 +122,13 @@ Field rules:
 | `Withdraw.amount` | USDC units, gross; the flat `withdrawalFee` is deducted from it (section 9.2); `recipient` any address except the zero address; shown by the wallet |
 | `ApproveAgent.name` | UTF-8, 0 to 32 bytes; `expiresAt` Unix ms, `T < expiresAt <= T + 180 days` |
 
+Reserved type names (S-2.3.1): `Attestation` (the user attestation of 392/397, `compliance/legal/notices.json`,
+signed under THIS domain), `Checkpoint` and `OracleObservation`/`OraclePrice` (oracle, section 5) are not
+actions: no input `typeId` maps to them (an unknown `typeId` is `MALFORMED` at decode), and a signature over any
+other type never verifies as an action because the digest covers the type hash (test
+`attestation_signature_is_never_an_action`). Any new type in this domain MUST get a name distinct from all of
+these and be added to this list.
+
 ### 2.4 Who may sign what (S-2.4)
 
 | Type | Main key | Agent |
@@ -172,14 +179,23 @@ block: it is recorded as a failed outcome with its error and has no other effect
 |---|---|---|
 | `0x01` | oracle | `OracleUpdate` exactly as 394's `node/oracle/README.md` section 4 (canonical bytes) |
 | `0x02` | deposit | `be64(depositIndex) || account:20 || be64(amount)` from the vault's `Deposit` event |
-| `0x03` | forced | `be64(forcedIndex) || account:20 || kind:u8 || be64(deadline) || be64(arg)` from the vault's `ForcedRequest` event |
+| `0x03` | forced | `be64(forcedIndex) || account:20 || kind:u8 || be32(marketId) || be64(amount) || be64(deadline)` = the fields of the vault's `ForcedRequest` event (VAULT.md; `deadline` in L2 `block.timestamp` seconds) |
 | `0x04` | action | `typeId:u8 || fields || signature:65`; `typeId` = 1 PlaceOrder, 2 CancelOrder, 3 CancelAll, 4 UpdateLeverage, 5 UpdateMargin, 6 Withdraw, 7 ApproveAgent, 8 RevokeAgent; `fields` = the message's fields in the type's order, each fixed width big-endian (`address` 20, `uint64` 8, `uint32` 4, `uint8` 1, `bool` 1 byte 0 or 1 only, `bytes32` 32, `string` `be16(len) || utf8`); the engine recomputes the EIP-712 digest from the decoded fields |
 
 - S-3.2.1 Deposits MUST be consecutive: `depositIndex == nextDepositIndex` (starting at 0), else the input fails
   `DEPOSIT_ORDER` and the node must re-submit (the vault index is the single order). Likewise forced requests with
-  `nextForcedIndex`. Deposits and forced requests come only from L2 events at the `finalized` tag agreed by two
-  endpoints (node's rule); the engine cannot check this and trusts the validator replay (each validator checks the
-  events against its own L2 view before signing; node's rule).
+  `nextForcedIndex` (a forced request is RECEIVED in index order; when it is PROCESSED is section 14).
+  Deposits and forced requests come from L2 events at the `finalized` tag agreed by two endpoints (node's rule), but
+  their correctness does NOT rest on those reads (R395-1): the engine itself computes the vault's chains (VAULT.md
+  5.4) from the inputs it APPLIES,
+  `depositsHead(0) = keccak256(abi.encode(bytes32("PosternPerps.deposit.v1"), uint256(700770), address(vault)))`,
+  `depositsHead(i+1) = keccak256(abi.encode(depositsHead(i), uint256(i), address(account), uint256(amount)))` per
+  credited deposit, and `forcedHead` likewise over PROCESSED forced requests (`abi.encode(head, index, account,
+  kind, marketId, amount, deadline)`, tag `"PosternPerps.forced.v1"`). Validators sign `depositsCredited`,
+  `depositsHead`, `forcedProcessed`, `forcedHead` as the engine computed them (`Engine::checkpoint_fields`), NEVER
+  a value copied from an L2 read; the vault refuses a checkpoint whose head differs from its own stored head at
+  that count. A fabricated, altered, reordered or skipped deposit therefore yields a head the vault refuses, even if
+  every validator's L2 view was wrong (test `r395_1_…`).
 - S-3.2.2 JSON form (API, mock, fixtures): the same fields, integers as decimal strings, bytes as `0x` hex.
 
 ### 3.3 Order of processing inside a block (normative)
@@ -188,6 +204,7 @@ block: it is recorded as a failed outcome with its error and has no other effect
 2. For each market in ascending id: oracle staleness rule H1 (394 section 6).
 3. Oracle input, if present: 394 rules C1 to C5 and H2/H3.
 4. Mark price of every market (section 5) from index and the book as it stands.
+   (5b, after funding: X3 settlement of markets halted for `maxHaltMs`, section 14.)
 5. Funding (section 7) for every market whose funding boundary was crossed (`T / fundingIntervalMs > prevT / fundingIntervalMs`).
 6. Premium sample for every active market if an oracle round was accepted in step 3.
 7. Deposits, then forced requests, then actions, each in input order.
@@ -225,8 +242,20 @@ block: it is recorded as a failed outcome with its error and has no other effect
   refused for margin (its margin was reserved; an account that becomes undercollateralised is handled by
   liquidation). A fill as taker re-checks per fill: the taker stops (remainder cancelled, `INSUFFICIENT_MARGIN`)
   before a fill that would leave its equity below its initial requirement, except for a fill that only reduces.
-- S-4.10 A halted market accepts only CancelOrder, CancelAll and nothing else (`MARKET_HALTED`); no matching, no
-  liquidation, no triggers, no funding sample.
+- S-4.10 A halted market accepts only CancelOrder, CancelAll and nothing else (`MARKET_HALTED`); no liquidation,
+  no triggers, no funding sample, and no matching EXCEPT a forced close's reduce-only take inside the exit band
+  (section 14; makers fill at their own prices). Withdrawals during a halt: S-9.2. Genesis per market `oracle`
+  adds `exitHaircutBps` (`>= jumpBps`), `exitHaircutPerMinBps`, `exitMaxHaircutBps` (`< 10000`), `maxHaltMs`
+  (`>= maxStalenessMs`); the converter uses 394's defaults (jumpBps, 100, 5000, 3600000) when absent. The oracle
+  state committed in `auxHash` adds `haltLow`, `haltHigh`. The engine's copy of the rules reproduces 394's shared
+  vectors `node/oracle/vectors/halt.json` (17 blocks: every H1, outcome and exit band) and `eip712.json` (domain,
+  struct hashes, digests, signers, canonical OracleUpdate bytes): tests `tests/r394.rs`.
+- S-4.11 Launch gate (392's request): no PlaceOrder is accepted (`NOT_LAUNCHED`) until `INSURANCE.balance >=
+  launchInsuranceMin` and `BACKSTOP.balance >= launchBackstopMin` (genesis; seeds are deposits to the system
+  addresses `0x…02` and `0x…03` through the vault). The check runs at each PlaceOrder and LATCHES open once
+  (event `Launched`): a later loss of the insurance fund does not close trading (closing it would trap users in
+  positions; the fund's level after launch is an operations alert, not a rule). Cancels, withdrawals and deposits
+  are never gated.
 
 ## 5. Index and mark price
 
@@ -281,16 +310,26 @@ fills pay no taker fee (step 4's fee replaces it); makers pay their normal fee.
 
 1. Cancel all its resting orders and triggers (all markets).
 2. For each position (ascending market id): bankruptcy price `bp` = the price at which `E` would be 0 holding the
-   other positions at mark (rounded toward the account: up for a long, down for a short). Send a reduce-only IOC
-   to the book for the whole position with limit `bp` (never fills worse than bankruptcy) and with the S-4.3
-   slippage bound waived.
+   other positions at mark (rounded toward the account: up for a long, down for a short; recomputed for each
+   position after the previous ones closed). Liquidation price bound (R395-13) `lp = max(bp, mark - mark *
+   mmf_0 / 2)` for a long, `min(bp, mark + mark * mmf_0 / 2)` for a short (`mmf_0` = tier-0 maintenance fraction).
+   Send a reduce-only IOC to the book for the whole position with limit `lp`, which never fills against an order
+   placed in the SAME block (the sequencer knows which accounts step 9 liquidates; its own last-moment order is
+   not liquidity): matching stops at the first such order. Stated bound: a liquidated account loses at most
+   `mmf_0 / 2` of the notional beyond mark plus the liquidation fee; the rest of its equity stays its own.
 3. The remainder is taken by the backstop vault (system account `BACKSTOP`) at `bp` if the backstop has a positive
-   balance and its equity after it covers its own maintenance requirement; else by auto-deleveraging (6.4).
+   balance and its equity after it covers its own maintenance requirement, and only up to its position limit
+   `|backstop position| <= oiCap * backstopOiPpm / 10^6` (genesis; 392's proposal 25% = 250000; closing an
+   opposite backstop position is not limited), at `lp` (not at `bp`); whatever remains goes to auto-deleveraging
+   (6.4) at `lp` (at `bp` in the gap case of step 5). The backstop is never liquidated, never its own
+   counterparty, stops taking when its equity after would fall below its maintenance requirement (R395-14), and
+   is the FIRST ADL counterparty on the side opposite to its position (and a forced close meets it through step
+   3's rule), which is how its positions are reduced in 0.1.5 (resting unwind orders: O-9).
 4. Liquidation fee: `liquidationFeePpm` of the liquidated notional, taken from what equity remains (never below 0),
    credited to the insurance fund (`INSURANCE`).
-5. If `E < 0` at the start (a gap: the oracle moved past bankruptcy), the position is closed at mark through steps
-   2 and 3 with `bp` replaced by mark, and the deficit is paid by `INSURANCE`; if the insurance balance does not
-   cover it, the remainder is closed by ADL at the bankruptcy price instead (no deficit is ever socialised outside
+5. If `E < 0` at the start (a gap: the oracle moved past bankruptcy), `INSURANCE` first pays the deficit AS FAR AS
+   ITS BALANCE GOES (R395-31: partial cover too); if that restores `E >= 0` the liquidation continues with steps 2
+   and 3; otherwise the positions are closed by ADL at the bankruptcy price (no deficit is ever socialised outside
    ADL).
 
 ### 6.4 Auto-deleveraging (last resort)
@@ -302,14 +341,17 @@ accounts.
 
 ## 7. Funding
 
-- S-7.1 Premium sample (step 6 of 3.3): `impactBid/impactAsk` = the average fill price of a `impactNotional`
+- S-7.1 Premium sample (taken at step 8 of 3.3, on the book AFTER the block's actions, when an oracle round was
+  accepted in the block; R395-16): `impactBid/impactAsk` = the average fill price of a `impactNotional`
   market order on each side (default 10,000 USD), index when the side is too thin; `premium = (max(0, impactBid -
   index) - max(0, index - impactAsk)) * RATE_SCALE / index` (rounded toward zero).
-- S-7.2 At each funding boundary (`fundingIntervalMs = 3600000`): `P = average of the samples` of the interval
-  (toward zero; no samples -> no funding for that interval); `rate = clamp(P + clamp(interest - P, -c, +c),
-  -maxFundingRate, +maxFundingRate)`. v0.1 defaults (392's `risk.json` supersedes): `interest = 12500`
-  (0.00125% per hour in `RATE_SCALE`, i.e. 0.01% per 8 h), `c = 500000` (0.05%), `maxFundingRate = 500000`
-  (0.05% per hour).
+- S-7.2 At each funding boundary (`fundingIntervalMs = 3600000`): `P = the MEDIAN of the samples` of the interval
+  (lower middle; no samples -> no funding for that interval; R395-16: a minority of manipulated samples cannot
+  move it); `rate = clamp(P + clamp(interest - P, -c, +c),
+  -maxFundingRate, +maxFundingRate)` where `c` is the market's genesis `fundingClamp` (per market, 392's request;
+  `markets.json` 0.2.1: 62500 = 0.00625% per hour = the benchmark's 0.05% per 8 h, tighter than the 0.1 default of
+  500000). Values of 0.2.1: `interest = 12500` (0.00125% per hour, i.e. 0.01% per 8 h), `maxFundingRate = 500000`
+  (0.05% per hour; raising it waits for R395-16, the premium sample a sequencer can quote into).
 - S-7.3 Payment per position: `f = size * mark * rate / RATE_SCALE` in notional units, computed in checked i128
   (S-1.3; an overflow anyway halts the market with `ARITHMETIC`); a long pays
   when `rate > 0`. Payers' amounts rounded up, receivers' down (S-0.3); converted to USDC per S-1.1 with the same
@@ -338,12 +380,29 @@ accounts.
 - S-9.1 Deposit: credit `amount` to `account` (created with the next index if new). Deposits are never refused by
   the engine (compliance freezes are an Open item: v0.1 engine has none; the node refuses actions of sanctioned
   addresses, which leaves their funds in place).
-- S-9.2 Withdraw: requires the main key; no position in a halted market; after the debit `E >= IR`; `amount >
-  withdrawalFee`. Effect: `balance -= amount`; `withdrawalFee` to `PROTOCOL_FEE`; a withdrawal record
+- S-9.2 Withdraw: requires the main key; `amount > withdrawalFee`; `amount <= freeCollateral` where
+  `freeCollateral = min(balance, floor((E' - IR') / 10^10))`, clamped at 0, and `E'`, `IR'` are `E` and `IR` with
+  every position in a HALTED market valued, and its requirement computed, at the side of the oracle's EXIT BAND
+  worse for its holder (a long at `low`, a short at `high`; 394's README 6a X1/X2: the band covers the last good
+  index and every committee price since the halt, widened by `exitHaircutBps >= jumpBps` plus
+  `exitHaircutPerMinBps` per minute of darkness up to `exitMaxHaircutBps`, and only widens). Decided (technical,
+  R395-5 with 394): a halt never blocks free collateral; the band is the bound the protocol stands behind for a
+  price it cannot observe (it replaces 0.1.3's "loss only, IR x2" rule, which had no tie to the prices the committee
+  saw). With no halted market `E' = E`, `IR' = IR` (the 0.1 rule). Cost: during a long halt users can withdraw less
+  than their mark-to-market equity. Effect: `balance -= amount`; `withdrawalFee` to `PROTOCOL_FEE`; a withdrawal record
   `{withdrawalId (u64, consecutive from 0), account, recipient, amount - withdrawalFee, height}` is appended to the
   withdrawal tree.
-- S-9.3 Trading fees: `fee = ceil(|size| * price * feePpm / 10^6 / 10^10)` USDC units per fill, taker `450`, maker
-  `150` ppm at the base tier (BRIEF-PERPS; 392's final table supersedes); no rebates in v0.1. Fees go to
+- S-9.3 Trading fees: `fee = ceil(|size| * price * feePpm / 10^6 / 10^10)` USDC units per fill, `feePpm` from the
+  account's volume tier (S-9.4); no rebates (every tier's maker fee `>= 0`).
+- S-9.4 Volume tiers (392's `risk.json` `feeTiers`, genesis `feeTiers[{minVolume14d (USDC units), takerFeePpm,
+  makerFeePpm}]`): tier 0 has `minVolume14d = 0` and MUST equal every market's `takerFeePpm`/`makerFeePpm`;
+  volumes ascend, fees never increase, `0 <= maker <= taker <= 1%`. An account's volume is the floor in USDC units of
+  the notional of each of its book and liquidation fills (maker and taker; agents trade as their account), kept
+  per UTC day. The tier of a fill is the highest whose `minVolume14d` is `<=` the sum over the 14 COMPLETE UTC days
+  before the fill's day. Decided (technical): today's volume counts from tomorrow, so the fee of a fill is known
+  for the whole day and an account cannot change its own tier inside a block by wash volume (wash volume still
+  pays fees at today's tier; self-trades never fill, S-4.4). Backstop and ADL transfers count no volume and pay no
+  fee. Fees go to
   `PROTOCOL_FEE`. Sweep: at each UTC day boundary (`T / 86400000` changes), if `PROTOCOL_FEE.balance >=
   minFeeSweep`, the whole balance becomes a withdrawal record with `recipient = feeRecipient` (genesis; MUST be
   `0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544`, the vault checks the same constant).
@@ -353,10 +412,10 @@ accounts.
 The reference is `engine/src/genesis.rs` (`deny_unknown_fields`, every integer a decimal string without leading
 zeros, in engine units): `{specVersion "0.1", chainId "700770", verifyingContract, feeRecipient (MUST be
 0x775a…0544), oracleSigners[n], oracleQuorum (odd, strict majority), oracleMaxFutureMs, oracleMaxAgeMs,
-withdrawalFee, minFeeSweep, markets[]}`, per market `{marketId (ascending, 1..255), symbol, tick, step, minSize,
+withdrawalFee, minFeeSweep, feeTiers[], launchInsuranceMin, launchBackstopMin, backstopOiPpm, markets[]}`, per market `{marketId (ascending, 1..255), symbol, tick, step, minSize,
 maxSize, oiCap, maxLeverage, defaultLeverage, tiers[{floor (USDC units), imfPpm, mmfPpm}], takerFeePpm,
 makerFeePpm, liquidationFeePpm, markBandBps, marketSlippageBps, impactNotional (USDC units), fundingIntervalMs,
-interest, interestClamp, maxFundingRate, oracle{minSources, agreeBps, jumpBps, maxStalenessMs, confirmRounds}}`.
+interest, fundingClamp, maxFundingRate, oracle{minSources, agreeBps, jumpBps, maxStalenessMs, confirmRounds}}`.
 The checkpoint committee is NOT engine state (vault and node). `genesisEncoding` = the engine's serialization of
 this object (fields in the order above, no whitespace, integers as decimal strings). The engine reads 392's `markets.json`/`risk.json` through a converter that applies S-1.2
 and refuses any inconsistency (display decimals vs tick, MMF `<=` markBand, tiers not ascending, IMF `<` MMF).
@@ -370,7 +429,11 @@ leaves and nodes). Empty subtree of height 0 is `bytes32(0)`; `Z(i+1) = H(0x01 |
   big-endian):
   `"PPv1acct" (8 bytes) || address:20 || be32(index) || be128(balance, two's complement) || be64(escapeValue) ||
   positionsHash:32` where `escapeValue` = `max(0, floor((E + sum of isolated (isoMargin*10^10 + U)) / 10^10))` at the
-  block's mark prices (USDC units: what the account is owed if every position is closed at mark) and
+  block's mark prices (USDC units: what the account is owed if every position is closed at mark), EXCEPT that the
+  total negative equity of all accounts (`sum of ceil(-E / 10^10)` over accounts with `E < 0`) is first charged to
+  `INSURANCE`'s escape value (R395-23: the order of 6.3; the sum of escape values then never exceeds custody while
+  the insurance fund covers the deficits, invariant checked after every block; only the remainder becomes the
+  vault's pro-rata haircut), and
   `positionsHash = keccak256(be32(count) || [be32(marketId) || be64(size, two's complement) ||
   be128(openNotional, two's complement) || be64(isoMargin) || u8(isolated)]...)` in ascending market id.
 - Market tree: depth 8, leaf position = marketId; data `"PPv1mrkt" || be32(marketId) || be64(index) || be64(mark) ||
@@ -378,7 +441,10 @@ leaves and nodes). Empty subtree of height 0 is `bytes32(0)`; `Z(i+1) = H(0x01 |
 - Withdrawal tree: depth 32, leaf position = `withdrawalId`, append-only over the whole history; data
   `"PPv1wdrl" || be64(withdrawalId) || account:20 || recipient:20 || be64(amount) || be64(height)`.
 - `systemHash = keccak256("PPv1sys" || be64(nextDepositIndex) || be64(nextForcedIndex) || be64(nextOrderId) ||
-  be128(totalEscape) || be128(dust) || auxHash)`, `totalEscape` = sum of all `escapeValue`; `auxHash` = keccak256
+  be128(totalEscape) || be128(dust) || auxHash || be64(withdrawalCount) || be64(withdrawalsTotal))` (0.1.5: the
+  last two at VAULT.md 5.2's request, so the vault's recomputed `stateRoot` covers them; `nextForcedIndex` = the
+  number of PROCESSED forced requests, section 14; received-but-pending requests, the received count and both
+  chain heads are in `auxHash`), `totalEscape` = sum of all `escapeValue`; `auxHash` = keccak256
   of every remaining piece of state (orders and book queues, triggers, oracle internals, last trade, premium
   accumulators, leverage settings, agents, nonce sets, last oracle round) in the fixed order of
   `Engine::aux_hash` (engine/src/engine.rs), so that validators agree on the WHOLE state, not only on balances.
@@ -400,6 +466,11 @@ Withdraw or the fixed fee sweep; payout needs the committee's checkpoint), inven
 see finalized on the L2, or move the index outside the honest oracle range (394). Can: reorder actions inside a
 block and choose which arrive (front-running within the 2-minute nonce window and the mark band), delay or censor
 (bounded by forced requests and escape mode in the vault), withhold oracle updates (markets halt, fail closed).
+Residual (R395-16, stated): a sequencer that places a quote as the LAST action of EVERY block and cancels it as the
+first action of the next is never hit (it orders every other action) and is sampled every time; post-action
+sampling and the median then do not help, and it can set the premium up to `maxFundingRate` (0.05% per hour in
+0.2.1) on every position. The bound is the funding cap and the clamp; a sampling point the sequencer cannot
+predict (e.g. derived from the next oracle round) is the planned fix (O-10).
 
 ## 13. Engine interface (for 389) and replay
 
@@ -419,10 +490,39 @@ deposit), `SELF_TRADE`, `CANCELLED`, `ISOLATED_UNSUPPORTED`, `MALFORMED`, `UNKNO
 
 ## 14. Forced requests (from the vault)
 
-`kind`: `0` CancelAll (all markets), `1` CloseAll (every position closed by reduce-only IOC at the mark +/-
-`marketSlippageBps`), `2` Withdraw (`arg` = gross amount; same rules as S-9.2 except the signature; recipient = the
-account itself). A forced request that fails its rules is still CONSUMED (`nextForcedIndex` advances) with its
-error recorded, so the vault's deadline check sees it processed. The vault enforces the deadline (VAULT.md).
+Kinds = VAULT.md `requestForced`: `1` cancel all orders; `2` close positions (`marketId` 0 = every market);
+`3` withdraw `amount` gross (0 = all free collateral) to the account itself, rules of S-9.2 without a signature.
+
+Received requests form a queue in index order. Every block (step 7, after deposits and forced inputs, before
+actions) the engine serves the queue FROM ITS HEAD with the current state; each request ends in one of:
+
+- served (event `ForcedServed`): cancel all always; close: on an ACTIVE market reduce-only through the book within
+  `mark +/- marketSlippageBps`, then the backstop (within its limit and margin), then ADL, the last two at that bound
+  price with the account's taker fee, so a forced close on an active market is always served and is never cheaper
+  than the book; withdraw: when `amount` (or all) is within free collateral;
+- rejected and CONSUMED (event `ForcedRejected`) only for a reason the user caused and that is provable from
+  finalized state on live prices: an unknown market id, a withdrawal above free collateral or not above the fee
+  while the account has no position in a halted market, an unknown kind;
+- a close of a position in a HALTED market is also SERVED, never refused for a halt (0.1.4, 394's README 6a):
+  reduce-only through the book only inside the exit band (`low` for a sell, `high` for a buy), the rest against
+  the opposite positions in ADL order at the settle price `settle` (the latest committee price since the halt,
+  else the last good index; always inside the band) with the account's taker fee;
+- PENDING, NOT consumed (event `ForcedPending`): a withdrawal that the halt rule of S-9.2 keeps below the request
+  while a position is in a halted market, or a request from an address whose deposit is not yet credited (the
+  sequencer's delay). A pending head blocks everything behind it (strict index order).
+- X3 settlement: when a market has been halted for `maxHaltMs` (default one hour, inside the vault's one-day
+  `forcedDelay`), step 5b of 3.3 cancels its orders and triggers and settles EVERY position of the market at
+  `settle` (event `MarketSettled`; exact: the sizes sum to zero, I-1, so I-2 holds); its collateral is then free
+  under S-9.2 and a pending withdrawal is served. Trade-off (stated): a genuine outage of an hour closes the
+  market's positions at the last price the committee signed.
+
+`forcedProcessed` counts served plus rejected only. The vault (VAULT.md 5.3 rule 4) refuses a checkpoint that leaves
+a request unprocessed past its deadline and enters escape; the deadline counts from the request in L2
+`block.timestamp` seconds, so a halt the sequencer causes by withholding oracle inputs can delay exits by at most
+`forcedDelay` before escape (R395-5). Decided (technical): consuming user-caused rejections is required, otherwise
+any depositor could stall the queue with an unservable request (for example a withdrawal of more than it owns) and
+force a global escape. Trade-off: a genuine oracle outage longer than `forcedDelay` with a pending close or
+withdrawal also ends in escape.
 
 ## 15. Worked example (S-0.3, S-1, S-6.2, S-9.3)
 
@@ -439,7 +539,7 @@ generated by the engine and checked by an independent Python implementation.
 - O-2 Partial liquidation (v0.1 liquidates whole positions).
 - O-3 Backstop vault deposits and shares (v0.1: anyone may deposit to the `BACKSTOP` address through the vault; it
   never signs, so nothing is withdrawable from it in v0.1; who funds it and with how much is an owner input).
-- O-4 Volume fee tiers (392's table).
+- O-4 Volume fee tiers: CLOSED in 0.1.2 (S-9.4).
 - O-5 The checkpoint digest and escape rule (390, VAULT.md).
 - O-6 Isolated margin is specified (6.2) but NOT implemented in engine 0.1: `UpdateLeverage{isolated:true}` returns
   `ISOLATED_UNSUPPORTED` and `UpdateMargin` returns `NOT_ISOLATED`; leaves carry `isoMargin = 0, isolated = 0`.
@@ -447,6 +547,14 @@ generated by the engine and checked by an independent Python implementation.
   700770 + vault); 394's README v0.1 says 7007701 without `verifyingContract`: one of the two must change (asked
   in the cross-area log; the engine follows 2.1 until agreed).
 - O-8 `snapshot()/restore()` of section 13: not implemented in 0.1 (recovery = replay of the log from genesis).
+- O-9 Backstop unwind (392's proposal: reduce-only limit orders at mark +/- markBandBps): not in 0.1.2; the
+  backstop holds what it takes until ADL or a later engine version (it has no key and cannot trade).
+- O-10 R395-16 (premium samples from a book the sequencer can quote into): open; the funding cap stays 0.05%/h.
+- Reserved primary type names: `Attestation` (392/397's geoblock attestation) is NOT an engine action and has no
+  input type id; the engine refuses it by construction (an unknown `typeId` is `MALFORMED` at decode, S-0.4).
+- Genesis from 392's files: `engine genesis <markets.json> <risk.json> --vault 0x.. --oracle-signers .. --quorum q
+  --backstop-seed USDC [--backstop-oi-ppm 250000]` converts human decimals with S-1.2 (exact or refused) and never
+  guesses an owner input (`TBD-owner` is refused); `defaultLeverage` = `min(10, maxLeverage)` when absent.
 
 ## Version history
 
@@ -454,6 +562,10 @@ generated by the engine and checked by an independent Python implementation.
 |---|---|---|
 | 0.1 | 2026-11-17 | first version (388): scales, domain (700770 + vault), types, nonces, blocks, matching, mark, margin, liquidation, funding, conservation, genesis, state root and proofs |
 | 0.1.1 | 2026-11-17 | aligned with engine 0.1 (`647a401`): signed balance (be128) in the account leaf and no height in it; `auxHash` in `systemHash`; nonce consumed on valid signature; IR formula exact; halted-market liquidation rule; bad debt; funding bound; genesis fields; O-6 to O-8 |
+| 0.1.2 | 2026-11-17 | 392's requests: per-market `fundingClamp` (S-7.2), volume fee tiers (S-9.4, closes O-4), launch gate (S-4.11), backstop position limit (6.3 step 3), `Attestation` reserved, compliance-file converter; genesis fields `feeTiers`, `launchInsuranceMin`, `launchBackstopMin`, `backstopOiPpm`, `fundingClamp` (was `interestClamp`) |
+| 0.1.3 | 2026-11-17 | R395-1 (engine computes `depositsHead`/`forcedHead`, VAULT.md 5.4 formulas; signed values never copied from L2), R395-5 (free collateral withdrawable during a halt, S-9.2; forced queue served from its head every block, halt-caused failures pending, not consumed; forced kinds and input fields = VAULT.md), R395-31 (partial insurance cover) |
+| 0.1.4 | 2026-11-17 | 394's exit band (README 6a) used for free collateral during a halt (replaces 0.1.3's x2 rule) and for forced closes in a halt (served at `settle`, never pending); X3 market settlement after `maxHaltMs`; genesis oracle exit fields; `Attestation` and other reserved type names (S-2.3.1) |
+| 0.1.5 | 2026-11-17 | systemHash adds withdrawalCount/withdrawalsTotal, nextForcedIndex = processed (VAULT 5.2; 390's vectors reproduced, new vector in tests/r395b.rs); R395-13 liquidation bound `lp` + no same-block makers; R395-14 backstop rules; R395-16 post-action samples + median; R395-23 insurance-first escape values |
 
 ## Not done / not proven
 

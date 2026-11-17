@@ -90,6 +90,22 @@ pub fn check(e: &Engine) -> Result<(), String> {
             return Err(format!("system account {i} negative"));
         }
     }
+    if e.forced_processed + e.forced_queue.len() as u64 != e.next_forced {
+        return Err("forced queue: processed + pending != received".into());
+    }
+    for (k, r) in e.forced_queue.iter().enumerate() {
+        if r.index != e.forced_processed + k as u64 {
+            return Err("forced queue out of index order".into());
+        }
+    }
+    // R395-23: escape claims never exceed custody while the insurance fund covers the negative equity
+    let esc = e.escape_values();
+    let total: i128 = esc.iter().map(|x| *x as i128).sum();
+    let deficit: i128 = (0..e.accounts.len() as u32).map(|i| e.equity(i)).filter(|x| *x < 0).map(|x| crate::num::div_ceil(-x, N_PER_USDC)).sum();
+    let ins_e = e.equity(crate::engine::ACCT_INSURANCE).max(0) / N_PER_USDC;
+    if ins_e >= deficit && total > e.total_deposits - e.total_withdrawn {
+        return Err(format!("R395-23: escape total {total} > custody {} with insurance {ins_e} >= deficit {deficit}", e.total_deposits - e.total_withdrawn));
+    }
     let wsum: i128 = e.withdrawals.iter().map(|w| w.amount as i128).sum();
     if wsum != e.total_withdrawn {
         return Err("withdrawal records do not sum to total_withdrawn".into());

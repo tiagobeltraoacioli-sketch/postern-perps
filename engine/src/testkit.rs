@@ -2,7 +2,7 @@
 //! is derived from a small public integer.
 use crate::eip712::{address_of, digest, oracle_struct_hash, sign_digest, struct_hash};
 use crate::engine::Engine;
-use crate::genesis::{Checked, Genesis, MarketParams, OracleParams, Tier, OWNER_FEE_RECIPIENT};
+use crate::genesis::{Checked, FeeTier, Genesis, MarketParams, OracleParams, Tier, OWNER_FEE_RECIPIENT};
 use crate::hash::{hex0x, keccak, Addr};
 use crate::types::*;
 use k256::ecdsa::SigningKey;
@@ -45,14 +45,18 @@ pub fn market(id: u32, symbol: &str) -> MarketParams {
         impact_notional: 10_000_000_000,
         funding_interval_ms: 3_600_000,
         interest: 12_500,
-        interest_clamp: 500_000,
+        funding_clamp: 500_000,
         max_funding_rate: 500_000,
-        oracle: OracleParams { min_sources: 3, agree_bps: 100, jump_bps: 500, max_staleness_ms: 10_000, confirm_rounds: 1 },
+        oracle: OracleParams { min_sources: 3, agree_bps: 100, jump_bps: 500, max_staleness_ms: 10_000, confirm_rounds: 1, exit_haircut_bps: 500, exit_haircut_per_min_bps: 100, exit_max_haircut_bps: 5000, max_halt_ms: 3_600_000 },
     }
 }
 
 pub fn genesis(n_oracles: u32, markets: Vec<MarketParams>) -> Checked {
-    let g = Genesis {
+    genesis_raw(n_oracles, markets).check().expect("test genesis valid")
+}
+
+pub fn genesis_raw(n_oracles: u32, markets: Vec<MarketParams>) -> Genesis {
+    Genesis {
         spec_version: "0.1".into(),
         chain_id: 700770,
         verifying_contract: DEV_VAULT.into(),
@@ -63,9 +67,12 @@ pub fn genesis(n_oracles: u32, markets: Vec<MarketParams>) -> Checked {
         oracle_max_age_ms: 6000,
         withdrawal_fee: 1_000_000,
         min_fee_sweep: 1_000_000,
+        fee_tiers: vec![FeeTier { min_volume_14d: 0, taker_fee_ppm: 450, maker_fee_ppm: 150 }],
+        launch_insurance_min: 0,
+        launch_backstop_min: 0,
+        backstop_oi_ppm: 250_000,
         markets,
-    };
-    g.check().expect("test genesis valid")
+    }
 }
 
 pub fn sign_action(e: &Engine, k: &SigningKey, a: Action) -> Input {

@@ -196,12 +196,13 @@ pub fn encode_input(i: &Input) -> Vec<u8> {
             p.extend_from_slice(account);
             p.extend_from_slice(&amount.to_be_bytes());
         }
-        Input::Forced { index, account, kind, deadline, arg } => {
+        Input::Forced { index, account, kind, market_id, amount, deadline } => {
             p.extend_from_slice(&index.to_be_bytes());
             p.extend_from_slice(account);
             p.push(*kind);
+            p.extend_from_slice(&market_id.to_be_bytes());
+            p.extend_from_slice(&amount.to_be_bytes());
             p.extend_from_slice(&deadline.to_be_bytes());
-            p.extend_from_slice(&arg.to_be_bytes());
         }
         Input::Action(sa) => {
             enc_action(&sa.action, &mut p);
@@ -236,7 +237,7 @@ pub fn decode_payload(tag: u8, payload: &[u8]) -> Result<Input, DecodeError> {
             Input::Oracle(OracleUpdate { round, observations })
         }
         0x02 => Input::Deposit { index: r.u64()?, account: r.addr()?, amount: r.u64()? },
-        0x03 => Input::Forced { index: r.u64()?, account: r.addr()?, kind: r.u8()?, deadline: r.u64()?, arg: r.u64()? },
+        0x03 => Input::Forced { index: r.u64()?, account: r.addr()?, kind: r.u8()?, market_id: r.u32()?, amount: r.u64()?, deadline: r.u64()? },
         0x04 => {
             let action = dec_action(&mut r)?;
             let signature = r.sig()?;

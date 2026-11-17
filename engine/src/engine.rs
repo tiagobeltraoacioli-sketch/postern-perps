@@ -12,7 +12,7 @@ use crate::merkle;
 use crate::num::*;
 use crate::oracle::{committee_prices, HaltReason, OracleState, Status};
 use crate::types::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub const MAX_INPUTS: usize = 10_000;
 pub const MAX_BLOCK_BYTES: usize = 4 << 20;
@@ -63,6 +63,8 @@ pub struct Account {
     pub leverage: BTreeMap<u32, u32>,
     pub orders: BTreeSet<u64>,
     pub agents: BTreeMap<Addr, Agent>,
+    /// Traded notional per UTC day (USDC units, floor), kept for the last 15 days (fee tiers, S-9.4).
+    pub volume: BTreeMap<u64, u128>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +79,8 @@ pub struct Order {
     pub client_order_id: H256,
     /// `Some((orderType, triggerPrice))` while the order waits for its trigger (S-4.6).
     pub trigger: Option<(u8, u64)>,
+    /// Block in which the order was placed (R395-13: liquidations never fill against same-block orders).
+    pub height: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,8 +92,8 @@ pub struct Market {
     pub mark: u64,
     pub last_trade: Option<(u64, u64)>,
     pub long_oi: u64,
-    pub premium_sum: i128,
-    pub premium_count: i128,
+    /// Premium samples of the current funding interval (RATE_SCALE), taken after the block's actions (R395-16).
+    pub premium_samples: Vec<i128>,
     pub cum_funding: i128,
 }
 
@@ -100,6 +104,103 @@ pub struct WithdrawalRecord {
     pub recipient: Addr,
     pub amount: u64,
     pub height: u64,
+}
+
+/// A forced request received from the vault and not yet processed (SPEC section 14).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForcedReq {
+    pub index: u64,
+    pub account: Addr,
+    pub kind: u8,
+    pub market_id: u32,
+    pub amount: u64,
+    pub deadline: u64,
+}
+
+enum ForcedResult {
+    Served,
+    /// Refused for a reason provable from finalized state that the user caused: consumed.
+    Rejected(Error),
+    /// Not servable now for a reason the user does not control (halt, uncredited deposit): stays at the head.
+    Pending(Error),
+}
+
+/// abi.encode(bytes32 text) word: ASCII left-aligned, zero-padded (VAULT.md 5.4).
+fn text_word(t: &str) -> H256 {
+    let mut w = [0u8; 32];
+    w[..t.len()].copy_from_slice(t.as_bytes());
+    w
+}
+
+/// The vault's chain heads (VAULT.md 5.4), recomputed by the engine from the inputs it APPLIED (R395-1).
+pub fn chain_genesis(tag: &str, chain_id: u64, vault: &Addr) -> H256 {
+    keccak_parts(&[&text_word(tag), &crate::hash::word_u(chain_id as u128), &crate::hash::word_addr(vault)])
+}
+
+pub fn deposit_link(head: &H256, i: u64, account: &Addr, amount: u64) -> H256 {
+    use crate::hash::{word_addr, word_u};
+    keccak_parts(&[head, &word_u(i as u128), &word_addr(account), &word_u(amount as u128)])
+}
+
+pub fn forced_link(head: &H256, r: &ForcedReq) -> H256 {
+    use crate::hash::{word_addr, word_u};
+    keccak_parts(&[head, &word_u(r.index as u128), &word_addr(&r.account), &word_u(r.kind as u128), &word_u(r.market_id as u128), &word_u(r.amount as u128), &word_u(r.deadline as u128)])
+}
+
+/// The fields of `systemHash` (SPEC 11, 0.1.5). `next_forced_index` is the number of PROCESSED forced requests
+/// (VAULT.md 5.2's `nextForcedIndex`); requests received but pending are in `auxHash`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemFields {
+    pub next_deposit_index: u64,
+    pub next_forced_index: u64,
+    pub next_order_id: u64,
+    pub total_escape: u128,
+    pub dust: u128,
+    pub aux_hash: H256,
+    pub withdrawal_count: u64,
+    pub withdrawals_total: u64,
+}
+
+pub fn system_hash_of(f: &SystemFields) -> H256 {
+    keccak_parts(&[
+        b"PPv1sys",
+        &f.next_deposit_index.to_be_bytes(),
+        &f.next_forced_index.to_be_bytes(),
+        &f.next_order_id.to_be_bytes(),
+        &f.total_escape.to_be_bytes(),
+        &f.dust.to_be_bytes(),
+        &f.aux_hash,
+        &f.withdrawal_count.to_be_bytes(),
+        &f.withdrawals_total.to_be_bytes(),
+    ])
+}
+
+pub fn state_root_of(height: u64, time: u64, accounts_root: &H256, markets_root: &H256, withdrawals_root: &H256, system_hash: &H256) -> H256 {
+    keccak_parts(&[b"PosternPerps/state/v1", &height.to_be_bytes(), &time.to_be_bytes(), accounts_root, markets_root, withdrawals_root, system_hash])
+}
+
+/// SPEC 11 account leaf data from its fields (shared with the vault's vectors).
+pub fn account_leaf_bytes(address: &Addr, index: u32, balance: i128, escape: u64, positions_hash: &H256) -> Vec<u8> {
+    let mut d = Vec::with_capacity(8 + 20 + 4 + 16 + 8 + 32);
+    d.extend_from_slice(b"PPv1acct");
+    d.extend_from_slice(address);
+    d.extend_from_slice(&index.to_be_bytes());
+    d.extend_from_slice(&balance.to_be_bytes());
+    d.extend_from_slice(&escape.to_be_bytes());
+    d.extend_from_slice(positions_hash);
+    d
+}
+
+/// The engine-side fields of a checkpoint (VAULT.md 5.2): what validators sign is COMPUTED from applied inputs,
+/// never copied from an L2 read (R395-1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckpointFields {
+    pub deposits_credited: u64,
+    pub deposits_head: H256,
+    pub forced_processed: u64,
+    pub forced_head: H256,
+    pub withdrawal_count: u64,
+    pub withdrawals_total: u128,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,6 +228,11 @@ pub enum Event {
     Halt { market: u32 },
     Resume { market: u32 },
     BadDebt { account: u32, amount: i128 },
+    Launched,
+    ForcedServed { index: u64 },
+    ForcedRejected { index: u64, reason: Error },
+    ForcedPending { index: u64, reason: Error },
+    MarketSettled { market: u32, price: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -168,17 +274,24 @@ pub struct Engine {
     pub next_order_id: u64,
     pub withdrawals: Vec<WithdrawalRecord>,
     pub next_deposit: u64,
+    /// Forced requests received (vault index order); `forced_processed <= next_forced`.
     pub next_forced: u64,
+    pub forced_processed: u64,
+    pub forced_queue: VecDeque<ForcedReq>,
+    pub deposits_head: H256,
+    pub forced_head: H256,
     /// Rounding residuals (notional units) owed to the insurance fund (S-0.3, I-2).
     pub dust: i128,
     pub last_oracle_round: Option<u64>,
     pub total_deposits: i128,
     pub total_withdrawn: i128,
+    /// Launch gate latch (S-4.11): one-way.
+    pub launched: bool,
     events: Vec<Event>,
 }
 
 fn new_account(address: Addr) -> Account {
-    Account { address, balance: 0, positions: BTreeMap::new(), leverage: BTreeMap::new(), orders: BTreeSet::new(), agents: BTreeMap::new() }
+    Account { address, balance: 0, positions: BTreeMap::new(), leverage: BTreeMap::new(), orders: BTreeSet::new(), agents: BTreeMap::new(), volume: BTreeMap::new() }
 }
 
 fn abs64(x: i64) -> u64 {
@@ -210,7 +323,7 @@ impl Engine {
         for m in &g.g.markets {
             markets.insert(
                 m.market_id,
-                Market { p: m.clone(), book: Book::default(), triggers: BTreeSet::new(), oracle: OracleState::default(), mark: 0, last_trade: None, long_oi: 0, premium_sum: 0, premium_count: 0, cum_funding: 0 },
+                Market { p: m.clone(), book: Book::default(), triggers: BTreeSet::new(), oracle: OracleState::default(), mark: 0, last_trade: None, long_oi: 0, premium_samples: Vec::new(), cum_funding: 0 },
             );
         }
         let log_hash = keccak_parts(&[b"PosternPerps/genesis/v1", &g.g.encoding()]);
@@ -230,12 +343,19 @@ impl Engine {
             withdrawals: Vec::new(),
             next_deposit: 0,
             next_forced: 0,
+            forced_processed: 0,
+            forced_queue: VecDeque::new(),
+            deposits_head: [0u8; 32],
+            forced_head: [0u8; 32],
             dust: 0,
             last_oracle_round: None,
             total_deposits: 0,
             total_withdrawn: 0,
+            launched: false,
             events: Vec::new(),
         };
+        e.deposits_head = chain_genesis("PosternPerps.deposit.v1", e.g.g.chain_id, &e.g.verifying_contract);
+        e.forced_head = chain_genesis("PosternPerps.forced.v1", e.g.g.chain_id, &e.g.verifying_contract);
         for i in 0..FIRST_USER {
             let a = system_address(i);
             e.by_addr.insert(a, i);
@@ -310,24 +430,37 @@ impl Engine {
                 self.settle_funding(*id);
             }
         }
-        // 6. premium sample
+        // 5b. X3 settlement of markets halted longer than maxHaltMs
+        self.settle_due_markets();
+        // 7. deposits, forced (received, then the queue is served from its head), actions
+        let mut forced_done = false;
+        for i in rest {
+            if !forced_done && matches!(i, Input::Action(_)) {
+                self.process_forced();
+                forced_done = true;
+            }
+            let r = match i {
+                Input::Oracle(_) => unreachable!("checked: at most one oracle input, first"),
+                Input::Deposit { index, account, amount } => self.apply_deposit(*index, *account, *amount),
+                Input::Forced { index, account, kind, market_id, amount, deadline } => {
+                    self.receive_forced(ForcedReq { index: *index, account: *account, kind: *kind, market_id: *market_id, amount: *amount, deadline: *deadline })
+                }
+                Input::Action(sa) => self.apply_action(sa),
+            };
+            outcomes.push(r);
+        }
+        if !forced_done {
+            self.process_forced();
+        }
+        // 8. mark again; premium sample on the POST-action book (R395-16: quotes placed as a block's last actions
+        // and cancelled as the next block's first are now exposed to every action in between); 9. triggers and
+        // liquidations
+        self.update_marks();
         if round_accepted {
             for id in &ids {
                 self.sample_premium(*id);
             }
         }
-        // 7. deposits, forced, actions
-        for i in rest {
-            let r = match i {
-                Input::Oracle(_) => unreachable!("checked: at most one oracle input, first"),
-                Input::Deposit { index, account, amount } => self.apply_deposit(*index, *account, *amount),
-                Input::Forced { index, account, kind, deadline: _, arg } => self.apply_forced(*index, *account, *kind, *arg),
-                Input::Action(sa) => self.apply_action(sa),
-            };
-            outcomes.push(r);
-        }
-        // 8. mark again; 9. triggers and liquidations
-        self.update_marks();
         for _ in 0..MAX_SYSTEM_PASSES {
             let a = self.trigger_pass();
             self.update_marks();
@@ -439,25 +572,21 @@ impl Engine {
         let ia = self.impact_price(mid, true).map(|x| x as i128).unwrap_or(index);
         let num = (ib - index).max(0) - (index - ia).max(0);
         let prem = num * RATE_SCALE / index; // toward zero (S-7.1)
-        let m = self.markets.get_mut(&mid).unwrap();
-        m.premium_sum += prem;
-        m.premium_count += 1;
+        self.markets.get_mut(&mid).unwrap().premium_samples.push(prem);
     }
 
     fn settle_funding(&mut self, mid: u32) {
-        let (count, sum, interest, clampc, maxr, mark) = {
-            let m = &self.markets[&mid];
-            (m.premium_count, m.premium_sum, m.p.interest as i128, m.p.interest_clamp as i128, m.p.max_funding_rate as i128, m.mark as i128)
-        };
-        {
+        let (mut samples, interest, clampc, maxr, mark) = {
             let m = self.markets.get_mut(&mid).unwrap();
-            m.premium_sum = 0;
-            m.premium_count = 0;
-        }
-        if count == 0 || !self.active(mid) {
+            (std::mem::take(&mut m.premium_samples), m.p.interest as i128, m.p.funding_clamp as i128, m.p.max_funding_rate as i128, m.mark as i128)
+        };
+        if samples.is_empty() || !self.active(mid) {
             return;
         }
-        let p = sum / count; // toward zero
+        // R395-16: the MEDIAN of the interval's samples (lower middle), not the mean: a minority of manipulated
+        // samples cannot move it.
+        samples.sort_unstable();
+        let p = samples[(samples.len() - 1) / 2];
         let rate = (p + (interest - p).clamp(-clampc, clampc)).clamp(-maxr, maxr);
         if rate == 0 {
             return;
@@ -513,8 +642,13 @@ impl Engine {
 
     /// (IR, MR) of one market for account `ai` with position size `size` and, optionally, an extra resting order.
     fn market_req(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>) -> (i128, i128) {
+        self.market_req_at(ai, mid, size, extra, self.markets[&mid].mark)
+    }
+
+    /// As `market_req` with the position valued at `price` instead of the mark.
+    fn market_req_at(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>, price: u64) -> (i128, i128) {
         let m = &self.markets[&mid];
-        let mark = m.mark as i128;
+        let mark = price as i128;
         let lev = self.leverage_of(ai, mid) as i128;
         let lev_frac = div_ceil(PPM, lev);
         let (mut bids, mut asks, mut pb, mut pa) = (0i128, 0i128, 0i128, 0i128);
@@ -648,6 +782,18 @@ impl Engine {
         let notional = (q as i128) * (p as i128);
         let fa = div_ceil(notional * a_fee_ppm as i128, PPM * N_PER_USDC);
         let fb = div_ceil(notional * b_fee_ppm as i128, PPM * N_PER_USDC);
+        if kind == FillKind::Book || kind == FillKind::Liquidation {
+            let day = self.time / DAY_MS;
+            let v = (notional / N_PER_USDC) as u128;
+            for x in [a, b] {
+                let vol = &mut self.accounts[x as usize].volume;
+                *vol.entry(day).or_default() += v;
+                while vol.keys().next().is_some_and(|d| *d + 14 < day) {
+                    let k = *vol.keys().next().unwrap();
+                    vol.remove(&k);
+                }
+            }
+        }
         if fa > 0 {
             self.transfer(a, ACCT_PROTOCOL_FEE, fa);
         }
@@ -686,6 +832,11 @@ impl Engine {
         while remaining > 0 {
             let Some((price, maker_id)) = self.markets[&mid].book.best_maker(is_buy, limit) else { break };
             let maker = self.orders[&maker_id].clone();
+            if mode == Mode::Liquidation && maker.height == self.height {
+                // R395-13: the sequencer knows which accounts step 9 liquidates; an order it placed in this very
+                // block is not liquidity for them. The remainder goes to the backstop / ADL at the bound price.
+                break;
+            }
             if maker.account == ai {
                 self.remove_order(maker_id, Some(Error::SelfTrade));
                 continue;
@@ -716,8 +867,9 @@ impl Engine {
                 stop = Some(Error::OiCap);
                 break;
             }
-            let taker_fee = if mode == Mode::Liquidation { 0 } else { m.p.taker_fee_ppm };
-            let maker_fee = m.p.maker_fee_ppm;
+            let taker_fee = if mode == Mode::Liquidation { 0 } else { self.fee_ppm(ai, true) };
+            let maker_fee = self.fee_ppm(maker.account, false);
+            let m = &self.markets[&mid];
             let only_reduces = (ts > 0 && nts >= 0 && nts < ts) || (ts < 0 && nts <= 0 && nts > ts);
             if mode == Mode::Normal && !only_reduces {
                 // S-4.9: per-fill check of the taker's initial requirement after the fill.
@@ -762,56 +914,164 @@ impl Engine {
             return Err(Error::Overflow); // not consumed: fail closed (SPEC S-3.2.1)
         }
         self.accounts[ai as usize].balance = nb;
+        self.deposits_head = deposit_link(&self.deposits_head, index, &account, amount);
         self.next_deposit += 1;
         self.total_deposits += amount as i128;
         self.events.push(Event::Deposit { index, account, amount });
         Ok(())
     }
 
-    fn apply_forced(&mut self, index: u64, account: Addr, kind: u8, arg: u64) -> Result<(), Error> {
-        if index != self.next_forced {
-            return Err(Error::ForcedOrder);
+    fn receive_forced(&mut self, r: ForcedReq) -> Result<(), Error> {
+        if r.index != self.next_forced {
+            return Err(Error::ForcedOrder); // not received: the vault index is the single order
         }
-        // Consumed whatever the outcome (SPEC section 14).
         self.next_forced += 1;
-        let Some(&ai) = self.by_addr.get(&account) else { return Err(Error::UnknownAccount) };
-        if ai < FIRST_USER {
-            return Err(Error::UnknownAccount);
+        self.forced_queue.push_back(r);
+        Ok(())
+    }
+
+    /// SPEC section 14 (R395-5): serve the queue from its head, in index order, every block. A request leaves the
+    /// queue only when served or rejected for a user-caused reason; a halt-caused failure leaves it at the head
+    /// (and everything behind it), so the vault's deadline (L2 block.timestamp) fires escape if it lasts.
+    fn process_forced(&mut self) {
+        while let Some(r) = self.forced_queue.front().cloned() {
+            match self.try_forced(&r) {
+                ForcedResult::Pending(e) => {
+                    self.events.push(Event::ForcedPending { index: r.index, reason: e });
+                    break;
+                }
+                res => {
+                    match res {
+                        ForcedResult::Served => self.events.push(Event::ForcedServed { index: r.index }),
+                        ForcedResult::Rejected(e) => self.events.push(Event::ForcedRejected { index: r.index, reason: e }),
+                        ForcedResult::Pending(_) => unreachable!(),
+                    }
+                    self.forced_queue.pop_front();
+                    self.forced_head = forced_link(&self.forced_head, &r);
+                    self.forced_processed += 1;
+                }
+            }
         }
-        match kind {
+    }
+
+    fn try_forced(&mut self, r: &ForcedReq) -> ForcedResult {
+        let ai = match self.by_addr.get(&r.account) {
+            Some(&ai) if ai >= FIRST_USER => ai,
+            // the vault lets only depositors request; an uncredited deposit is the sequencer's delay: wait
+            Some(_) => return ForcedResult::Rejected(Error::UnknownAccount),
+            None => return ForcedResult::Pending(Error::UnknownAccount),
+        };
+        match r.kind {
             FORCED_CANCEL_ALL => {
                 self.cancel_all(ai, 0);
-                Ok(())
+                ForcedResult::Served
             }
-            FORCED_CLOSE_ALL => {
-                self.cancel_all(ai, 0);
-                let mids: Vec<u32> = self.accounts[ai as usize].positions.keys().copied().collect();
-                let mut skipped = false;
+            FORCED_CLOSE => {
+                if r.market_id != 0 && !self.markets.contains_key(&r.market_id) {
+                    return ForcedResult::Rejected(Error::UnknownMarket);
+                }
+                self.cancel_all(ai, r.market_id);
+                let mids: Vec<u32> = self.accounts[ai as usize].positions.keys().copied().filter(|m| r.market_id == 0 || *m == r.market_id).collect();
+                let mut pending = None;
                 for mid in mids {
-                    if !self.active(mid) {
-                        skipped = true;
-                        continue;
-                    }
-                    let s = self.pos_size(ai, mid);
-                    let is_buy = s < 0;
-                    let m = &self.markets[&mid];
-                    let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
-                    let limit = if is_buy { (m.mark + band).min(MAX_PRICE) } else { m.mark.saturating_sub(band).max(1) };
-                    let oid = self.next_order_id;
-                    self.next_order_id += 1;
-                    let (filled, _) = self.take(ai, mid, is_buy, limit, abs64(s), true, Mode::Forced, oid);
-                    if filled < abs64(s) {
-                        self.events.push(Event::RemainderCancelled { order: oid, size: abs64(s) - filled, reason: Error::NoLiquidity });
+                    if let Err(e) = self.forced_close(ai, mid) {
+                        pending = Some(e);
                     }
                 }
-                if skipped {
-                    Err(Error::PositionInHaltedMarket)
-                } else {
-                    Ok(())
+                match pending {
+                    Some(e) => ForcedResult::Pending(e),
+                    None => ForcedResult::Served,
                 }
             }
-            FORCED_WITHDRAW => self.withdraw(ai, arg, account),
-            _ => Err(Error::Malformed),
+            FORCED_WITHDRAW => {
+                let free = self.free_collateral(ai);
+                let halted = self.halted_involved(ai);
+                let fee = self.g.g.withdrawal_fee as i128;
+                let want = if r.amount == 0 { free } else { r.amount as i128 };
+                if want <= fee || want > free {
+                    let e = if want <= fee { Error::WithdrawTooSmall } else { Error::InsufficientMargin };
+                    // only the halt can make a request that is servable on live prices unservable now
+                    return if halted { ForcedResult::Pending(Error::PositionInHaltedMarket) } else { ForcedResult::Rejected(e) };
+                }
+                match self.withdraw(ai, want as u64, r.account) {
+                    Ok(()) => ForcedResult::Served,
+                    Err(e) => ForcedResult::Rejected(e),
+                }
+            }
+            _ => ForcedResult::Rejected(Error::Malformed),
+        }
+    }
+
+    /// Close one position for a forced request. Active market: reduce-only through the book within the slippage
+    /// bound, then the backstop (within its limit), then ADL, both at the bound price with the taker fee, so a
+    /// forced close is always served and never cheaper than the book. Halted market: book only; the rest waits.
+    fn forced_close(&mut self, ai: u32, mid: u32) -> Result<(), Error> {
+        let s = self.pos_size(ai, mid);
+        if s == 0 {
+            return Ok(());
+        }
+        let is_buy = s < 0;
+        if !self.active(mid) {
+            // 394 README 6a: in a halt the book is used only inside the exit band, the rest is closed against the
+            // opposite positions (ADL ranking) at the settle price with the taker fee: never refused for a halt.
+            let Some(x) = self.exit_price(mid) else { return Err(Error::MarketHalted) };
+            let limit = if is_buy { x.high.min(MAX_PRICE) } else { x.low };
+            let oid = self.next_order_id;
+            self.next_order_id += 1;
+            self.take(ai, mid, is_buy, limit, abs64(s), true, Mode::Forced, oid);
+            let r = abs64(self.pos_size(ai, mid));
+            if r > 0 {
+                let fee = self.fee_ppm(ai, true);
+                self.adl(ai, mid, x.settle.clamp(x.low, x.high), r, is_buy, fee);
+            }
+            return Ok(());
+        }
+        let m = &self.markets[&mid];
+        let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
+        let limit = if is_buy { (m.mark + band).min(MAX_PRICE) } else { m.mark.saturating_sub(band).max(1) };
+        if m.mark > 0 {
+            let oid = self.next_order_id;
+            self.next_order_id += 1;
+            self.take(ai, mid, is_buy, limit, abs64(s), true, Mode::Forced, oid);
+        }
+        let r = abs64(self.pos_size(ai, mid));
+        if r == 0 {
+            return Ok(());
+        }
+        let fee = self.fee_ppm(ai, true);
+        let q = self.backstop_room(mid, is_buy, r, self.markets[&mid].mark, limit);
+        if q > 0 {
+            self.exec_fill(mid, FillKind::Backstop, ai, ACCT_BACKSTOP, is_buy, limit, q, fee, 0, 0, 0);
+        }
+        let r = abs64(self.pos_size(ai, mid));
+        if r > 0 {
+            self.adl(ai, mid, limit, r, is_buy, fee);
+        }
+        Ok(())
+    }
+
+    /// Size the backstop may take from a closing account (direction `closer_buys`) at `price`: within its
+    /// position limit and only while its equity after covers its maintenance requirement (SPEC 6.3 step 3).
+    fn backstop_room(&self, mid: u32, closer_buys: bool, r: u64, mark: u64, price: u64) -> u64 {
+        if self.accounts[ACCT_BACKSTOP as usize].balance <= 0 {
+            return 0;
+        }
+        let bs = self.pos_size(ACCT_BACKSTOP, mid);
+        let limit = ((self.markets[&mid].p.oi_cap as u128) * (self.g.g.backstop_oi_ppm as u128) / 1_000_000) as i128;
+        let dir: i128 = if closer_buys { -1 } else { 1 };
+        let same = dir * bs as i128;
+        let room = (limit - same.max(0)).max(0) + (-same).max(0);
+        let q = (r as i128).min(room) as u64;
+        if q == 0 {
+            return 0;
+        }
+        let d = (dir * q as i128) as i64;
+        let e_after = self.equity(ACCT_BACKSTOP) + (d as i128) * (mark as i128 - price as i128);
+        let (_, mr_after) = self.account_req(ACCT_BACKSTOP, Some((mid, bs + d, None)));
+        if e_after >= mr_after {
+            q
+        } else {
+            0
         }
     }
 
@@ -957,16 +1217,9 @@ impl Engine {
         if amount <= self.g.g.withdrawal_fee {
             return Err(Error::WithdrawTooSmall);
         }
-        let mids: Vec<u32> = self.accounts[ai as usize].positions.keys().copied().collect();
-        if mids.iter().any(|m| !self.active(*m)) {
-            return Err(Error::PositionInHaltedMarket);
-        }
+        // R395-5 (c): a halt never blocks free collateral (S-9.2: free collateral with the halt rule)
         let a = amount as i128;
-        if self.accounts[ai as usize].balance < a {
-            return Err(Error::InsufficientMargin);
-        }
-        let (ir, _) = self.account_req(ai, None);
-        if self.equity(ai) - a * N_PER_USDC < ir {
+        if a > self.free_collateral(ai) {
             return Err(Error::InsufficientMargin);
         }
         let fee = self.g.g.withdrawal_fee as i128;
@@ -974,6 +1227,88 @@ impl Engine {
         self.accounts[ACCT_PROTOCOL_FEE as usize].balance += fee;
         self.record_withdrawal(ai, recipient, (a - fee) as u64);
         Ok(())
+    }
+
+    /// S-9.2 (0.1.3): positions in a halted market count with their losses at the last mark but not their gains,
+    /// and their initial requirement twice (a buffer against the move the halted oracle does not show).
+    pub fn free_collateral(&self, ai: u32) -> i128 {
+        let a = &self.accounts[ai as usize];
+        let mut e = a.balance * N_PER_USDC;
+        let mut ir = 0i128;
+        let mut mids: BTreeSet<u32> = a.positions.keys().copied().collect();
+        for oid in &a.orders {
+            mids.insert(self.orders[oid].market);
+        }
+        for mid in mids {
+            let size = a.positions.get(&mid).map(|p| p.size).unwrap_or(0);
+            // halted: the side of 394's exit band worse for the holder (long at low, short at high), SPEC S-9.2
+            let price = if self.active(mid) {
+                self.markets[&mid].mark
+            } else {
+                match self.exit_price(mid) {
+                    Some(x) if size > 0 => x.low,
+                    Some(x) if size < 0 => x.high,
+                    _ => self.markets[&mid].mark,
+                }
+            };
+            let u = a.positions.get(&mid).map(|p| (p.size as i128) * (price as i128) - p.open_notional).unwrap_or(0);
+            let (i, _) = self.market_req_at(ai, mid, size, None, price);
+            e += u;
+            ir += i;
+        }
+        div_floor(e - ir, N_PER_USDC).min(a.balance).max(0)
+    }
+
+    pub fn exit_price(&self, mid: u32) -> Option<crate::oracle::ExitPrice> {
+        let m = &self.markets[&mid];
+        m.oracle.exit_price(&m.p.oracle, self.time)
+    }
+
+    /// X3: a halt older than maxHaltMs settles every position of the market at the settle price (all orders and
+    /// triggers of the market cancelled). Pairwise exact: the sizes sum to zero (I-1), so I-2 holds.
+    fn settle_due_markets(&mut self) {
+        let ids: Vec<u32> = self.markets.keys().copied().collect();
+        for mid in ids {
+            if self.active(mid) {
+                continue;
+            }
+            let Some(x) = self.exit_price(mid) else { continue };
+            if !x.settle_due {
+                continue;
+            }
+            let has = self.accounts.iter().any(|a| a.positions.contains_key(&mid));
+            let oids: Vec<u64> = self.orders.iter().filter(|(_, o)| o.market == mid).map(|(k, _)| *k).collect();
+            for oid in oids {
+                self.remove_order(oid, Some(Error::MarketHalted));
+            }
+            if !has {
+                continue;
+            }
+            for ai in 0..self.accounts.len() as u32 {
+                let s = self.pos_size(ai, mid);
+                if s != 0 {
+                    let r = self.trade_position(ai, mid, -s, x.settle);
+                    self.credit_notional(ai, r);
+                }
+            }
+            self.markets.get_mut(&mid).unwrap().long_oi = 0;
+            self.events.push(Event::MarketSettled { market: mid, price: x.settle });
+        }
+    }
+
+    pub fn halted_involved(&self, ai: u32) -> bool {
+        self.accounts[ai as usize].positions.keys().any(|m| !self.active(*m))
+    }
+
+    pub fn checkpoint_fields(&self) -> CheckpointFields {
+        CheckpointFields {
+            deposits_credited: self.next_deposit,
+            deposits_head: self.deposits_head,
+            forced_processed: self.forced_processed,
+            forced_head: self.forced_head,
+            withdrawal_count: self.withdrawals.len() as u64,
+            withdrawals_total: self.total_withdrawn as u128,
+        }
     }
 
     fn record_withdrawal(&mut self, ai: u32, recipient: Addr, net: u64) {
@@ -1021,8 +1356,35 @@ impl Engine {
         Ok(())
     }
 
+    /// S-9.4: tier from the 14 complete UTC days before today (known for the whole day, not movable mid-day).
+    pub fn fee_ppm(&self, ai: u32, taker: bool) -> u32 {
+        let today = self.time / DAY_MS;
+        let vol: u128 = self.accounts[ai as usize].volume.range(today.saturating_sub(14)..today).map(|(_, v)| *v).sum();
+        let t = self.g.g.fee_tiers.iter().rev().find(|t| vol >= t.min_volume_14d as u128).unwrap_or(&self.g.g.fee_tiers[0]);
+        if taker {
+            t.taker_fee_ppm
+        } else {
+            t.maker_fee_ppm
+        }
+    }
+
+    /// S-4.11: one-way latch, opened once the insurance fund and the backstop hold their genesis minimums.
+    fn launch_check(&mut self) -> bool {
+        if !self.launched
+            && self.accounts[ACCT_INSURANCE as usize].balance >= self.g.g.launch_insurance_min as i128
+            && self.accounts[ACCT_BACKSTOP as usize].balance >= self.g.g.launch_backstop_min as i128
+        {
+            self.launched = true;
+            self.events.push(Event::Launched);
+        }
+        self.launched
+    }
+
     fn place(&mut self, ai: u32, p: &PlaceOrder) -> Result<(), Error> {
         self.check_order_fields(p)?;
+        if !self.launch_check() {
+            return Err(Error::NotLaunched);
+        }
         if !self.active(p.market_id) {
             return Err(Error::MarketHalted);
         }
@@ -1038,7 +1400,7 @@ impl Engine {
         if is_trigger {
             let id = self.next_order_id;
             self.next_order_id += 1;
-            self.orders.insert(id, Order { id, account: ai, market: p.market_id, is_buy: p.is_buy, price: p.price, remaining: p.size, reduce_only: p.reduce_only, client_order_id: p.client_order_id, trigger: Some((p.order_type, p.trigger_price)) });
+            self.orders.insert(id, Order { id, account: ai, market: p.market_id, is_buy: p.is_buy, price: p.price, remaining: p.size, reduce_only: p.reduce_only, client_order_id: p.client_order_id, trigger: Some((p.order_type, p.trigger_price)), height: self.height });
             self.markets.get_mut(&p.market_id).unwrap().triggers.insert(id);
             self.accounts[ai as usize].orders.insert(id);
             self.events.push(Event::TriggerStored { order: id });
@@ -1079,7 +1441,7 @@ impl Engine {
         let rem = size - filled;
         if rem > 0 {
             if tif != TIF_IOC && stop.is_none() {
-                self.orders.insert(id, Order { id, account: ai, market: mid, is_buy, price, remaining: rem, reduce_only, client_order_id: coid, trigger: None });
+                self.orders.insert(id, Order { id, account: ai, market: mid, is_buy, price, remaining: rem, reduce_only, client_order_id: coid, trigger: None, height: self.height });
                 self.markets.get_mut(&mid).unwrap().book.insert(is_buy, price, id);
                 self.accounts[ai as usize].orders.insert(id);
                 self.events.push(Event::Rested { order: id });
@@ -1163,13 +1525,14 @@ impl Engine {
         let e = self.equity(ai);
         if e < 0 {
             let need = div_ceil(-e, N_PER_USDC);
+            // R395-31: insurance first, as far as it goes; only what it cannot cover is deleveraged
             let ins = self.accounts[ACCT_INSURANCE as usize].balance.max(0);
-            if ins >= need {
-                self.transfer(ACCT_INSURANCE, ai, need);
-                self.events.push(Event::InsuranceCover { account: ai, amount: need });
-            } else {
-                gap = true;
+            let pay = need.min(ins);
+            if pay > 0 {
+                self.transfer(ACCT_INSURANCE, ai, pay);
+                self.events.push(Event::InsuranceCover { account: ai, amount: pay });
             }
+            gap = pay < need;
         }
         let mids: Vec<u32> = self.accounts[ai as usize].positions.keys().copied().collect();
         for mid in mids {
@@ -1180,26 +1543,27 @@ impl Engine {
             let mark = self.markets[&mid].mark;
             let bp = self.bankruptcy_price(ai, mid);
             let is_buy = s0 < 0;
+            // R395-13: liquidation price bound = mark -/+ half the tier-0 maintenance fraction, never past bankruptcy;
+            // the book, the backstop and ADL all fill at or inside it, so a liquidated account loses at most
+            // mmf0/2 of the notional beyond mark plus the liquidation fee (the rest of its equity stays its own).
+            let half_mmf = self.markets[&mid].p.tiers[0].mmf_ppm as u128 / 2;
+            let off = ((mark as u128) * half_mmf / 1_000_000) as u64;
+            let lp = if is_buy { bp.min(mark.saturating_add(off).min(MAX_PRICE)) } else { bp.max(mark.saturating_sub(off).max(1)) };
             if !gap {
                 let oid = self.next_order_id;
                 self.next_order_id += 1;
-                self.take(ai, mid, is_buy, bp, abs64(s0), true, Mode::Liquidation, oid);
+                self.take(ai, mid, is_buy, lp, abs64(s0), true, Mode::Liquidation, oid);
             }
             let r = abs64(self.pos_size(ai, mid));
             if r > 0 && !gap {
-                // backstop takes the remainder at bp if it stays above its own maintenance requirement
-                let bs = self.pos_size(ACCT_BACKSTOP, mid);
-                let d: i64 = if is_buy { -(r as i64) } else { r as i64 }; // backstop's direction
-                let nbs = bs + d;
-                let e_after = self.equity(ACCT_BACKSTOP) + (d as i128) * (mark as i128 - bp as i128);
-                let (_, mr_after) = self.account_req(ACCT_BACKSTOP, Some((mid, nbs, None)));
-                if e_after >= mr_after && self.accounts[ACCT_BACKSTOP as usize].balance > 0 {
-                    self.exec_fill(mid, FillKind::Backstop, ai, ACCT_BACKSTOP, is_buy, bp, r, 0, 0, 0, 0);
+                let q = self.backstop_room(mid, is_buy, r, mark, lp);
+                if q > 0 {
+                    self.exec_fill(mid, FillKind::Backstop, ai, ACCT_BACKSTOP, is_buy, lp, q, 0, 0, 0, 0);
                 }
             }
             let r = abs64(self.pos_size(ai, mid));
             if r > 0 {
-                self.adl(ai, mid, bp, r, is_buy);
+                self.adl(ai, mid, if gap { bp } else { lp }, r, is_buy, 0);
             }
             // liquidation fee to the insurance fund, never below zero equity
             let notional = (abs64(s0) as i128) * (mark as i128);
@@ -1214,7 +1578,7 @@ impl Engine {
     }
 
     /// SPEC 6.4: opposite positions ranked by U/E (profit ratio times leverage), ties by account index.
-    fn adl(&mut self, ai: u32, mid: u32, bp: u64, mut r: u64, liq_is_buy: bool) {
+    fn adl(&mut self, ai: u32, mid: u32, bp: u64, mut r: u64, liq_is_buy: bool, closer_fee_ppm: u32) {
         let mark = self.markets[&mid].mark as i128;
         let mut cands: Vec<(i128, u32)> = Vec::new();
         for (bi, a) in self.accounts.iter().enumerate() {
@@ -1227,7 +1591,9 @@ impl Engine {
                 if (liq_is_buy && p.size > 0) || (!liq_is_buy && p.size < 0) {
                     let u = (p.size as i128) * mark - p.open_notional;
                     let e = self.equity(bi);
-                    let score = if e > 0 { u.saturating_mul(PPM) / e } else { i128::MIN };
+                    // R395-14: the backstop (no key, cannot trade) is the FIRST counterparty of every ADL on the side
+                    // opposite to its position: the only way its book is reduced in 0.1.5
+                    let score = if bi == ACCT_BACKSTOP { i128::MAX } else if e > 0 { u.saturating_mul(PPM) / e } else { i128::MIN };
                     cands.push((score, bi));
                 }
             }
@@ -1241,7 +1607,7 @@ impl Engine {
             if q == 0 {
                 continue;
             }
-            self.exec_fill(mid, FillKind::Adl, ai, bi, liq_is_buy, bp, q, 0, 0, 0, 0);
+            self.exec_fill(mid, FillKind::Adl, ai, bi, liq_is_buy, bp, q, closer_fee_ppm, 0, 0, 0);
             r -= q;
         }
         debug_assert_eq!(r, 0, "I-1 guarantees enough opposite size");
@@ -1286,16 +1652,36 @@ impl Engine {
 
     // ------------------------------------------------------------------ commitments (SPEC 11)
 
-    pub fn escape_value(&self, ai: u32) -> u64 {
-        let e = self.equity(ai);
-        if e <= 0 {
-            0
-        } else {
-            (e / N_PER_USDC).min(u64::MAX as i128) as u64
+    /// SPEC 11 (0.1.5, R395-23): what each account is owed if every position closes at mark, floored at 0, with the
+    /// total negative equity of all other accounts charged to `INSURANCE` first (the order of 6.3), so that the sum
+    /// never exceeds custody while the insurance fund covers the deficits; only the remainder is the vault's
+    /// pro-rata haircut.
+    pub fn escape_values(&self) -> Vec<u64> {
+        let mut v = Vec::with_capacity(self.accounts.len());
+        let mut deficit: i128 = 0;
+        for ai in 0..self.accounts.len() as u32 {
+            let e = self.equity(ai);
+            if e <= 0 {
+                deficit += div_ceil(-e, N_PER_USDC);
+                v.push(0);
+            } else {
+                v.push((e / N_PER_USDC).min(u64::MAX as i128) as u64);
+            }
         }
+        let ins = ACCT_INSURANCE as usize;
+        v[ins] = (v[ins] as i128 - deficit).max(0) as u64;
+        v
+    }
+
+    pub fn escape_value(&self, ai: u32) -> u64 {
+        self.escape_values()[ai as usize]
     }
 
     pub fn account_leaf_data(&self, ai: u32) -> Vec<u8> {
+        self.account_leaf_data_with(ai, self.escape_value(ai))
+    }
+
+    fn account_leaf_data_with(&self, ai: u32, escape: u64) -> Vec<u8> {
         let a = &self.accounts[ai as usize];
         let mut ph = Vec::new();
         ph.extend_from_slice(&(a.positions.len() as u32).to_be_bytes());
@@ -1311,7 +1697,7 @@ impl Engine {
         d.extend_from_slice(&a.address);
         d.extend_from_slice(&ai.to_be_bytes());
         d.extend_from_slice(&a.balance.to_be_bytes());
-        d.extend_from_slice(&self.escape_value(ai).to_be_bytes());
+        d.extend_from_slice(&escape.to_be_bytes());
         d.extend_from_slice(&keccak(&ph));
         d
     }
@@ -1345,7 +1731,8 @@ impl Engine {
     }
 
     pub fn account_leaves(&self) -> Vec<H256> {
-        (0..self.accounts.len() as u32).map(|i| merkle::leaf_hash(&self.account_leaf_data(i))).collect()
+        let esc = self.escape_values();
+        (0..self.accounts.len() as u32).map(|i| merkle::leaf_hash(&self.account_leaf_data_with(i, esc[i as usize]))).collect()
     }
 
     pub fn withdrawal_leaves(&self) -> Vec<H256> {
@@ -1377,6 +1764,7 @@ impl Engine {
             let (ty, tp) = o.trigger.unwrap_or((255, 0));
             b.push(ty);
             b.extend_from_slice(&tp.to_be_bytes());
+            b.extend_from_slice(&o.height.to_be_bytes());
         }
         for (mid, m) in &self.markets {
             b.extend_from_slice(&mid.to_be_bytes());
@@ -1386,6 +1774,8 @@ impl Engine {
                 }
             }
             b.extend_from_slice(&m.oracle.index_time.to_be_bytes());
+            b.extend_from_slice(&m.oracle.halt_low.to_be_bytes());
+            b.extend_from_slice(&m.oracle.halt_high.to_be_bytes());
             match m.oracle.run {
                 Some((l, c, t)) => {
                     b.push(1);
@@ -1403,8 +1793,10 @@ impl Engine {
                 }
                 None => b.push(0),
             }
-            b.extend_from_slice(&m.premium_sum.to_be_bytes());
-            b.extend_from_slice(&m.premium_count.to_be_bytes());
+            b.extend_from_slice(&(m.premium_samples.len() as u32).to_be_bytes());
+            for x in &m.premium_samples {
+                b.extend_from_slice(&x.to_be_bytes());
+            }
         }
         for (i, a) in self.accounts.iter().enumerate() {
             b.extend_from_slice(&(i as u32).to_be_bytes());
@@ -1420,6 +1812,23 @@ impl Engine {
                 b.extend_from_slice(&x.expires_at.to_be_bytes());
             }
             b.push(0xff);
+            for (d, v) in &a.volume {
+                b.extend_from_slice(&d.to_be_bytes());
+                b.extend_from_slice(&v.to_be_bytes());
+            }
+            b.push(0xfd);
+        }
+        b.push(self.launched as u8);
+        b.extend_from_slice(&self.next_forced.to_be_bytes());
+        b.extend_from_slice(&self.deposits_head);
+        b.extend_from_slice(&self.forced_head);
+        for r in &self.forced_queue {
+            b.extend_from_slice(&r.index.to_be_bytes());
+            b.extend_from_slice(&r.account);
+            b.push(r.kind);
+            b.extend_from_slice(&r.market_id.to_be_bytes());
+            b.extend_from_slice(&r.amount.to_be_bytes());
+            b.extend_from_slice(&r.deadline.to_be_bytes());
         }
         for (s, set) in &self.nonces {
             b.extend_from_slice(s);
@@ -1439,30 +1848,23 @@ impl Engine {
     }
 
     pub fn system_hash(&self) -> H256 {
-        let total_escape: u128 = (0..self.accounts.len() as u32).map(|i| self.escape_value(i) as u128).sum();
-        keccak_parts(&[
-            b"PPv1sys",
-            &self.next_deposit.to_be_bytes(),
-            &self.next_forced.to_be_bytes(),
-            &self.next_order_id.to_be_bytes(),
-            &total_escape.to_be_bytes(),
-            &self.dust.to_be_bytes(),
-            &self.aux_hash(),
-        ])
+        let total_escape: u128 = self.escape_values().iter().map(|x| *x as u128).sum();
+        system_hash_of(&SystemFields {
+            next_deposit_index: self.next_deposit,
+            next_forced_index: self.forced_processed,
+            next_order_id: self.next_order_id,
+            total_escape,
+            dust: self.dust as u128,
+            aux_hash: self.aux_hash(),
+            withdrawal_count: self.withdrawals.len() as u64,
+            withdrawals_total: u64::try_from(self.total_withdrawn).expect("withdrawn total fits u64 (custody bound)"),
+        })
     }
 
     pub fn state_root(&self) -> H256 {
         let ar = merkle::root(&self.account_leaves(), ACCOUNT_DEPTH);
         let wr = merkle::root(&self.withdrawal_leaves(), WITHDRAWAL_DEPTH);
-        keccak_parts(&[
-            b"PosternPerps/state/v1",
-            &self.height.to_be_bytes(),
-            &self.time.to_be_bytes(),
-            &ar,
-            &self.markets_root(),
-            &wr,
-            &self.system_hash(),
-        ])
+        state_root_of(self.height, self.time, &ar, &self.markets_root(), &wr, &self.system_hash())
     }
 
     pub fn account_proof(&self, addr: &Addr) -> Option<(Vec<u8>, u32, Vec<H256>)> {

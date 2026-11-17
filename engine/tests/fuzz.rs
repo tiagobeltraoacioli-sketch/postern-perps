@@ -30,7 +30,7 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (0..TRADERS, 0usize..50).prop_map(|(who, pick)| Op::Cancel { who, pick }),
         1 => (0..TRADERS).prop_map(|who| Op::CancelAll { who }),
         1 => (0..TRADERS, 1u64..5_000_000_000).prop_map(|(who, amount)| Op::Withdraw { who, amount }),
-        1 => (0..TRADERS, 1u64..20_000_000_000).prop_map(|(who, amount)| Op::Deposit { who, amount }),
+        1 => (0..TRADERS, 1u64..2_000_000_000).prop_map(|(who, amount)| Op::Deposit { who, amount }),
         1 => (0..TRADERS, 1u32..=2, 1u32..=60).prop_map(|(who, mkt, lev)| Op::Leverage { who, mkt, lev }),
         3 => (prop_oneof![500u64..3000, 3000u64..20_000, Just(3_600_000u64)], prop::bool::weighted(0.85), -450i64..450)
             .prop_map(|(dt, oracle, mv_bps)| Op::Block { dt, oracle, mv_bps }),
@@ -50,6 +50,7 @@ struct Sim {
     nonce: u64,
     log: Vec<Block>,
     roots: Vec<[u8; 32]>,
+    stats: std::collections::BTreeMap<String, u64>,
 }
 
 fn round_tick(p: u64, tick: u64) -> u64 {
@@ -65,7 +66,7 @@ impl Sim {
         m2.max_size = 100_000_000_000;
         m2.oi_cap = 2_000_000_000_000;
         let e = Engine::new(genesis(5, vec![market(1, "BTC-USD"), m2]));
-        Sim { e, ok: oracle_keys(5), keys: (0..TRADERS as u32).map(|i| key(100 + i)).collect(), t: T0, h: 0, dep: 0, px: [0, 6_725_000_000_000, 348_000_000_000], pending: vec![], deposits: vec![], nonce: 0, log: vec![], roots: vec![] }
+        Sim { e, ok: oracle_keys(5), keys: (0..TRADERS as u32).map(|i| key(100 + i)).collect(), t: T0, h: 0, dep: 0, px: [0, 6_725_000_000_000, 348_000_000_000], pending: vec![], deposits: vec![], nonce: 0, log: vec![], roots: vec![], stats: Default::default() }
     }
     fn next_nonce(&mut self) -> u64 {
         self.nonce += 1;
@@ -85,13 +86,24 @@ impl Sim {
         if let Err(msg) = invariants::check(&self.e) {
             panic!("invariant broken at height {}: {msg}", self.h);
         }
+        for ev in &out.events {
+            let name = match ev {
+                Event::Fill { kind, .. } => format!("fill:{kind:?}"),
+                other => format!("{other:?}").split([' ', '{', '(']).next().unwrap().to_string(),
+            };
+            *self.stats.entry(name).or_default() += 1;
+        }
+        for o in &out.outcomes {
+            let k = match o { Ok(()) => "ok".to_string(), Err(e) => format!("err:{}", e.name()) };
+            *self.stats.entry(k).or_default() += 1;
+        }
         self.roots.push(out.state_root);
         self.log.push(b);
     }
     fn run(&mut self, ops: &[Op]) {
         for who in 0..TRADERS {
             let a = addr(&self.keys[who]);
-            self.deposits.push(Input::Deposit { index: self.dep, account: a, amount: 50_000_000_000 });
+            self.deposits.push(Input::Deposit { index: self.dep, account: a, amount: if who < 2 { 50_000_000_000 } else { 3_000_000_000 } });
             self.dep += 1;
         }
         self.flush(1000, true);
@@ -102,6 +114,11 @@ impl Sim {
                         let tick = self.e.markets[&(m as u32)].p.tick;
                         let p = (self.px[m] as i128 * (10_000 + mv_bps as i128) / 10_000) as u64;
                         self.px[m] = round_tick(p, tick);
+                    }
+                    if dt > 60_000 {
+                        // signed actions carry a nonce near the current time: include them first, then let the
+                        // long gap pass (an hour: funding boundary) in an empty block
+                        self.flush(1000, oracle);
                     }
                     self.flush(dt, oracle);
                 }
@@ -195,8 +212,38 @@ fn crash_and_recover_sequence() {
         if i % 10 == 9 {
             ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: if i < 150 { -440 } else { 440 } });
         }
+        if i % 100 == 50 {
+            ops.push(Op::Block { dt: 3_600_000, oracle: true, mv_bps: 0 });
+        }
     }
     let mut sim = Sim::new();
     sim.run(&ops);
     replay_matches(&sim);
+    eprintln!("crash_and_recover stats: {:?}", sim.stats);
+    for k in ["fill:Book", "Liquidated", "Funding", "Rested", "ok"] {
+        assert!(sim.stats.get(k).copied().unwrap_or(0) > 0, "path {k} not exercised: {:?}", sim.stats);
+    }
+    assert!(sim.stats.get("fill:Adl").copied().unwrap_or(0) + sim.stats.get("fill:Liquidation").copied().unwrap_or(0) > 0, "no liquidation fill: {:?}", sim.stats);
+}
+
+/// Aggregate path coverage over many random runs (so a fuzzer that never reaches a path is visible).
+#[test]
+fn random_runs_reach_every_path() {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+    let mut runner = TestRunner::deterministic();
+    let strat = prop::collection::vec(op(), 150..250);
+    let mut total: std::collections::BTreeMap<String, u64> = Default::default();
+    for _ in 0..24 {
+        let ops = strat.new_tree(&mut runner).unwrap().current();
+        let mut sim = Sim::new();
+        sim.run(&ops);
+        for (k, v) in sim.stats {
+            *total.entry(k).or_default() += v;
+        }
+    }
+    eprintln!("random coverage: {total:?}");
+    for k in ["fill:Book", "Rested", "Triggered", "TriggerStored", "Cancelled", "Withdrawal", "Halt", "Resume", "Funding", "Liquidated", "err:INSUFFICIENT_MARGIN", "err:REDUCE_ONLY", "err:WOULD_CROSS", "err:MARKET_HALTED"] {
+        assert!(total.get(k).copied().unwrap_or(0) > 0, "random fuzzer never reached {k}: {total:?}");
+    }
 }

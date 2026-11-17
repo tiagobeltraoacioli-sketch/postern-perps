@@ -29,12 +29,24 @@ pub struct OracleState {
     pub status: Status,
     /// confirmation run (last, count, lastTimeMs)
     pub run: Option<(u64, u32, u64)>,
+    /// X2: lowest / highest committee price since the halt (0 = none); only widen, cleared on resume.
+    pub halt_low: u64,
+    pub halt_high: u64,
 }
 
 impl Default for OracleState {
     fn default() -> Self {
-        OracleState { index: 0, index_time: 0, status: Status::Halted(HaltReason::Stale), run: None }
+        OracleState { index: 0, index_time: 0, status: Status::Halted(HaltReason::Stale), run: None, halt_low: 0, halt_high: 0 }
     }
+}
+
+/// 394's `exit_price` (README 6a, X0 to X3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExitPrice {
+    pub low: u64,
+    pub high: u64,
+    pub settle: u64,
+    pub settle_due: bool,
 }
 
 /// `|a - b| * 10000 <= bps * b`, in u128.
@@ -44,6 +56,26 @@ pub fn within_bps(a: u64, b: u64, bps: u32) -> bool {
 }
 
 impl OracleState {
+    pub fn exit_price(&self, p: &OracleParams, t: u64) -> Option<ExitPrice> {
+        if self.index == 0 {
+            return None;
+        }
+        let age = t.saturating_sub(self.index_time);
+        if self.status == Status::Active {
+            return Some(ExitPrice { low: self.index, high: self.index, settle: self.index, settle_due: false });
+        }
+        let h = (p.exit_haircut_bps as u64).saturating_add((p.exit_haircut_per_min_bps as u64).saturating_mul(age / 60_000)).min(p.exit_max_haircut_bps as u64);
+        let (lo, hi) = if self.halt_low == 0 { (self.index, self.index) } else { (self.index.min(self.halt_low), self.index.max(self.halt_high)) };
+        let low = (lo as u128 * (10_000 - h as u128) / 10_000) as u64;
+        let high = (hi as u128 * (10_000 + h as u128)).div_ceil(10_000);
+        Some(ExitPrice {
+            low: low.max(1),
+            high: u64::try_from(high).unwrap_or(u64::MAX),
+            settle: self.run.map(|r| r.0).unwrap_or(self.index),
+            settle_due: age >= p.max_halt_ms,
+        })
+    }
+
     /// H1, at the start of every block.
     pub fn h1(&mut self, t: u64, p: &OracleParams) {
         if self.status == Status::Active && t.saturating_sub(self.index_time) > p.max_staleness_ms {
@@ -62,6 +94,8 @@ impl OracleState {
                 } else {
                     self.status = Status::Halted(HaltReason::Jump);
                     self.run = Some((m, 1, tau));
+                    self.halt_low = m;
+                    self.halt_high = m;
                 }
             }
             Status::Halted(HaltReason::Arithmetic) => {
@@ -76,8 +110,12 @@ impl OracleState {
                     self.index_time = tau;
                     self.status = Status::Active;
                     self.run = None;
+                    self.halt_low = 0;
+                    self.halt_high = 0;
                     return;
                 }
+                self.halt_low = if self.halt_low == 0 { m } else { self.halt_low.min(m) };
+                self.halt_high = self.halt_high.max(m);
                 let next = match self.run {
                     Some((last, count, lt)) if tau.saturating_sub(lt) <= p.max_staleness_ms && within_bps(m, last, p.agree_bps) => {
                         (m, count + 1, tau)
@@ -89,6 +127,8 @@ impl OracleState {
                     self.index_time = tau;
                     self.status = Status::Active;
                     self.run = None;
+                    self.halt_low = 0;
+                    self.halt_high = 0;
                 } else {
                     self.run = Some(next);
                 }
@@ -177,7 +217,7 @@ pub fn committee_prices(
 mod tests {
     use super::*;
     fn params() -> OracleParams {
-        OracleParams { min_sources: 3, agree_bps: 100, jump_bps: 500, max_staleness_ms: 10_000, confirm_rounds: 3 }
+        OracleParams { min_sources: 3, agree_bps: 100, jump_bps: 500, max_staleness_ms: 10_000, confirm_rounds: 3, exit_haircut_bps: 500, exit_haircut_per_min_bps: 100, exit_max_haircut_bps: 5000, max_halt_ms: 3_600_000 }
     }
     #[test]
     fn genesis_needs_confirmation_then_bounded_steps() {
@@ -201,7 +241,7 @@ mod tests {
     #[test]
     fn stale_halts() {
         let p = params();
-        let mut s = OracleState { index: 1, index_time: 0, status: Status::Active, run: None };
+        let mut s = OracleState { index: 1, index_time: 0, status: Status::Active, run: None, halt_low: 0, halt_high: 0 };
         s.h1(10_000, &p);
         assert_eq!(s.status, Status::Active);
         s.h1(10_001, &p);
