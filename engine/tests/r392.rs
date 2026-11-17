@@ -120,7 +120,7 @@ fn volume_tier_applies_from_the_next_utc_day() {
     let ask = sign_action(&r.e, &kb, place(b, t, 1, false, ORDER_LIMIT, TIF_GTC, P, 20_000_000, false));
     let sell_close = sign_action(&r.e, &ka, place(a, t, 1, false, ORDER_LIMIT, TIF_GTC, P + 10_000_000, 10_000_000, false));
     let buy = sign_action(&r.e, &ka, place(a, t + 1, 1, true, ORDER_MARKET, TIF_IOC, P + 1_000_000_000, 20_000_000, false));
-    let out = r.tick(1000, P, vec![ask, sell_close, buy]);
+    let out = r.tick(3000, P, vec![ask, sell_close, buy]);
     assert!(out.outcomes.iter().all(|o| o.is_ok()), "{:?}", out.outcomes);
     assert_eq!(fees(&out), (4_035_000, 0), "tier 1 the next day for both sides");
 }
@@ -178,4 +178,37 @@ fn genesis_refuses_market_fees_that_differ_from_tier_0() {
     let mut g = base();
     g.markets[0].taker_fee_ppm = 400;
     assert!(g.check().is_err());
+}
+
+/// 392/397's user attestation is signed under the engine's domain (SPEC 2.1): the type name `Attestation` is
+/// reserved and can never act. (a) no input type id decodes to it; (b) an attestation signature attached to any
+/// action does not verify (different struct hash), so it is refused as BAD_SIGNATURE and consumes nothing.
+#[test]
+fn attestation_signature_is_never_an_action() {
+    use postern_perps_engine::codec::decode_inputs;
+    use postern_perps_engine::eip712::{digest, sign_digest};
+    use postern_perps_engine::hash::{keccak, keccak_parts, word_addr, word_u};
+    let mut r = Rig::new(base());
+    let ka = key(1);
+    let a = addr(&ka);
+    let d = r.dep(a, 1000);
+    r.tick(1000, P, vec![d]);
+    // 392's type (compliance/legal/notices.json, attestation)
+    let th = keccak(b"Attestation(address account,string documentId,bytes32 documentHash,string country,uint64 issuedAt)");
+    let sh = keccak_parts(&[&th, &word_addr(&a), &keccak(b"attest-0.1-20261117"), &[0x11u8; 32], &keccak(b"ZZ"), &word_u((r.t / 1000) as u128)]);
+    let att_sig = sign_digest(&ka, &digest(&r.e.domain_sep, &sh));
+    let t = r.t + 1000;
+    let order = place(a, t, 1, true, ORDER_LIMIT, TIF_GTC, P - 1_000_000_000, 100_000, false);
+    let forged = Input::Action(SignedAction { action: order.clone(), signature: att_sig });
+    let genuine = sign_action(&r.e, &ka, order);
+    let out = r.tick(1000, P, vec![forged, genuine]);
+    assert_eq!(out.outcomes[1..], [Err(Error::BadSignature), Ok(())], "the attestation signature is refused; the nonce stayed unused");
+    // no type id 0 or 9..255 decodes (an `Attestation` input cannot even be expressed)
+    for ty in [0u8, 9, 255] {
+        let mut b = vec![0, 0, 0, 1, 0x04, 0, 0, 0, 1 + 20 + 65];
+        b.push(ty);
+        b.extend_from_slice(&[0u8; 20]);
+        b.extend_from_slice(&[0u8; 65]);
+        assert!(decode_inputs(&b).is_err());
+    }
 }

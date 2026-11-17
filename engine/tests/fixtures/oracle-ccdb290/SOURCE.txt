@@ -1,0 +1,1 @@
+Copied unchanged from postern-perps codex/perps-oracle-20261117 at ccdb290 (agent 394), node/oracle/vectors/halt.json and eip712.json: shared vectors the engine's copy of the oracle rules must reproduce.

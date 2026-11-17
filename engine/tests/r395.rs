@@ -1,6 +1,6 @@
 //! Fixes of reviewer 395's High findings R395-1 and R395-5 and of R395-31 (SPEC 0.1.3).
 use k256::ecdsa::SigningKey;
-use postern_perps_engine::engine::{system_address, Event, ACCT_INSURANCE};
+use postern_perps_engine::engine::{self, system_address, Event, ACCT_INSURANCE};
 use postern_perps_engine::hash::{keccak, Addr, H256};
 use postern_perps_engine::invariants;
 use postern_perps_engine::testkit::*;
@@ -52,8 +52,8 @@ impl Rig {
         let t = self.t + 1000;
         let ask = sign_action(&self.e, &kb, place(addr(&kb), t, 1, false, ORDER_LIMIT, TIF_GTC, P, 10_000_000, false));
         let buy = sign_action(&self.e, &ka, place(addr(&ka), t, 1, true, ORDER_MARKET, TIF_IOC, P + 1_000_000_000, 10_000_000, false));
-        let out = self.block(1000, Some(P), vec![ask, buy]);
-        assert!(out.outcomes.iter().all(|o| o.is_ok()));
+        let out = self.block(3000, Some(P), vec![ask, buy]); // a new 3 s oracle round
+        assert!(out.outcomes.iter().all(|o| o.is_ok()), "{:?}", out.outcomes);
         (ka, kb)
     }
 }
@@ -125,28 +125,43 @@ fn r395_5_halt_never_blocks_free_collateral_withdrawal() {
     assert_eq!(out.outcomes, vec![Ok(()), Err(Error::InsufficientMargin)]);
 }
 
+/// Restated at SPEC 0.1.4 (394's exit band, coordinator 2026-11-17): a forced close during a halt is SERVED at
+/// once, the book inside the exit band, the rest at the settle price; it is no longer left pending. The property
+/// of 0.1.3 (a halt never consumes a forced request without serving it) is kept: it is served, not rejected.
 #[test]
-fn r395_5_forced_close_in_a_halt_stays_pending_then_is_served_without_a_new_input() {
+fn r395_5_forced_close_in_a_halt_is_served_at_the_settle_price() {
     let mut r = Rig::new();
     let (ka, kb) = r.open(10_000);
     let (a, b) = (addr(&ka), addr(&kb));
-    r.block(11_000, None, vec![]); // halted
+    r.block(11_000, None, vec![]); // halted (stale)
+    let x = r.e.exit_price(1).unwrap();
+    assert!(x.low < P && x.high > P && x.settle == P, "band around the last index, settle = last index");
     let f = r.forced(a, FORCED_CLOSE, 0, 0);
     let f2 = r.forced(b, FORCED_CANCEL_ALL, 0, 0);
     let out = r.block(1000, None, vec![f, f2]);
-    assert_eq!(out.outcomes, vec![Ok(()), Ok(())], "both received");
-    assert_eq!(r.e.forced_processed, 0, "NOT consumed during the halt; the request behind it waits too");
-    assert_eq!(r.e.forced_queue.len(), 2);
-    assert!(out.events.iter().any(|e| matches!(e, Event::ForcedPending { index: 0, .. })));
-    // still pending in later blocks while halted (the vault deadline, in L2 seconds, then fires escape)
-    r.block(1000, None, vec![]);
-    assert_eq!(r.e.forced_processed, 0);
-    // the market resumes: served from state, no new input; empty book -> backstop has no capital -> ADL vs b
-    let out = r.block(1000, Some(P), vec![]);
     assert!(out.events.iter().any(|e| matches!(e, Event::ForcedServed { index: 0 })));
     assert!(out.events.iter().any(|e| matches!(e, Event::ForcedServed { index: 1 })));
     assert_eq!(r.e.forced_processed, 2);
-    assert!(r.e.accounts[r.e.by_addr[&a] as usize].positions.is_empty(), "a's position closed");
+    let fill = out.events.iter().find_map(|e| match e { Event::Fill { price, kind: engine::FillKind::Adl, .. } => Some(*price), _ => None });
+    assert_eq!(fill, Some(P), "closed against the opposite position at the settle price");
+    assert!(r.e.accounts[r.e.by_addr[&a] as usize].positions.is_empty());
+}
+
+#[test]
+fn r395_5_a_halt_longer_than_max_halt_settles_the_market() {
+    let mut r = Rig::new();
+    let (ka, kb) = r.open(10_000);
+    let (a, b) = (addr(&ka), addr(&kb));
+    r.block(11_000, None, vec![]);
+    let out = r.block(3_600_000, None, vec![]);
+    assert!(out.events.iter().any(|e| matches!(e, Event::MarketSettled { market: 1, price: P })));
+    for x in [a, b] {
+        assert!(r.e.accounts[r.e.by_addr[&x] as usize].positions.is_empty());
+    }
+    assert_eq!(r.e.markets[&1].long_oi, 0);
+    // then everything is free collateral
+    let free = r.e.free_collateral(r.e.by_addr[&a]);
+    assert_eq!(free, r.e.accounts[r.e.by_addr[&a] as usize].balance);
 }
 
 #[test]

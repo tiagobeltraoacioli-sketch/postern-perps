@@ -48,6 +48,16 @@ pub struct OracleParams {
     pub max_staleness_ms: u64,
     #[serde(with = "strnum")]
     pub confirm_rounds: u32,
+    /// Exit band of a halted market (394's README 6a, X1): base half-width, growth per minute, cap (bps).
+    #[serde(with = "strnum")]
+    pub exit_haircut_bps: u32,
+    #[serde(with = "strnum")]
+    pub exit_haircut_per_min_bps: u32,
+    #[serde(with = "strnum")]
+    pub exit_max_haircut_bps: u32,
+    /// X3: a halt this old settles every position of the market at the settle price.
+    #[serde(with = "strnum")]
+    pub max_halt_ms: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -273,6 +283,10 @@ impl Genesis {
             if m.oracle.min_sources == 0 || m.oracle.agree_bps == 0 || m.oracle.jump_bps == 0 || m.oracle.confirm_rounds == 0 || m.oracle.max_staleness_ms == 0 {
                 return Err(format!("{}: oracle params", m.symbol));
             }
+            let o = &m.oracle;
+            if o.exit_haircut_bps < o.jump_bps || o.exit_max_haircut_bps < o.exit_haircut_bps || o.exit_max_haircut_bps >= 10_000 || o.max_halt_ms < o.max_staleness_ms {
+                return Err(format!("{}: exit band (394 README 6a: exitHaircutBps >= jumpBps, max >= base, max < 10000, maxHaltMs >= maxStalenessMs)", m.symbol));
+            }
         }
         let hash = keccak(&self.encoding());
         Ok(Checked { verifying_contract: vc, fee_recipient: fr, oracle_signers: signers, hash, g: self })
@@ -378,6 +392,11 @@ pub fn from_compliance(
                 jump_bps: jint(o, "jumpBps")? as u32,
                 max_staleness_ms: jint(o, "maxStalenessMs")? as u64,
                 confirm_rounds: jint(o, "confirmRounds")? as u32,
+                // 394's README section 8 defaults when the file does not name them
+                exit_haircut_bps: jint(o, "exitHaircutBps").map(|x| x as u32).unwrap_or(jint(o, "jumpBps")? as u32),
+                exit_haircut_per_min_bps: jint(o, "exitHaircutPerMinBps").map(|x| x as u32).unwrap_or(100),
+                exit_max_haircut_bps: jint(o, "exitMaxHaircutBps").map(|x| x as u32).unwrap_or(5000),
+                max_halt_ms: jint(o, "maxHaltMs").map(|x| x as u64).unwrap_or(3_600_000),
             },
         });
     }

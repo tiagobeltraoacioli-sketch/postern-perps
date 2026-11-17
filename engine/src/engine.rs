@@ -186,6 +186,7 @@ pub enum Event {
     ForcedServed { index: u64 },
     ForcedRejected { index: u64, reason: Error },
     ForcedPending { index: u64, reason: Error },
+    MarketSettled { market: u32, price: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -383,6 +384,8 @@ impl Engine {
                 self.settle_funding(*id);
             }
         }
+        // 5b. X3 settlement of markets halted longer than maxHaltMs
+        self.settle_due_markets();
         // 6. premium sample
         if round_accepted {
             for id in &ids {
@@ -596,8 +599,13 @@ impl Engine {
 
     /// (IR, MR) of one market for account `ai` with position size `size` and, optionally, an extra resting order.
     fn market_req(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>) -> (i128, i128) {
+        self.market_req_at(ai, mid, size, extra, self.markets[&mid].mark)
+    }
+
+    /// As `market_req` with the position valued at `price` instead of the mark.
+    fn market_req_at(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>, price: u64) -> (i128, i128) {
         let m = &self.markets[&mid];
-        let mark = m.mark as i128;
+        let mark = price as i128;
         let lev = self.leverage_of(ai, mid) as i128;
         let lev_frac = div_ceil(PPM, lev);
         let (mut bids, mut asks, mut pb, mut pa) = (0i128, 0i128, 0i128, 0i128);
@@ -955,6 +963,21 @@ impl Engine {
             return Ok(());
         }
         let is_buy = s < 0;
+        if !self.active(mid) {
+            // 394 README 6a: in a halt the book is used only inside the exit band, the rest is closed against the
+            // opposite positions (ADL ranking) at the settle price with the taker fee: never refused for a halt.
+            let Some(x) = self.exit_price(mid) else { return Err(Error::MarketHalted) };
+            let limit = if is_buy { x.high.min(MAX_PRICE) } else { x.low };
+            let oid = self.next_order_id;
+            self.next_order_id += 1;
+            self.take(ai, mid, is_buy, limit, abs64(s), true, Mode::Forced, oid);
+            let r = abs64(self.pos_size(ai, mid));
+            if r > 0 {
+                let fee = self.fee_ppm(ai, true);
+                self.adl(ai, mid, x.settle.clamp(x.low, x.high), r, is_buy, fee);
+            }
+            return Ok(());
+        }
         let m = &self.markets[&mid];
         let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
         let limit = if is_buy { (m.mark + band).min(MAX_PRICE) } else { m.mark.saturating_sub(band).max(1) };
@@ -966,9 +989,6 @@ impl Engine {
         let r = abs64(self.pos_size(ai, mid));
         if r == 0 {
             return Ok(());
-        }
-        if !self.active(mid) {
-            return Err(Error::MarketHalted);
         }
         let fee = self.fee_ppm(ai, true);
         let q = self.backstop_room(mid, is_buy, r, self.markets[&mid].mark, limit);
@@ -1173,17 +1193,59 @@ impl Engine {
         }
         for mid in mids {
             let size = a.positions.get(&mid).map(|p| p.size).unwrap_or(0);
-            let u = a.positions.get(&mid).map(|p| (p.size as i128) * (self.markets[&mid].mark as i128) - p.open_notional).unwrap_or(0);
-            let (i, _) = self.market_req(ai, mid, size, None);
-            if self.active(mid) {
-                e += u;
-                ir += i;
+            // halted: the side of 394's exit band worse for the holder (long at low, short at high), SPEC S-9.2
+            let price = if self.active(mid) {
+                self.markets[&mid].mark
             } else {
-                e += u.min(0);
-                ir += 2 * i;
-            }
+                match self.exit_price(mid) {
+                    Some(x) if size > 0 => x.low,
+                    Some(x) if size < 0 => x.high,
+                    _ => self.markets[&mid].mark,
+                }
+            };
+            let u = a.positions.get(&mid).map(|p| (p.size as i128) * (price as i128) - p.open_notional).unwrap_or(0);
+            let (i, _) = self.market_req_at(ai, mid, size, None, price);
+            e += u;
+            ir += i;
         }
         div_floor(e - ir, N_PER_USDC).min(a.balance).max(0)
+    }
+
+    pub fn exit_price(&self, mid: u32) -> Option<crate::oracle::ExitPrice> {
+        let m = &self.markets[&mid];
+        m.oracle.exit_price(&m.p.oracle, self.time)
+    }
+
+    /// X3: a halt older than maxHaltMs settles every position of the market at the settle price (all orders and
+    /// triggers of the market cancelled). Pairwise exact: the sizes sum to zero (I-1), so I-2 holds.
+    fn settle_due_markets(&mut self) {
+        let ids: Vec<u32> = self.markets.keys().copied().collect();
+        for mid in ids {
+            if self.active(mid) {
+                continue;
+            }
+            let Some(x) = self.exit_price(mid) else { continue };
+            if !x.settle_due {
+                continue;
+            }
+            let has = self.accounts.iter().any(|a| a.positions.contains_key(&mid));
+            let oids: Vec<u64> = self.orders.iter().filter(|(_, o)| o.market == mid).map(|(k, _)| *k).collect();
+            for oid in oids {
+                self.remove_order(oid, Some(Error::MarketHalted));
+            }
+            if !has {
+                continue;
+            }
+            for ai in 0..self.accounts.len() as u32 {
+                let s = self.pos_size(ai, mid);
+                if s != 0 {
+                    let r = self.trade_position(ai, mid, -s, x.settle);
+                    self.credit_notional(ai, r);
+                }
+            }
+            self.markets.get_mut(&mid).unwrap().long_oi = 0;
+            self.events.push(Event::MarketSettled { market: mid, price: x.settle });
+        }
     }
 
     pub fn halted_involved(&self, ai: u32) -> bool {
@@ -1635,6 +1697,8 @@ impl Engine {
                 }
             }
             b.extend_from_slice(&m.oracle.index_time.to_be_bytes());
+            b.extend_from_slice(&m.oracle.halt_low.to_be_bytes());
+            b.extend_from_slice(&m.oracle.halt_high.to_be_bytes());
             match m.oracle.run {
                 Some((l, c, t)) => {
                     b.push(1);

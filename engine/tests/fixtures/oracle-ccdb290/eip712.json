@@ -1,0 +1,281 @@
+{
+  "_note": "UNAUDITED PROTOTYPE test vectors. Keys are THROWAWAY keys derived from public labels: never use them.",
+  "domainSeparator": "0x863a1fbafc7d0c642df8319f2465953aa9df429c9b0776245c46e81d4ed7f6d7",
+  "observations": [
+    {
+      "digest": "0x1af695dec797685f45f8944533f5a66585a890e0fbb0b7a93bea3b75f7804e35",
+      "hashStruct": "0x05112f72e1e22c224224cb03bd2ede78219a9a987b0abda285dad931aa335f90",
+      "name": "one-market",
+      "signature": "0x4b028b03f7db526bf5df50a4292c0efe4d60c5bfe89980e024f9e9d549a0e0b17478917ff22176c70549813fdbebef49044494727eb30aede018f6bed200cf271b",
+      "signer": "0x9091f2de7ddc6d70a3365316896c79f3de2e7847",
+      "throwawayScalar": "0xc351abc830ff8c153d7227e359ec0d57d4d5c55fd472e46c52a34e0b3b9de629",
+      "typedData": {
+        "domain": {
+          "chainId": 700770,
+          "name": "PosternPerps",
+          "verifyingContract": "0xdb0b1676ac81645ca3e2fbe136b6ad00b2eb908c",
+          "version": "1"
+        },
+        "message": {
+          "prices": [
+            {
+              "marketId": 1,
+              "price": 648703,
+              "sources": 7
+            }
+          ],
+          "round": 598296643,
+          "timeMs": 1794889929012
+        },
+        "primaryType": "OracleObservation",
+        "types": {
+          "EIP712Domain": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "version",
+              "type": "string"
+            },
+            {
+              "name": "chainId",
+              "type": "uint256"
+            },
+            {
+              "name": "verifyingContract",
+              "type": "address"
+            }
+          ],
+          "OracleObservation": [
+            {
+              "name": "round",
+              "type": "uint64"
+            },
+            {
+              "name": "timeMs",
+              "type": "uint64"
+            },
+            {
+              "name": "prices",
+              "type": "OraclePrice[]"
+            }
+          ],
+          "OraclePrice": [
+            {
+              "name": "marketId",
+              "type": "uint32"
+            },
+            {
+              "name": "price",
+              "type": "uint64"
+            },
+            {
+              "name": "sources",
+              "type": "uint8"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "digest": "0x5df0c418c40ab6796c00425a592a9a409c7660365f2771417f0054e1bfc594e0",
+      "hashStruct": "0x5e74ddddb574fab01b7b43de3ab01363f83d6077a02d6ecb03dd2e313e2c67ac",
+      "name": "three-markets",
+      "signature": "0xd2d64e227cbcca39671e224c60b27f3c2c0f0a9b533bc66d2a2d7fa18f7442d17197d5f7e2fc3a3978bd64f599a8fc475b013838bc553960101bb8795f25c3221b",
+      "signer": "0xebedbc3d0057e181687387dd30768ab22a02363e",
+      "throwawayScalar": "0x96796114c98d1b63b0f1bf1518bc952a7ee77a273ba866bd597c6a16496f0476",
+      "typedData": {
+        "domain": {
+          "chainId": 700770,
+          "name": "PosternPerps",
+          "verifyingContract": "0xdb0b1676ac81645ca3e2fbe136b6ad00b2eb908c",
+          "version": "1"
+        },
+        "message": {
+          "prices": [
+            {
+              "marketId": 1,
+              "price": 648703,
+              "sources": 7
+            },
+            {
+              "marketId": 2,
+              "price": 182784,
+              "sources": 6
+            },
+            {
+              "marketId": 3,
+              "price": 72660,
+              "sources": 5
+            }
+          ],
+          "round": 598296644,
+          "timeMs": 1794889932000
+        },
+        "primaryType": "OracleObservation",
+        "types": {
+          "EIP712Domain": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "version",
+              "type": "string"
+            },
+            {
+              "name": "chainId",
+              "type": "uint256"
+            },
+            {
+              "name": "verifyingContract",
+              "type": "address"
+            }
+          ],
+          "OracleObservation": [
+            {
+              "name": "round",
+              "type": "uint64"
+            },
+            {
+              "name": "timeMs",
+              "type": "uint64"
+            },
+            {
+              "name": "prices",
+              "type": "OraclePrice[]"
+            }
+          ],
+          "OraclePrice": [
+            {
+              "name": "marketId",
+              "type": "uint32"
+            },
+            {
+              "name": "price",
+              "type": "uint64"
+            },
+            {
+              "name": "sources",
+              "type": "uint8"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "digest": "0x751b848136255fd6c0ae52c4184936d6f572e8c98eab4ecd84754dd8cdaad711",
+      "hashStruct": "0x9158c9a92ce40d32ee68d72f48e6285d83bfd55104e7479d23c52f36f427af34",
+      "name": "max-values",
+      "signature": "0x677c998a1eaf7d966b858bc6604b8a7b540e6c0519373b1e1bc3978a5c7c85b36d1bc52fdfd28fcb5a24761a3f2c91158cdb29663076e10a6a2a6de59471ced11c",
+      "signer": "0x051f4b6a85227fe5b81a4cb2ec773cd8e7f4b946",
+      "throwawayScalar": "0x9d4aa4f66c1c1213a828729b19b1984960b81bec803505f0d7ef493e8148b9cf",
+      "typedData": {
+        "domain": {
+          "chainId": 700770,
+          "name": "PosternPerps",
+          "verifyingContract": "0xdb0b1676ac81645ca3e2fbe136b6ad00b2eb908c",
+          "version": "1"
+        },
+        "message": {
+          "prices": [
+            {
+              "marketId": 4294967295,
+              "price": 18446744073709551615,
+              "sources": 255
+            }
+          ],
+          "round": 6148914691236516,
+          "timeMs": 18446744073709550999
+        },
+        "primaryType": "OracleObservation",
+        "types": {
+          "EIP712Domain": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "version",
+              "type": "string"
+            },
+            {
+              "name": "chainId",
+              "type": "uint256"
+            },
+            {
+              "name": "verifyingContract",
+              "type": "address"
+            }
+          ],
+          "OracleObservation": [
+            {
+              "name": "round",
+              "type": "uint64"
+            },
+            {
+              "name": "timeMs",
+              "type": "uint64"
+            },
+            {
+              "name": "prices",
+              "type": "OraclePrice[]"
+            }
+          ],
+          "OraclePrice": [
+            {
+              "name": "marketId",
+              "type": "uint32"
+            },
+            {
+              "name": "price",
+              "type": "uint64"
+            },
+            {
+              "name": "sources",
+              "type": "uint8"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "typeHashes": {
+    "OracleObservation": "0x250ff2f261e61ee478b9b3d4dd3e5056d8f9f42999d24218508f1e2973d63b83",
+    "OraclePrice": "0x5820fdbc210fdf8ca6c99c2e72dcdaf183b4f9ccd6be6cae71a7a4ab9b699914"
+  },
+  "update": {
+    "canonicalBytes": "0x0000000023a948430200000001a1e7c6d134000100000001000000000009e5ff074b028b03f7db526bf5df50a4292c0efe4d60c5bfe89980e024f9e9d549a0e0b17478917ff22176c70549813fdbebef49044494727eb30aede018f6bed200cf271b01000001a1e7c6d134000100000001000000000009e5ff074b028b03f7db526bf5df50a4292c0efe4d60c5bfe89980e024f9e9d549a0e0b17478917ff22176c70549813fdbebef49044494727eb30aede018f6bed200cf271b",
+    "json": {
+      "observations": [
+        {
+          "prices": [
+            {
+              "marketId": 1,
+              "price": "648703",
+              "sources": 7
+            }
+          ],
+          "signature": "0x4b028b03f7db526bf5df50a4292c0efe4d60c5bfe89980e024f9e9d549a0e0b17478917ff22176c70549813fdbebef49044494727eb30aede018f6bed200cf271b",
+          "signer": 0,
+          "timeMs": 1794889929012
+        },
+        {
+          "prices": [
+            {
+              "marketId": 1,
+              "price": "648703",
+              "sources": 7
+            }
+          ],
+          "signature": "0x4b028b03f7db526bf5df50a4292c0efe4d60c5bfe89980e024f9e9d549a0e0b17478917ff22176c70549813fdbebef49044494727eb30aede018f6bed200cf271b",
+          "signer": 1,
+          "timeMs": 1794889929012
+        }
+      ],
+      "round": 598296643
+    }
+  },
+  "verifyingContract": "0xdb0b1676ac81645ca3e2fbe136b6ad00b2eb908c"
+}

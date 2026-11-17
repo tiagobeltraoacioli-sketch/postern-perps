@@ -47,7 +47,7 @@ pub fn market(id: u32, symbol: &str) -> MarketParams {
         interest: 12_500,
         funding_clamp: 500_000,
         max_funding_rate: 500_000,
-        oracle: OracleParams { min_sources: 3, agree_bps: 100, jump_bps: 500, max_staleness_ms: 10_000, confirm_rounds: 1 },
+        oracle: OracleParams { min_sources: 3, agree_bps: 100, jump_bps: 500, max_staleness_ms: 10_000, confirm_rounds: 1, exit_haircut_bps: 500, exit_haircut_per_min_bps: 100, exit_max_haircut_bps: 5000, max_halt_ms: 3_600_000 },
     }
 }
 
