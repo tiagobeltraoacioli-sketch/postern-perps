@@ -1,7 +1,7 @@
 /** The application shell: header, banners that must be seen, the page, the footer, the review sheet. */
 import { useEffect, useRef, useState } from 'react';
 import { Wallet, Copy, LogOut, CandlestickChart, PieChart, ArrowLeftRight, KeyRound, Activity, type LucideIcon } from 'lucide-react';
-import { feed, route as routeStore, go, eip712Problem, geo as geoStore, geoRead, startSession, type Route } from './state/session';
+import { feed, route as routeStore, go, signingDomain, eip712Problem, geo as geoStore, geoRead, startSession, type Route } from './state/session';
 import { ActionProvider, useActions } from './state/actions';
 import { useStore } from './lib/store';
 import { shortAddress } from './lib/format';
@@ -17,7 +17,6 @@ import { Agents } from './pages/Agents';
 import { System } from './pages/System';
 import { Legal } from './pages/Legal';
 import { OPERATOR_LINE, PROTOTYPE_LINE, restrictedText } from './compliance/notices';
-import { DOMAIN } from './lib/eip712';
 
 const NAV: [Route['page'], string, string, LucideIcon][] = [
   ['trade', 'Trade', 'Trade', CandlestickChart],
@@ -162,6 +161,7 @@ function WalletButton() {
 }
 
 function Banners() {
+  const domain = useStore(signingDomain);
   const problem = useStore(eip712Problem);
   const geo = useStore(geoStore);
   const read = useStore(geoRead);
@@ -169,7 +169,7 @@ function Banners() {
   return (
     <div className="banners">
       {LOCAL_RENDER && <p className="banner banner-local">Local render build against a loopback mock: not for publication.</p>}
-      {!DOMAIN && (
+      {!domain && (
         <p className="banner banner-warn" role="status">
           Not live: the exchange's vault is not deployed, so this page signs nothing. Prices and accounts shown are read only.
         </p>

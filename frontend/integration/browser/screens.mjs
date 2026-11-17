@@ -2,6 +2,8 @@
 // Screenshot and assertion harness of the perps frontend against a loopback mock. UNAUDITED prototype, local only.
 //
 //   node integration/browser/screens.mjs --app http://127.0.0.1:49111/ --mock http://127.0.0.1:49110 --out <dir> [--port 49150]
+// The mock must run on the real clock (node/mock: --start-time now, not --static): the page refuses to sign when the
+// exchange clock is outside the SPEC 2.5 nonce window of this device clock.
 //
 // A harness wallet (EIP-6963 provider "Harness wallet") is injected into the page; its key is generated for this run
 // in this process (viem generatePrivateKey) and signing happens here, never in the page. Every scene asserts the texts
@@ -80,7 +82,7 @@ const scenario = async (query) => {
   const r = await fetch(`${MOCK}/mock/scenario?${query}`);
   if (!r.ok) throw new Error(`scenario ${query}: ${r.status}`);
 };
-const RESET = 'geo=PA&resume=BTC-USD&eip712=pinned&sequencer=running&vault=normal&accounts=reset';
+const RESET = 'geo=ZZ&resume=BTC-USD&eip712=pinned&sequencer=running&vault=normal';
 const failures = [];
 const results = [];
 const expect = (scene, ok, what) => {
@@ -208,7 +210,7 @@ try {
   await connect();
   await has('10', /exit only/);
   await shot('10-restricted-dark');
-  await scenario('geo=PA');
+  await scenario('geo=ZZ');
 
   // Halted market.
   await scenario('halt=BTC-USD');

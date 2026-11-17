@@ -84,6 +84,12 @@ describe('refusals', () => {
     expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { markets: closeOnly })).join()).toMatch(/close-only/);
     expect(refusals('PlaceOrder', order({ reduceOnly: true }), localSigner(), guard(account, { markets: closeOnly }))).toEqual([]);
   });
+  it('clock outside the SPEC 2.5 nonce window (vs the exchange clock): refused before signing', () => {
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { clockSkewMs: 4 * 3_600_000 })).join()).toMatch(/behind the exchange/);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { clockSkewMs: -31_000 })).join()).toMatch(/ahead of the exchange/);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { clockSkewMs: 119_000 }))).toEqual([]);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { clockSkewMs: -29_000 }))).toEqual([]);
+  });
   it('sequencer not running: refused', () => {
     expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { status: status('recovering') })).join()).toMatch(/sequencer recovering/);
   });

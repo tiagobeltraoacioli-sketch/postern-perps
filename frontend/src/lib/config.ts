@@ -4,7 +4,6 @@ declare const __POSTERN_CONFIG__: {
   wsUrl: string;
   l2RpcUrl: string;
   l2ChainId: number;
-  engineChainId: number;
   vault: string | null;
   collateral: string | null;
   explorerTx: string | null;
