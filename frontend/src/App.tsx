@@ -17,6 +17,7 @@ import { Agents } from './pages/Agents';
 import { System } from './pages/System';
 import { Legal } from './pages/Legal';
 import { OPERATOR_LINE, PROTOTYPE_LINE, restrictedText } from './compliance/notices';
+import { DOMAIN } from './lib/eip712';
 
 const NAV: [Route['page'], string, string, LucideIcon][] = [
   ['trade', 'Trade', 'Trade', CandlestickChart],
@@ -168,6 +169,11 @@ function Banners() {
   return (
     <div className="banners">
       {LOCAL_RENDER && <p className="banner banner-local">Local render build against a loopback mock: not for publication.</p>}
+      {!DOMAIN && (
+        <p className="banner banner-warn" role="status">
+          Not live: the exchange's vault is not deployed, so this page signs nothing. Prices and accounts shown are read only.
+        </p>
+      )}
       {problem && (
         <p className="banner banner-danger" role="alert">
           This interface is out of date with the exchange ({problem}). Signing is refused until it is updated.

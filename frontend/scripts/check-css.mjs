@@ -9,6 +9,7 @@ const src = new URL('../src/', import.meta.url).pathname;
 const walk = (dir) =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
+    // src/chart is agent 396's directory with its own checks; its classes are still counted as used words.
     return statSync(path).isDirectory() ? (name === 'test' ? [] : walk(path)) : [path];
   });
 const files = walk(src);
@@ -19,7 +20,7 @@ const words = new Set(code.match(/[A-Za-z][A-Za-z0-9_-]*/g));
 const TEMPLATED = [/^lamp-(idle|kindling|lit|pending|settled|warn|danger)$/, /^(toast|callout|badge|banner|status|conn|health|review|tone|book)-[a-z]+$/, /^side-(long|short)$/];
 let dead = 0;
 let classes = 0;
-for (const file of files.filter((f) => f.endsWith('.css'))) {
+for (const file of files.filter((f) => f.endsWith('.css') && !f.includes('/src/chart/'))) {
   const css = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/url\([^)]*\)/g, '');
   if (/text-transform\s*:/.test(css)) {
     dead++;
