@@ -38,8 +38,17 @@ node node/mock/conformance/run.mjs --base http://127.0.0.1:49300 --mock
 ```
 
 ```
+node node/mock/conformance/run.mjs --base http://127.0.0.1:48900 --funded
+```
+
+```
 cd node/mock && node --test test/*.test.mjs
 ```
+
+Against a real node (no `--mock`), the checks that need an account with collateral (price-0 refusal by the engine,
+agent approval and rights, book deltas) are SKIPPED, listed and never counted as passed, unless `--funded [LABEL]`:
+the suite then signs as the throwaway account `--print-accounts` names, which the operator funds through the dev
+vault deposit on the L2 before the run (the API has no deposit route by design: deposits come only from the vault).
 
 Options: `--seed N` (default 7), `--start-time MS|now` (default 1794878400000; `now` makes the engine time
 follow the wall clock from launch so a browser's millisecond nonces fall inside the window), `--static` (blocks
@@ -94,8 +103,8 @@ documented response field, and is simplified inside. Not like SPEC v0.1:
   it strictly and compares it with `inputs`), but a mock block may carry no input and the simulated market moves
   without inputs, so the mock's log is not replayable by an engine; the oracle committee keys are not published
   by the API; the state root, account proof and withdrawal Merkle tree are the mock's own formats (commutative
-  pairs), not SPEC 11's; the checkpoint digest is 389's proposal (B) (seven fields), not the extended one of the
-  vault draft `e0cc9fd` (thirteen fields): VAULT.md and SPEC 0.2 decide, then the mock follows;
+  pairs), not SPEC 11's; the checkpoint is VAULT.md v0.2's sixteen fields and its stateRoot follows the SPEC 11 equation
+  (system hash, chain heads as VAULT.md 5.4), but the three subtrees are the mock's own Merkle format;
 - `accounts` defaults to demo data for unknown addresses (the API says a zero account).
 
 Exactness that IS kept: integer arithmetic only, `priceDecimals + sizeDecimals <= 6` checked so price x size
@@ -105,6 +114,6 @@ to zero per market (tested).
 
 ## Not done / not proven
 
-The mock is not the engine and proves nothing about the engine. Not done: SPEC 11 trees and proofs, the vault's 13-field checkpoint, forced requests, the fee
+The mock is not the engine and proves nothing about the engine. Not done: SPEC 11 trees and proofs, forced requests, the fee
 sweep, ADL, open-order margin. The conformance suite has not yet been run against the real node (it does not
 exist yet). The busy-scenario rate is wall-clock dependent.

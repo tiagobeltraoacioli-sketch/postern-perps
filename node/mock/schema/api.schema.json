@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "postern-perps/api/0.1",
  "title": "PosternDEX Perpetuals API v0.1 (UNAUDITED prototype)",
- "description": "Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries every field of the signed digest (389 proposal B) so anyone can recompute it; VAULT.md (390) will extend it. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
+ "description": "Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries the sixteen fields of the VAULT.md v0.2 digest (as 389's node b170e74 serialises them) so anyone can recompute the digest and the SPEC 11 state-root equation. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
  "$defs": {
   "Dec": {
    "type": "string",
@@ -853,14 +853,46 @@
     "logHash": {
      "$ref": "#/$defs/Hash"
     },
+    "accountsRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "marketsRoot": {
+     "$ref": "#/$defs/Hash"
+    },
     "withdrawalsRoot": {
      "$ref": "#/$defs/Hash"
     },
-    "depositsCredited": {
+    "nextDepositIndex": {
      "$ref": "#/$defs/Int"
     },
-    "forcedProcessed": {
+    "nextForcedIndex": {
      "$ref": "#/$defs/Int"
+    },
+    "nextOrderId": {
+     "$ref": "#/$defs/U64"
+    },
+    "totalEscape": {
+     "type": "string",
+     "pattern": "^(0|[1-9][0-9]{0,38})$"
+    },
+    "dust": {
+     "type": "string",
+     "pattern": "^(0|[1-9][0-9]{0,38})$"
+    },
+    "auxHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "depositsHead": {
+     "$ref": "#/$defs/Hash"
+    },
+    "forcedHead": {
+     "$ref": "#/$defs/Hash"
+    },
+    "withdrawalCount": {
+     "$ref": "#/$defs/Int"
+    },
+    "withdrawalsTotal": {
+     "$ref": "#/$defs/U64"
     },
     "digest": {
      "$ref": "#/$defs/Hash"
@@ -884,9 +916,19 @@
     "blockHash",
     "stateRoot",
     "logHash",
+    "accountsRoot",
+    "marketsRoot",
     "withdrawalsRoot",
-    "depositsCredited",
-    "forcedProcessed",
+    "nextDepositIndex",
+    "nextForcedIndex",
+    "nextOrderId",
+    "totalEscape",
+    "dust",
+    "auxHash",
+    "depositsHead",
+    "forcedHead",
+    "withdrawalCount",
+    "withdrawalsTotal",
     "digest",
     "threshold",
     "final",

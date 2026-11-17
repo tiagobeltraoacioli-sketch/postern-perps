@@ -16,3 +16,19 @@ test('conformance suite passes against the mock (static mode)', { timeout: 240_0
     await m.close();
   }
 });
+
+test('real-node mode: checks needing collateral are SKIPPED without --funded (never passed) and run with it', { timeout: 240_000 }, async () => {
+  const m = await startMock({ port: 0, static: true, rateLimit: false });
+  try {
+    const bare = await runConformance(m.url, { mock: false, runId: 'bare' });
+    assert.equal(bare.failed.length, 0, bare.failed.map((f) => f.name).join(' | '));
+    assert.equal(bare.skipped.length, 3);
+    assert.equal(bare.passed + bare.skipped.length, bare.total, 'a skipped check is not counted as passed');
+    const funded = await runConformance(m.url, { mock: false, runId: 'funded', funded: 'test-funded' });
+    assert.equal(funded.failed.length, 0, funded.failed.map((f) => f.name).join(' | '));
+    assert.equal(funded.skipped.length, 0);
+    assert.ok(funded.results.some((r) => /RevokeAgent included and applied/.test(r.name) && r.ok === true));
+  } finally {
+    await m.close();
+  }
+});
