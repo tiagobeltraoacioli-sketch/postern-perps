@@ -317,8 +317,8 @@ export class Feed {
             candles ??= this.candles.get();
             if (!candles.ready) break;
             const c = convert.candle(data as T.WireCandle);
-            const list = candles.candles;
-            const last = list[list.length - 1];
+            const list: T.Candle[] = candles.candles;
+            const last: T.Candle | undefined = list[list.length - 1];
             candles = { ...candles, candles: last && last.t === c.t ? [...list.slice(0, -1), c] : last && c.t < last.t ? list : [...list, c].slice(-1500) };
           }
           break;

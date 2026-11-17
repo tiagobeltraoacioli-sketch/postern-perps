@@ -1,0 +1,220 @@
+{
+ "_note": "Frontend stand-in only: the typed data the stand-in mock serves at GET /v1/eip712 = the frontend pin (src/lib/eip712.ts, PROVISIONAL until docs/SPEC.md). scales: decimals of the scaled integers that are signed.",
+ "specVersion": "frontend-provisional-0.1",
+ "domain": {
+  "name": "PosternPerps",
+  "version": "1",
+  "chainId": 7007701
+ },
+ "types": {
+  "PlaceOrder": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "isBuy",
+    "type": "bool"
+   },
+   {
+    "name": "orderType",
+    "type": "uint8"
+   },
+   {
+    "name": "timeInForce",
+    "type": "uint8"
+   },
+   {
+    "name": "price",
+    "type": "uint64"
+   },
+   {
+    "name": "size",
+    "type": "uint64"
+   },
+   {
+    "name": "reduceOnly",
+    "type": "bool"
+   },
+   {
+    "name": "triggerPrice",
+    "type": "uint64"
+   },
+   {
+    "name": "clientOrderId",
+    "type": "bytes32"
+   }
+  ],
+  "CancelOrder": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "orderId",
+    "type": "uint64"
+   }
+  ],
+  "CancelAll": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   }
+  ],
+  "UpdateLeverage": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "leverage",
+    "type": "uint32"
+   },
+   {
+    "name": "isolated",
+    "type": "bool"
+   }
+  ],
+  "UpdateMargin": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "amount",
+    "type": "int64"
+   }
+  ],
+  "Withdraw": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "amount",
+    "type": "uint64"
+   },
+   {
+    "name": "recipient",
+    "type": "address"
+   }
+  ],
+  "ApproveAgent": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "agent",
+    "type": "address"
+   },
+   {
+    "name": "name",
+    "type": "string"
+   },
+   {
+    "name": "expiresAt",
+    "type": "uint64"
+   }
+  ],
+  "RevokeAgent": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "agent",
+    "type": "address"
+   }
+  ]
+ },
+ "actions": [
+  "PlaceOrder",
+  "CancelOrder",
+  "CancelAll",
+  "UpdateLeverage",
+  "UpdateMargin",
+  "Withdraw",
+  "ApproveAgent",
+  "RevokeAgent"
+ ],
+ "agentAllowed": [
+  "PlaceOrder",
+  "CancelOrder",
+  "CancelAll",
+  "UpdateLeverage",
+  "UpdateMargin"
+ ],
+ "enums": {
+  "orderType": {
+   "limit": 0,
+   "market": 1,
+   "stopMarket": 2,
+   "stopLimit": 3,
+   "takeProfitMarket": 4,
+   "takeProfitLimit": 5
+  },
+  "timeInForce": {
+   "GTC": 0,
+   "IOC": 1,
+   "POST_ONLY": 2
+  }
+ },
+ "scales": {
+  "price": 8,
+  "size": 8,
+  "usdc": 6
+ }
+}

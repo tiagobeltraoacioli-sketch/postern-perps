@@ -1,0 +1,56 @@
+{
+  "note": "UNAUDITED prototype. The market table this interface signs against, PINNED: symbol, marketId, base, decimals, tick and step. The interface refuses to sign when GET /v1/markets publishes a different value for any of these fields (src/lib/pins.ts). PROVISIONAL: values from node/fixtures/markets.json (agent 351, WIP 59dcd7b) until compliance/markets.json (agent 392) and docs/SPEC.md (agent 388) publish the launch table.",
+  "source": "node/fixtures/markets.json @ 59dcd7b",
+  "markets": [
+    {
+      "symbol": "BTC-USD",
+      "marketId": 1,
+      "base": "BTC",
+      "priceDecimals": 1,
+      "sizeDecimals": 4,
+      "tickSize": "0.5",
+      "stepSize": "0.0001",
+      "minOrderSize": "0.0001",
+      "maxOrderSize": "50",
+      "maxLeverage": "50",
+      "marginTiers": [
+        { "notionalFloor": "0", "initialMarginFraction": "0.02", "maintenanceMarginFraction": "0.01", "maxLeverage": "50" },
+        { "notionalFloor": "1000000", "initialMarginFraction": "0.04", "maintenanceMarginFraction": "0.02", "maxLeverage": "25" },
+        { "notionalFloor": "5000000", "initialMarginFraction": "0.1", "maintenanceMarginFraction": "0.05", "maxLeverage": "10" }
+      ]
+    },
+    {
+      "symbol": "ETH-USD",
+      "marketId": 2,
+      "base": "ETH",
+      "priceDecimals": 2,
+      "sizeDecimals": 3,
+      "tickSize": "0.05",
+      "stepSize": "0.001",
+      "minOrderSize": "0.001",
+      "maxOrderSize": "1000",
+      "maxLeverage": "50",
+      "marginTiers": [
+        { "notionalFloor": "0", "initialMarginFraction": "0.02", "maintenanceMarginFraction": "0.01", "maxLeverage": "50" },
+        { "notionalFloor": "1000000", "initialMarginFraction": "0.04", "maintenanceMarginFraction": "0.02", "maxLeverage": "25" },
+        { "notionalFloor": "5000000", "initialMarginFraction": "0.1", "maintenanceMarginFraction": "0.05", "maxLeverage": "10" }
+      ]
+    },
+    {
+      "symbol": "SOL-USD",
+      "marketId": 3,
+      "base": "SOL",
+      "priceDecimals": 3,
+      "sizeDecimals": 2,
+      "tickSize": "0.005",
+      "stepSize": "0.01",
+      "minOrderSize": "0.01",
+      "maxOrderSize": "20000",
+      "maxLeverage": "20",
+      "marginTiers": [
+        { "notionalFloor": "0", "initialMarginFraction": "0.05", "maintenanceMarginFraction": "0.025", "maxLeverage": "20" },
+        { "notionalFloor": "500000", "initialMarginFraction": "0.1", "maintenanceMarginFraction": "0.05", "maxLeverage": "10" }
+      ]
+    }
+  ]
+}
