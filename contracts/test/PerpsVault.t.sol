@@ -485,9 +485,12 @@ contract PerpsVaultTest is Base {
     function test_large_withdrawal_waits_delay() public {
         PerpsVault.Withdrawal[] memory ws = _withdrawSetup(100_000 * USDC);
         PerpsVault.SumProof memory p = _wProof(ws, 0);
-        vm.expectRevert(PerpsVault.NotReady.selector);
-        vault.withdraw(1, ws[0], p, 1);
-        bytes32 key = vault.withdraw(1, ws[0], p, 0); // register only
+        bytes32 key = vault.withdraw(1, ws[0], p, type(uint64).max); // registers; not ready, so nothing paid
+        assertEq(usdc.balanceOf(carol), 0, "nothing paid before the delay");
+        (,, uint64 paid0, uint64 readyAt) = vault.payouts(key);
+        assertTrue(paid0 == 0 && readyAt == block.timestamp + 1 days, "registered with its delay");
+        vm.expectRevert(PerpsVault.AlreadyRegistered.selector);
+        vault.withdraw(1, ws[0], p, 0);
         vm.expectRevert(PerpsVault.NotReady.selector);
         vault.release(key, type(uint64).max);
         vm.warp(block.timestamp + 1 days - 1);
@@ -543,9 +546,8 @@ contract PerpsVaultTest is Base {
         vault.guardianPause();
         assertTrue(vault.paused(), "paused");
         PerpsVault.SumProof memory p = _wProof(ws, 0);
-        vm.expectRevert(PerpsVault.Paused.selector);
-        vault.withdraw(1, ws[0], p, 1);
-        bytes32 key = vault.withdraw(1, ws[0], p, 0); // registering moves nothing
+        bytes32 key = vault.withdraw(1, ws[0], p, type(uint64).max); // registers, pays nothing while paused
+        assertEq(usdc.balanceOf(carol), 0, "nothing paid while paused");
         vm.expectRevert(PerpsVault.Paused.selector);
         vault.release(key, 1);
         usdc.mint(bob, 100 * USDC);
@@ -965,4 +967,19 @@ contract ReentrantToken {
         balanceOf[to] += v;
         return true;
     }
+}
+
+contract PerpsVaultGas is Base {
+    /// Creation must fit the L2's per-transaction gas cap with a wide margin (bridge constraint: 5,000,000).
+    function test_creation_gas_below_l2_cap() public {
+        _setUpVault();
+        PerpsVault.Config memory c = _config();
+        uint256 g = gasleft();
+        new PerpsVault(c);
+        uint256 used = g - gasleft();
+        assertTrue(used < 5_000_000, "creation above 5,000,000 gas");
+        emit log_named_uint("creation gas (7 validators, 3 guardians)", used);
+    }
+
+    event log_named_uint(string key, uint256 val);
 }

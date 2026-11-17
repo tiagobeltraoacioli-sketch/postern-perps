@@ -588,7 +588,8 @@ contract PerpsVault {
     }
 
     // ------------------------------------------------------------------ withdrawals
-    /// @notice Registers withdrawal record `w`, proven against accepted checkpoint `seq`, and pays up to `want` now.
+    /// @notice Registers withdrawal record `w`, proven against accepted checkpoint `seq`, and pays up to `want` now if it
+    ///         is ready, not paused and the bucket allows (else it stays registered for `release`).
     function withdraw(uint64 seq, Withdrawal calldata w, SumProof calldata proof, uint64 want)
         external
         nonReentrant
@@ -610,7 +611,7 @@ contract PerpsVault {
         if (uint256(withdrawnTotal) + w.amount > latest.withdrawalsTotal) revert Insolvent();
         withdrawnTotal += w.amount;
         _register(key, w.recipient, w.amount);
-        if (want != 0) _release(key, want);
+        _payNow(key, want);
     }
 
     /// @notice Pays up to `want` of a registered payout once it is ready. Anyone may call; it pays the recipient.
@@ -626,6 +627,13 @@ contract PerpsVault {
         committedOut += total;
         reserved += total;
         emit PayoutRegistered(key, recipient, total, readyAt);
+    }
+
+    /// @dev Registering paths pay what they can now and keep the registration otherwise (a large payout, a pause or
+    ///      an empty bucket must never undo the claim); `release` is strict and says why it cannot pay.
+    function _payNow(bytes32 key, uint64 want) private {
+        if (want == 0 || paused() || block.timestamp < payouts[key].readyAt || availableToRelease() == 0) return;
+        _release(key, want);
     }
 
     function _release(bytes32 key, uint64 want) private {
@@ -708,7 +716,7 @@ contract PerpsVault {
         if (uint256(escapeClaimedTotal) + amount > latest.escapeTotal) revert Insolvent();
         escapeClaimedTotal += amount;
         _register(key, account, amount);
-        if (want != 0) _release(key, want);
+        _payNow(key, want);
     }
 
     /// @notice In escape: refunds deposit `index` that the latest checkpoint did not credit, to the credited account,
