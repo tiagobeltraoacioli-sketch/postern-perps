@@ -1,0 +1,13 @@
+[package]
+name = "perps-review-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Agent 395: independent encoder (SPEC 2 and 3) and adversarial harness for the perps engine. UNAUDITED review tooling."
+
+[dependencies]
+sha3 = "0.10"
+k256 = { version = "0.13", features = ["ecdsa"] }
+hex = "0.4"
+
+[workspace]
