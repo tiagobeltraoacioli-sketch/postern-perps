@@ -64,6 +64,10 @@ export function errorWords(error: unknown): string {
       return 'Refused: this key is not approved for the account. Approve the agent key again, or sign with your wallet.';
     case 'AGENT_NOT_ALLOWED':
       return 'Refused: this action needs your main wallet. An agent key cannot do it.';
+    case 'NONCE_WINDOW':
+      return "Refused: the request's time (nonce) is outside the exchange's window. This device's clock differs from the exchange's; correct it and try again. Nothing was changed.";
+    case 'NONCE_USED':
+      return 'Refused: this request was already used (nonce). Try again. Nothing was changed.';
     case 'BAD_NONCE':
       return 'Refused: the request was out of order (nonce). Try again.';
     case 'MARKET_HALTED':

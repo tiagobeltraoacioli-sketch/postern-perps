@@ -4,7 +4,6 @@
   "wsUrl": "wss://api.posterndex.com/v1/ws",
   "l2RpcUrl": "https://l2rpc.blochl1.com",
   "l2ChainId": 700770,
-  "engineChainId": 7007701,
   "vault": null,
   "collateral": null,
   "explorerTx": null

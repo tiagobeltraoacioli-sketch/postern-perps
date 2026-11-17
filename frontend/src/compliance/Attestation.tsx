@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { useStore } from '../lib/store';
-import { geo as geoStore } from '../state/session';
+import { geo as geoStore, signingDomain } from '../state/session';
 import { useActions } from '../state/actions';
 import { walletSigner } from '../lib/sign';
 import { walletError } from '../wallet/wallet';
@@ -25,7 +25,7 @@ export function Attestation({ account, onDone }: { account: string; onDone: () =
     setBusy(true);
     setError('');
     try {
-      const record = await signAttestation(walletSigner(account, (a) => provider.request(a)), attestationMessage(account, country, Date.now()));
+      const record = await signAttestation(walletSigner(account, (a) => provider.request(a)), attestationMessage(account, country, Date.now()), signingDomain.get());
       keepAttestation(record);
       onDone();
     } catch (e) {

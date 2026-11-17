@@ -10,7 +10,7 @@
  */
 import { keccak256, recoverTypedDataAddress, toBytes, type Hex } from 'viem';
 import { signatureProblem, type Signer } from '../lib/sign';
-import type { TypedData } from '../lib/eip712';
+import { EIP712_DOMAIN_TYPE, type Domain, type TypedData } from '../lib/eip712';
 
 export const STATEMENT_ID = 'attest-0.1-20261117';
 export const STATEMENT_DOCUMENT = 'ATTEST-0.1-20261117';
@@ -22,8 +22,11 @@ export const STATEMENT_TEXT =
 /** notices.json `attestation.statementHash` (392, b91d429..47f95bd). */
 export const STATEMENT_HASH = '0xcfdf20a5c360057590fa84786ff9e9b76180ebcbb55390ce7a68f37b3b1b6621';
 
-/** 397's domain (its own name: never an action, never a checkpoint). See the cross-area note on the chain id. */
-export const ATTESTATION_DOMAIN = { name: 'PosternPerps Attestation', version: '1', chainId: 7007701 } as const;
+/**
+ * 397 (c964dcb): the attestation signs under the SPEC 0.1.1 action domain {PosternPerps, 1, 700770, vault}; the 7007701
+ * domain is retired. Separation from actions rests on the primary type name `Attestation` (reserved in SPEC).
+ * No vault, no domain: nothing is signed.
+ */
 export const ATTESTATION_TYPES = {
   Attestation: [
     { name: 'account', type: 'address' },
@@ -51,28 +54,29 @@ export function attestationMessage(account: string, residenceCountry: string, no
   return { account: account.toLowerCase(), statementId: STATEMENT_ID, statementHash: STATEMENT_HASH, residenceCountry: country, issuedAt: String(now), expiresAt: String(now + VALIDITY_MS) };
 }
 
-export function attestationTypedData(message: AttestationMessage) {
+export function attestationTypedData(message: AttestationMessage, domain: Domain) {
   return {
-    domain: { ...ATTESTATION_DOMAIN },
-    types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }], ...ATTESTATION_TYPES },
+    domain: { ...domain },
+    types: { EIP712Domain: EIP712_DOMAIN_TYPE, ...ATTESTATION_TYPES },
     primaryType: 'Attestation' as const,
     message: { ...message },
   };
 }
 
-const forViem = (m: AttestationMessage) =>
-  ({ domain: { ...ATTESTATION_DOMAIN }, types: ATTESTATION_TYPES, primaryType: 'Attestation', message: { ...m, issuedAt: BigInt(m.issuedAt), expiresAt: BigInt(m.expiresAt) } }) as const;
+const forViem = (m: AttestationMessage, domain: Domain) =>
+  ({ domain: { ...domain }, types: ATTESTATION_TYPES, primaryType: 'Attestation', message: { ...m, issuedAt: BigInt(m.issuedAt), expiresAt: BigInt(m.expiresAt) } }) as const;
 
 /** Signs with the MAIN wallet only, checks the signature here, returns the record. */
-export async function signAttestation(signer: Signer, message: AttestationMessage): Promise<AttestationRecord> {
+export async function signAttestation(signer: Signer, message: AttestationMessage, domain: Domain | null): Promise<AttestationRecord> {
+  if (!domain) throw new Error('The vault is not deployed: there is no signing domain, nothing is signed.');
   if (signer.kind !== 'wallet') throw new Error('The attestation is signed by your main wallet only.');
   if (signer.address !== message.account) throw new Error('The wallet account changed.');
   const shown = statementProblem();
   if (shown) throw new Error(`Refused: ${shown}.`);
-  const signature = await signer.sign(attestationTypedData(message) as unknown as TypedData);
+  const signature = await signer.sign(attestationTypedData(message, domain) as unknown as TypedData);
   const form = signatureProblem(signature);
   if (form) throw new Error(`The wallet returned an unusable signature: ${form}.`);
-  const recovered = (await recoverTypedDataAddress({ ...forViem(message), signature: signature as Hex } as never)).toLowerCase();
+  const recovered = (await recoverTypedDataAddress({ ...forViem(message, domain), signature: signature as Hex } as never)).toLowerCase();
   if (recovered !== message.account) throw new Error('The wallet signed with another account than the one shown.');
   return { message, signature };
 }

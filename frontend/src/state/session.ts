@@ -10,7 +10,8 @@
  */
 import { useMemo } from 'react';
 import { api } from '../lib/api';
-import { compareWithNode, DOMAIN } from '../lib/eip712';
+import { compareWithNode, DOMAIN, domainFor, type Domain } from '../lib/eip712';
+import { LOCAL_RENDER } from '../lib/config';
 import { Feed } from '../lib/feed';
 import { tableProblems } from '../lib/pins';
 import { Store, useStore } from '../lib/store';
@@ -22,11 +23,17 @@ export const eip712Problem = new Store<string | null | undefined>(undefined);
 export const geo = new Store<WireGeo | null>(null);
 export const geoRead = new Store<'pending' | 'ok' | 'failed'>('pending');
 export const clockSkewMs = new Store<number | null>(null);
+/**
+ * The signing domain. A published build takes it ONLY from config/production.json (lib/eip712.ts DOMAIN). A local
+ * render build against a loopback mock whose config names no vault takes the vault from the mock's /v1/status once
+ * (393's reference mock deploys its own); such a build is marked "not for publication" and fails the bundle gate.
+ */
+export const signingDomain = new Store<Domain | null>(DOMAIN);
 
 export async function checkEip712() {
   try {
     const published = await api.get<unknown>('/v1/eip712');
-    eip712Problem.set(compareWithNode(published));
+    eip712Problem.set(compareWithNode(published, signingDomain.get()));
   } catch {
     // Unreadable is not "equal": keep the previous verdict if there was one, else stay unchecked.
     if (eip712Problem.get() === undefined) eip712Problem.set(undefined);
@@ -60,6 +67,13 @@ export function startSession() {
   feed.status.subscribe(() => {
     const s = feed.status.get();
     if (s) clockSkewMs.set(s.time - Date.now());
+    if (LOCAL_RENDER && !DOMAIN && !signingDomain.get() && s) {
+      const local = domainFor(s.network?.vault);
+      if (local) {
+        signingDomain.set(local);
+        void checkEip712();
+      }
+    }
   });
 }
 
@@ -67,7 +81,7 @@ export function startSession() {
 export function currentGuard(account: string | null): Guard {
   const markets = feed.markets.get();
   return {
-    domain: DOMAIN,
+    domain: signingDomain.get(),
     account: account?.toLowerCase() ?? null,
     eip712Problem: eip712Problem.get(),
     markets,
@@ -75,6 +89,7 @@ export function currentGuard(account: string | null): Guard {
     geo: geo.get(),
     status: feed.status.get(),
     now: Date.now(),
+    clockSkewMs: clockSkewMs.get(),
   };
 }
 export function useGuard(account: string | null): Guard {
@@ -82,9 +97,11 @@ export function useGuard(account: string | null): Guard {
   const g = useStore(geo);
   const markets = useStore(feed.markets);
   const status = useStore(feed.status);
+  const domain = useStore(signingDomain);
+  const skew = useStore(clockSkewMs);
   return useMemo(
-    () => ({ domain: DOMAIN, account: account?.toLowerCase() ?? null, eip712Problem: problem, markets, tableProblems: tableProblems(markets), geo: g, status, now: Date.now() }),
-    [account, problem, g, markets, status],
+    () => ({ domain, account: account?.toLowerCase() ?? null, eip712Problem: problem, markets, tableProblems: tableProblems(markets), geo: g, status, now: Date.now(), clockSkewMs: skew }),
+    [domain, account, problem, g, markets, status, skew],
   );
 }
 

@@ -56,7 +56,13 @@ export type Guard = {
   status: WireStatus | null;
   /** Unix ms, for agent expiry and approval bounds. */
   now: number;
+  /** Exchange clock minus this device's clock (from /v1/status), or undefined when not measured. */
+  clockSkewMs?: number | null;
 };
+
+/** SPEC 2.5 nonce window around the block time T: T - 120 s <= nonce <= T + 30 s. Nonces are this device's clock. */
+export const NONCE_PAST_MS = 120_000;
+export const NONCE_AHEAD_MS = 30_000;
 
 export type Prepared = {
   type: ActionType;
@@ -190,6 +196,9 @@ export function refusals(type: ActionType, message: Message, signer: Signer | nu
     if (!geo) out.push('Your region could not be confirmed. Only cancelling, reducing and withdrawing are possible.');
     else if (geo.restricted || geo.policy !== 'open') out.push('PosternDEX Perpetuals is not available in your region. Only cancelling, reducing and withdrawing are possible.');
   }
+  const skew = guard.clockSkewMs;
+  if (typeof skew === 'number' && (skew > NONCE_PAST_MS || -skew > NONCE_AHEAD_MS))
+    out.push(`This device's clock is ${Math.round(Math.abs(skew) / 1000)} s ${skew > 0 ? 'behind' : 'ahead of'} the exchange; the exchange accepts a signature only within 2 minutes behind or 30 s ahead of its clock. Correct the clock; nothing was signed.`);
   if (guard.status && guard.status.sequencer.state !== 'running') out.push(`The exchange is not accepting actions (sequencer ${guard.status.sequencer.state}).`);
   for (const p of valueProblems(type, message, guard.markets, guard.now)) out.push(`Refused: ${p}.`);
   return [...new Set(out)];

@@ -2,11 +2,10 @@
  * The exchange's state and the trust model in words: what the sequencer, the committee, the vault and this
  * interface can and cannot do, and every check this interface makes before it asks for a signature.
  */
-import { feed, eip712Problem, geo as geoStore, clockSkewMs } from '../state/session';
+import { feed, signingDomain, eip712Problem, geo as geoStore, clockSkewMs } from '../state/session';
 import { useStore } from '../lib/store';
 import { feedStats } from '../lib/feed';
 import { signingProblem, PINNED_MARKETS } from '../lib/pins';
-import { DOMAIN } from '../lib/eip712';
 import { formatDateTime, shortAddress, DASH } from '../lib/format';
 import { config } from '../lib/config';
 
@@ -17,6 +16,7 @@ export function System() {
   const problem = useStore(eip712Problem);
   const geo = useStore(geoStore);
   const skew = useStore(clockSkewMs);
+  const DOMAIN = useStore(signingDomain);
   const behind = status ? status.latestBlock.height - status.latestFinalized.height : null;
   const flushes = feedStats.flushMs;
   const p95 = flushes.length ? [...flushes].sort((a, b) => a - b)[Math.floor(flushes.length * 0.95)] : null;
