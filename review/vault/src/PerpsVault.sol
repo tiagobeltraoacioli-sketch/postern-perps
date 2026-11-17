@@ -31,27 +31,27 @@ pragma solidity 0.8.24;
 contract PerpsVault {
     // ------------------------------------------------------------------ constants
     uint8 public constant decimals = 6;
-    uint256 public constant MAX_VALIDATORS = 16;
-    uint256 public constant MAX_GUARDIANS = 7;
-    uint64 public constant MAX_PAUSE_DURATION = 14 days;
-    uint64 public constant MAX_LARGE_DELAY = 14 days;
-    uint64 public constant MIN_FORCED_DELAY = 1 hours;
-    uint64 public constant MAX_FORCED_DELAY = 7 days;
-    uint64 public constant MIN_ESCAPE_DELAY = 1 days;
-    uint64 public constant MAX_ESCAPE_DELAY = 30 days;
+    uint256 internal constant MAX_VALIDATORS = 16;
+    uint256 internal constant MAX_GUARDIANS = 7;
+    uint64 internal constant MAX_PAUSE_DURATION = 14 days;
+    uint64 internal constant MAX_LARGE_DELAY = 14 days;
+    uint64 internal constant MIN_FORCED_DELAY = 1 hours;
+    uint64 internal constant MAX_FORCED_DELAY = 7 days;
+    uint64 internal constant MIN_ESCAPE_DELAY = 1 days;
+    uint64 internal constant MAX_ESCAPE_DELAY = 30 days;
     /// Escape surplus (custody nobody can claim) becomes sweepable to `feeRecipient` this long after escape.
     uint64 public constant SURPLUS_DELAY = 90 days;
     /// Deepest sum-tree proof accepted (2^48 leaves).
-    uint256 public constant MAX_PROOF_DEPTH = 48;
+    uint256 internal constant MAX_PROOF_DEPTH = 48;
 
-    uint8 public constant FORCED_CANCEL_ALL = 1;
-    uint8 public constant FORCED_CLOSE = 2;
-    uint8 public constant FORCED_WITHDRAW = 3;
+    uint8 internal constant FORCED_CANCEL_ALL = 1;
+    uint8 internal constant FORCED_CLOSE = 2;
+    uint8 internal constant FORCED_WITHDRAW = 3;
 
-    bytes32 public constant DOMAIN_TYPEHASH =
+    bytes32 internal constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-    bytes32 public constant NAME_HASH = keccak256("PosternPerpsVault");
-    bytes32 public constant VERSION_HASH = keccak256("1");
+    bytes32 internal constant NAME_HASH = keccak256("PosternPerpsVault");
+    bytes32 internal constant VERSION_HASH = keccak256("1");
     bytes32 public constant CHECKPOINT_TYPEHASH = keccak256(
         "Checkpoint(uint64 height,uint64 time,bytes32 stateRoot,bytes32 logHash,uint64 depositsCredited,"
         "bytes32 depositsHead,uint64 forcedProcessed,bytes32 forcedHead,uint64 withdrawalCount,"
@@ -59,10 +59,10 @@ contract PerpsVault {
     );
     bytes32 public constant UNPAUSE_TYPEHASH = keccak256("Unpause(uint64 pauseCount,uint256 validUntil)");
 
-    bytes32 public constant DEPOSIT_CHAIN_TAG = bytes32("PosternPerps.deposit.v1");
-    bytes32 public constant FORCED_CHAIN_TAG = bytes32("PosternPerps.forced.v1");
-    bytes32 public constant WITHDRAWAL_LEAF_TAG = bytes32("PosternPerps.withdrawal.v1");
-    bytes32 public constant ESCAPE_LEAF_TAG = bytes32("PosternPerps.escape.v1");
+    bytes32 internal constant DEPOSIT_CHAIN_TAG = bytes32("PosternPerps.deposit.v1");
+    bytes32 internal constant FORCED_CHAIN_TAG = bytes32("PosternPerps.forced.v1");
+    bytes32 internal constant WITHDRAWAL_LEAF_TAG = bytes32("PosternPerps.withdrawal.v1");
+    bytes32 internal constant ESCAPE_LEAF_TAG = bytes32("PosternPerps.escape.v1");
     bytes32 private constant WITHDRAWAL_KEY = bytes32("W");
     bytes32 private constant ESCAPE_KEY = bytes32("E");
 
@@ -359,11 +359,11 @@ contract PerpsVault {
         return keccak256(abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this)));
     }
 
-    function depositChainGenesis() public view returns (bytes32) {
+    function depositChainGenesis() internal view returns (bytes32) {
         return keccak256(abi.encode(DEPOSIT_CHAIN_TAG, block.chainid, address(this)));
     }
 
-    function forcedChainGenesis() public view returns (bytes32) {
+    function forcedChainGenesis() internal view returns (bytes32) {
         return keccak256(abi.encode(FORCED_CHAIN_TAG, block.chainid, address(this)));
     }
 
@@ -377,7 +377,7 @@ contract PerpsVault {
 
     /// @notice Chain link of deposit `index` (0-based) after `previous`.
     function depositLink(bytes32 previous, uint64 index, address account, uint64 amount)
-        public
+        internal
         pure
         returns (bytes32)
     {
@@ -392,7 +392,7 @@ contract PerpsVault {
         uint32 marketId,
         uint64 amount,
         uint64 deadline
-    ) public pure returns (bytes32) {
+    ) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
                 previous, uint256(index), account, uint256(kind), uint256(marketId), uint256(amount), uint256(deadline)
@@ -430,17 +430,17 @@ contract PerpsVault {
         );
     }
 
-    function withdrawalLeaf(Withdrawal calldata w) public pure returns (bytes32) {
+    function withdrawalLeaf(Withdrawal calldata w) internal pure returns (bytes32) {
         return keccak256(abi.encode(WITHDRAWAL_LEAF_TAG, uint256(w.index), w.account, w.recipient, uint256(w.amount)));
     }
 
-    function escapeLeaf(address account, uint64 amount) public pure returns (bytes32) {
+    function escapeLeaf(address account, uint64 amount) internal pure returns (bytes32) {
         return keccak256(abi.encode(ESCAPE_LEAF_TAG, account, uint256(amount)));
     }
 
     /// @notice Parent of two sum-tree nodes: 81 bytes, so never equal to a 128- or 96-byte leaf preimage.
     function nodeHash(bytes32 leftHash, uint64 leftSum, bytes32 rightHash, uint64 rightSum)
-        public
+        internal
         pure
         returns (bytes32)
     {
@@ -449,7 +449,7 @@ contract PerpsVault {
 
     /// @notice Root hash and total of the tree a leaf belongs to by `proof`. Reverts on overflow or a malformed proof.
     function sumRoot(bytes32 leafHash, uint64 leafSum, SumProof calldata proof)
-        public
+        internal
         pure
         returns (bytes32 h, uint64 s)
     {
@@ -470,11 +470,11 @@ contract PerpsVault {
         }
     }
 
-    function withdrawalKey(uint64 index) public pure returns (bytes32) {
+    function withdrawalKey(uint64 index) internal pure returns (bytes32) {
         return keccak256(abi.encode(WITHDRAWAL_KEY, uint256(index)));
     }
 
-    function escapeKey(address account) public pure returns (bytes32) {
+    function escapeKey(address account) internal pure returns (bytes32) {
         return keccak256(abi.encode(ESCAPE_KEY, account));
     }
 
@@ -588,7 +588,8 @@ contract PerpsVault {
     }
 
     // ------------------------------------------------------------------ withdrawals
-    /// @notice Registers withdrawal record `w`, proven against accepted checkpoint `seq`, and pays up to `want` now.
+    /// @notice Registers withdrawal record `w`, proven against accepted checkpoint `seq`, and pays up to `want` now if it
+    ///         is ready, not paused and the bucket allows (else it stays registered for `release`).
     function withdraw(uint64 seq, Withdrawal calldata w, SumProof calldata proof, uint64 want)
         external
         nonReentrant
@@ -610,7 +611,7 @@ contract PerpsVault {
         if (uint256(withdrawnTotal) + w.amount > latest.withdrawalsTotal) revert Insolvent();
         withdrawnTotal += w.amount;
         _register(key, w.recipient, w.amount);
-        if (want != 0) _release(key, want);
+        _payNow(key, want);
     }
 
     /// @notice Pays up to `want` of a registered payout once it is ready. Anyone may call; it pays the recipient.
@@ -626,6 +627,13 @@ contract PerpsVault {
         committedOut += total;
         reserved += total;
         emit PayoutRegistered(key, recipient, total, readyAt);
+    }
+
+    /// @dev Registering paths pay what they can now and keep the registration otherwise (a large payout, a pause or
+    ///      an empty bucket must never undo the claim); `release` is strict and says why it cannot pay.
+    function _payNow(bytes32 key, uint64 want) private {
+        if (want == 0 || paused() || block.timestamp < payouts[key].readyAt || availableToRelease() == 0) return;
+        _release(key, want);
     }
 
     function _release(bytes32 key, uint64 want) private {
@@ -708,7 +716,7 @@ contract PerpsVault {
         if (uint256(escapeClaimedTotal) + amount > latest.escapeTotal) revert Insolvent();
         escapeClaimedTotal += amount;
         _register(key, account, amount);
-        if (want != 0) _release(key, want);
+        _payNow(key, want);
     }
 
     /// @notice In escape: refunds deposit `index` that the latest checkpoint did not credit, to the credited account,
