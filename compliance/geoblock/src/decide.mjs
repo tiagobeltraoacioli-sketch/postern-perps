@@ -118,7 +118,8 @@ function isExitAction(list, action) {
  *        action?: {type, reduceOnly?}, geo?: {country, subdivision, trusted}, signals?: {tor, vpnProxy, hosting},
  *        addresses?: [{role, address}], sanctions?: SanctionsSet|null, nowMs?: number,
  *        attestation?: {status: 'valid'|'missing'|'invalid'|'expired', residenceCountry?}|'deferred'|null,
- *          ('deferred' only at the edge: the node, which holds the records, re-decides with the real value),
+ *          ('deferred' only with caller: 'edge'; the node, which holds the records, re-decides with the real value),
+ *        caller?: 'edge' (set only by edge/worker.mjs),
  *        requireAttestation?: boolean (default: true in live, false in dev) }
  * `list` may be null (missing or refused list): then only reads and no-value actions pass.
  */
@@ -133,6 +134,9 @@ export function decide(list, req) {
   if (mode !== 'live' && mode !== 'dev') return refuse(base, 'MALFORMED', 400, 'mode');
   if (!['action', 'read', 'deposit'].includes(req.kind)) return refuse(base, 'MALFORMED', 400, 'kind');
   if (req.surface !== 'api' && req.surface !== 'ui') return refuse(base, 'MALFORMED', 400, 'surface');
+  // R395-35: 'deferred' (judge the attestation later) is the edge's value only; anywhere else it would skip the
+  // attestation rule and the hosting refusal, so it is refused unless the caller declares itself the edge.
+  if (req.attestation === 'deferred' && req.caller !== 'edge') return refuse(base, 'MALFORMED', 400, 'attestation deferred outside the edge');
   let action = null;
   if (req.kind === 'action') {
     action = req.action;

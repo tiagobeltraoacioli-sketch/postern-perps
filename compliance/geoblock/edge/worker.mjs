@@ -12,7 +12,15 @@
 //     sanctions list, decides; a refusal is answered here with the API's 451/403/503 error body; an allowed
 //     action is forwarded with the authenticated geo assertion. The node re-decides (the edge is a filter, the
 //     node's admission is the authority) and also screens the recovered signer, which only it computes.
-//     Other /v1/* (reads, the WebSocket upgrade): forwarded with the assertion; never geoblocked here (public reads).
+//     /v1/ws (R395-36): the edge holds both sockets and screens EVERY client frame with `op: "action"` through the
+//     same decision (screenWsMessage); a refused frame is answered with the API's `op: "error"` frame and never
+//     reaches the node; an allowed one is forwarded with its OWN fresh assertion in the field `edgeGeo`
+//     ({header, mac}), minted per action, never per connection (the observation is the connection's client IP,
+//     fixed for its life; the assertion's 30 s window and request id bind it to this one action). A client frame
+//     that already carries `edgeGeo` is refused. Without WebSocketPair (any runtime but a Worker) the upgrade is
+//     refused (503): a socket is never passed through unscreened. Node rule (389): in live mode a WebSocket action
+//     is admitted only with a valid `edgeGeo` assertion, verified exactly like the header.
+//     Other /v1/* (reads): forwarded with the assertion; never geoblocked here (public reads).
 //     Anything else (the static app): forwarded unchanged; the app reads /v1/geo and shows the notices.
 //  4. Fail closed: no list, no sanctions list (live), or no MAC secret -> actions refused with 503, except the
 //     no-value actions the decision allows; reads still pass (without an assertion, which the node needs only to
@@ -25,6 +33,7 @@ import { encodeAssertion, macAssertion, HEADER, MAC_HEADER, MIN_SECRET_BYTES } f
 import { hexToBytes } from '../src/keccak.mjs';
 
 export const MAX_BODY_BYTES = 16 * 1024;
+export const EDGE_GEO_FIELD = 'edgeGeo';
 const STRIP = [HEADER, MAC_HEADER, 'x-mock-country'];
 
 const json = (status, body, extra = {}) => new Response(JSON.stringify(body), {
@@ -74,6 +83,40 @@ async function readBody(request) {
   try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(buf), bytes: buf }; } catch { return { bad: true }; }
 }
 
+const wsError = (id, code, message, details = {}) => JSON.stringify({ op: 'error', id: id ?? null, error: { code, message, details } });
+
+function mint(cfg, obs, surface) {
+  const country = obs.geo.country && /^[A-Z][A-Z0-9]$/.test(obs.geo.country) ? obs.geo.country : null;
+  const header = encodeAssertion({ country, subdivision: obs.geo.subdivision, signals: obs.signals, surface, tsMs: cfg.now(), requestId: cfg.randomId() });
+  return { header, mac: macAssertion(cfg.secret, header) };
+}
+
+/**
+ * screenWsMessage(text, obs, cfg) -> {forward: string} | {reply: string}. One client WebSocket frame.
+ * cfg: {mode, list, sanctions, secret, now, randomId}. Frames other than `op: "action"` pass unchanged.
+ */
+export function screenWsMessage(text, obs, cfg) {
+  if (typeof text !== 'string') return { reply: wsError(null, 'MALFORMED', MESSAGES.MALFORMED, { path: 'frame' }) };
+  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return { reply: wsError(null, 'TOO_LARGE', 'Frame over 16 KiB.') };
+  let f;
+  try { f = JSON.parse(text); } catch { return { reply: wsError(null, 'MALFORMED', MESSAGES.MALFORMED, { path: 'frame' }) }; }
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return { reply: wsError(null, 'MALFORMED', MESSAGES.MALFORMED, { path: 'frame' }) };
+  if (f.op !== 'action') return { forward: text };
+  const id = f.id;
+  if (Object.hasOwn(f, EDGE_GEO_FIELD)) return { reply: wsError(id, 'MALFORMED', MESSAGES.MALFORMED, { path: EDGE_GEO_FIELD }) };
+  const r = f.request;
+  if (!r || typeof r !== 'object' || typeof r.type !== 'string' || typeof r.message !== 'object' || r.message === null) {
+    return { reply: wsError(id, 'MALFORMED', MESSAGES.MALFORMED, { path: 'request' }) };
+  }
+  const action = { type: r.type, reduceOnly: r.type === 'PlaceOrder' ? r.message.reduceOnly : undefined };
+  const d = decide(cfg.list ?? null, { mode: cfg.mode, surface: 'api', kind: 'action', action, geo: obs.geo, signals: obs.signals,
+    addresses: messageAddresses(r.type, r.message), sanctions: cfg.sanctions ?? null, nowMs: cfg.now(), attestation: 'deferred', caller: 'edge' });
+  if (!d.allow) return { reply: wsError(id, d.code, MESSAGES[d.code] ?? MESSAGES.MALFORMED, { country: d.country, listVersion: d.listVersion, reasonCode: d.reasons[0] ?? d.detail ?? null }) };
+  const secretOk = cfg.secret instanceof Uint8Array && cfg.secret.length >= MIN_SECRET_BYTES;
+  if (!secretOk) return { reply: wsError(id, 'SEQUENCER_UNAVAILABLE', 'Edge not configured.', { reasonCode: 'NO_EDGE_SECRET' }) };
+  return { forward: JSON.stringify({ ...f, [EDGE_GEO_FIELD]: mint(cfg, obs, 'api') }) };
+}
+
 /**
  * createEdge(config) -> async handler(request, cf)
  * config: {mode: 'live'|'dev', list (loaded), sanctions (loaded) | null, secret: Uint8Array | null,
@@ -116,13 +159,36 @@ export function createEdge(cfg) {
         return apiError(400, 'MALFORMED', MESSAGES.MALFORMED, { path: 'envelope' });
       }
       const action = { type: env.type, reduceOnly: env.type === 'PlaceOrder' ? env.message.reduceOnly : undefined };
-      const d = decide(list ?? null, { ...base, kind: 'action', action, addresses: messageAddresses(env.type, env.message), attestation: 'deferred' });
+      const d = decide(list ?? null, { ...base, kind: 'action', action, addresses: messageAddresses(env.type, env.message), attestation: 'deferred', caller: 'edge' });
       if (!d.allow) {
         const message = MESSAGES[d.code] ?? MESSAGES.MALFORMED;
         return apiError(d.httpStatus, d.code, message, { country: d.country, listVersion: d.listVersion, reasonCode: d.reasons[0] ?? d.detail ?? null });
       }
       if (!secretOk && mode === 'live') return apiError(503, 'SEQUENCER_UNAVAILABLE', 'Edge not configured.', { reasonCode: 'NO_EDGE_SECRET' });
       return forward(request, url, obs, 'api', body.bytes);
+    }
+    if (url.pathname === '/v1/ws') {
+      if ((request.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') return apiError(400, 'MALFORMED', MESSAGES.MALFORMED, { path: 'upgrade' });
+      if (typeof globalThis.WebSocketPair !== 'function') return apiError(503, 'SEQUENCER_UNAVAILABLE', 'WebSocket screening unavailable.', { reasonCode: 'NO_WEBSOCKET_PAIR' });
+      // Worker runtime: open the origin socket, then relay with every client frame screened.
+      const headers = new Headers(request.headers);
+      for (const h of STRIP) headers.delete(h);
+      const up = await fetchOrigin(new Request(new URL('/v1/ws', origin), { headers }));
+      const originWs = up.webSocket;
+      if (!originWs) return apiError(503, 'SEQUENCER_UNAVAILABLE', 'Origin refused the WebSocket.');
+      originWs.accept();
+      const pair = new globalThis.WebSocketPair();
+      const [client, server] = Object.values(pair);
+      server.accept();
+      const cfgWs = { mode, list, sanctions, secret: secretOk ? secret : null, now, randomId };
+      server.addEventListener('message', (ev) => {
+        const r = screenWsMessage(typeof ev.data === 'string' ? ev.data : null, obs, cfgWs);
+        if (r.forward !== undefined) originWs.send(r.forward); else server.send(r.reply);
+      });
+      originWs.addEventListener('message', (ev) => server.send(ev.data));
+      server.addEventListener('close', (ev) => { try { originWs.close(ev.code, ev.reason); } catch {} });
+      originWs.addEventListener('close', (ev) => { try { server.close(ev.code, ev.reason); } catch {} });
+      return new Response(null, { status: 101, webSocket: client });
     }
     return forward(request, url, obs, 'api');
   };

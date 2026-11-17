@@ -3139,7 +3139,8 @@
       "address": "0x00000000000000000000000000000000000000a1"
      }
     ],
-    "attestation": "deferred"
+    "attestation": "deferred",
+    "caller": "edge"
    },
    "expect": {
     "allow": true,
@@ -3177,7 +3178,8 @@
       "address": "0x00000000000000000000000000000000000000a1"
      }
     ],
-    "attestation": "deferred"
+    "attestation": "deferred",
+    "caller": "edge"
    },
    "expect": {
     "allow": true,
@@ -3215,7 +3217,8 @@
       "address": "0x00000000000000000000000000000000000000a1"
      }
     ],
-    "attestation": "deferred"
+    "attestation": "deferred",
+    "caller": "edge"
    },
    "expect": {
     "allow": false,
@@ -3561,6 +3564,83 @@
     "httpStatus": 200,
     "exitOnly": false,
     "reasons": []
+   }
+  },
+  {
+   "name": "R395-35: 'deferred' outside the edge is refused (node path)",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": "deferred"
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
+   }
+  },
+  {
+   "name": "R395-35: 'deferred' with another caller value is refused",
+   "list": "fixture",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "PA",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": true
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "PlaceOrder",
+     "reduceOnly": false
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": "deferred",
+    "caller": "node"
+   },
+   "expect": {
+    "allow": false,
+    "code": "MALFORMED",
+    "httpStatus": 400,
+    "exitOnly": false
    }
   }
  ]
