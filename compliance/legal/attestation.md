@@ -4,26 +4,25 @@ Document id: `ATTEST-0.1-20261117`. Status: DRAFT FOR COUNSEL. Not legal advice.
 
 ## Text the user reads and signs (exact; machine-readable copy in `notices.json` field `attestation`)
 
-The text signed is the `attestation.text` string of `compliance/legal/notices.json`, byte for byte; its SHA-256 is
-`attestation.sha256` in the same file (checked by the tests).
+The text signed is `attestation.text` of `compliance/legal/notices.json`, byte for byte (the document id on the
+first line, then one line per statement). Its keccak-256 is `attestation.statementHash` and its id for the record
+is `attestation.statementId` (lower case, agent 397's id rule); both are checked by the tests.
 
-## How it is signed (Decided, technical, agent 392; the record format is agent 397's)
+## How it is signed (the record and its typed data are agent 397's: `compliance/geoblock/src/attestation.mjs`)
 
-- Signed as EIP-712 typed data in the engine's signing domain of SPEC 2.1 (`{name "PosternPerps", version "1",
-  chainId 700770, verifyingContract = the PerpsVault address pinned at build time}`; so a staging attestation
-  never verifies against production, R395-2), primary type
-  `Attestation(address account,string documentId,bytes32 documentHash,string country,uint64 issuedAt)`, where
-  `documentHash` = SHA-256 of the exact UTF-8 text, `country` = the ISO code the Interface detected (or `XX`),
-  `issuedAt` = seconds since the epoch. The wallet shows the document id and the country; the text itself is shown
-  in full by the Interface before the signature (a wallet cannot display a long text in typed data reliably).
-- Reason for a signature instead of a click: the record must show that the key holder made the statement; a
-  click proves only that a browser did. Reason for typed data instead of `personal_sign` of the whole text:
-  hardware wallets display typed-data fields; long personal messages are often shown as a hash only.
-- This is not a trading action: the engine never sees it and it moves nothing. It must not be accepted as any
-  action type (different primary type; 388 and 389 to confirm that no action type is named `Attestation`).
-- A new document id requires a new signature before the next order (the Interface checks its stored version).
+- EIP-712 `Attestation(address account,string statementId,bytes32 statementHash,string residenceCountry,uint64
+  issuedAt,uint64 expiresAt)` in its own domain name `PosternPerps Attestation` (never accepted as an action or a
+  checkpoint), validity at most 400 days, residence declared by the user; a declared residence the list denies
+  makes the user exit-only. The Interface shows the full text before the signature (a wallet cannot display a long
+  text reliably); the wallet shows the id, the hash and the declared country.
+- Why a signature and not a click: the record must show that the key holder made the statement.
+- Two points raised with 397 (cross-area, 2026-11-17): (1) its domain's `chainId` 7007701 is the value 391 found
+  injected wallets refuse ("Provided chainId must match the active chainId"); SPEC 2.1 moved actions to 700770 for
+  that reason; (2) without a `verifyingContract` (or a deployment-specific id) an attestation signed on staging is
+  valid on production (the R395-2 class; low impact here since it moves no value, but the record should name the
+  deployment).
 
 ## Not done / not proven
 
 - Whether a signed self-declaration has any legal value in each jurisdiction: for counsel.
-- 397 owns the stored record (fields, retention, where it is kept); this file proposes the signed content only.
+- 397 owns the stored record (fields, retention, where it is kept) and the typed data; this file owns the text.

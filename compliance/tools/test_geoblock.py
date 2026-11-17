@@ -57,7 +57,7 @@ def violations(geo, old=OLD, src=SRC, iso=ISO):
                 if s not in src:
                     v.append(f"G-6 {code}: source {s} not in sources.json")
             for q in e.get("counsel", []):
-                if q not in geo["counsel_questions"]:
+                if q not in geo["research"]["counsel_questions"]:
                     v.append(f"G-6 {code}: counsel question {q} undefined")
             if e["tier"] == "allowed":
                 good = [s for s in e["sources"] if s in src and "UNVERIFIED" not in src[s].get("status", "")

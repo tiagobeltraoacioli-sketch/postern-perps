@@ -11,6 +11,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from keccak import keccak256  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 COMP = os.path.dirname(HERE)
 REPO = os.path.dirname(COMP)
@@ -40,18 +43,13 @@ def build():
     out["documents"] = docs
     out["attestation"] = {
         "documentId": att_id,
+        "statementId": att_id.lower(),
         "text": text,
+        "statementHash": "0x" + keccak256(text.encode("utf8")).hex(),
         "sha256": hashlib.sha256(text.encode("utf8")).hexdigest(),
-        "eip712": {
-            "domain": {"name": "PosternPerps", "version": "1", "chainId": 700770,
-                       "verifyingContract": "TBD-deploy: the PerpsVault address, pinned at build time (SPEC 2.1)"},
-            "primaryType": "Attestation",
-            "types": {"Attestation": [
-                {"name": "account", "type": "address"}, {"name": "documentId", "type": "string"},
-                {"name": "documentHash", "type": "bytes32"}, {"name": "country", "type": "string"},
-                {"name": "issuedAt", "type": "uint64"}]},
-            "documentHash": "0x" + hashlib.sha256(text.encode("utf8")).hexdigest(),
-        },
+        "typedData": "agent 397: compliance/geoblock/src/attestation.mjs (Attestation(address account,string "
+                     "statementId,bytes32 statementHash,string residenceCountry,uint64 issuedAt,uint64 expiresAt)); "
+                     "statementId and statementHash above are its inputs",
     }
     return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
 
