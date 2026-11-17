@@ -116,7 +116,7 @@ fn r395_14_backstop_is_unwound_by_the_opposite_side() {
     let bs = |e: &Engine| e.accounts[ACCT_BACKSTOP as usize].positions.get(&1).map(|x| x.size).unwrap_or(0);
     assert_eq!(bs(&r.e), 10_000_000, "the backstop took a's long");
     // b (short) closes through a forced request: the backstop's long is the first thing it meets
-    let f = Input::Forced { index: 0, account: b, kind: FORCED_CLOSE, market_id: 0, amount: 0, deadline: 0 };
+    let f = Input::Forced { index: 0, account: b, kind: FORCED_CLOSE, deadline: 0, arg: 0 };
     r.block(3000, Some(p), vec![f]);
     assert_eq!(bs(&r.e), 0, "the backstop's position was reduced by the opposite side");
     let _ = engine::ACCT_INSURANCE;

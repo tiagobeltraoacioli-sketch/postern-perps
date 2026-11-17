@@ -27,8 +27,8 @@ impl Rig {
         self.dep += 1;
         i
     }
-    fn forced(&mut self, a: Addr, kind: u8, market_id: u32, amount: u64) -> Input {
-        let i = Input::Forced { index: self.fid, account: a, kind, market_id, amount, deadline: T0 / 1000 + 86_400 };
+    fn forced(&mut self, a: Addr, kind: u8, _market_id: u32, arg: u64) -> Input {
+        let i = Input::Forced { index: self.fid, account: a, kind, deadline: T0 / 1000 + 86_400, arg };
         self.fid += 1;
         i
     }

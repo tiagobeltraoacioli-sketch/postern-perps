@@ -1,0 +1,11 @@
+{
+  "_note": "UNAUDITED prototype shared vector (388, SPEC 0.1.6): VAULT.md 0.2 forced-request chain; computed independently in tests/r390.rs and by the engine.",
+  "chainId": 700770,
+  "vault": "0x00000000000000000000000000000000000ba417",
+  "requests": [
+    {"index": 0, "account": "0x4be5ca6bcf47515945697c1451676b7a3971fbca", "kind": 0, "deadline": "1794966400", "arg": "0"},
+    {"index": 1, "account": "0x4be5ca6bcf47515945697c1451676b7a3971fbca", "kind": 2, "deadline": "1794966401", "arg": "5000000"}
+  ],
+  "forcedHead2": "0xef4758f64316a851cda4dbd78f4627774502320f46836b5255e365dfcff61be3",
+  "inputTag0x03Payload": "be64 index || account:20 || kind:u8 || be64 deadline || be64 arg"
+}
