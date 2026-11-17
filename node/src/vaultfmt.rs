@@ -31,7 +31,7 @@ pub fn forced_head_next(prev: &H256, index: u64, account: &Address, kind: u64, d
 }
 
 
-/// Shared vectors of agent 390: `contracts/test/vectors/vault-vectors.json` (schema 0.2, contracts 27c1969,
+/// Shared vectors of agent 390: `contracts/test/vectors/vault-vectors.json` (schema 0.3, contracts 64072cb,
 /// produced by `forge test --mc PerpsVaultVectors`). The node must reproduce every output byte for byte.
 #[cfg(test)]
 mod vault_vectors {
@@ -71,7 +71,8 @@ mod vault_vectors {
             withdrawal_count: 4,
             withdrawals_total: 1_000_000,
         };
-        assert_eq!(to_hex(&cp.state_root()), "0xe72601eaf3f450e42a4936525576728e24a4c75301e50dc379caca768cbfec22");
+        // vectors 0.3 (64072cb): SPEC 0.1.5 systemHash with withdrawalCount/Total; the 0.1.1 value was 0xe726…ec22
+        assert_eq!(to_hex(&cp.state_root()), "0xa37422a49ce13023aba96c4eb9989223238fc85e408d8bbf083d645d79dba9ac");
         assert_eq!(to_hex(&cp.digest(&dom)), "0xedbdd9a9ebd4e2e3767ec12a7c2e2fa499fd328953513ff27eb7ad385e3163f9");
         let w = WithdrawalRecord {
             id: 3,
@@ -90,5 +91,26 @@ mod vault_vectors {
         j["stateRoot"] = to_hex(&k("x")).into();
         assert!(CheckpointBody::from_json(&j).is_err());
         assert_eq!(CheckpointBody::from_json(&cp.to_json()).unwrap(), cp);
+    }
+}
+
+/// VAULT 0.2 forced-request input bytes (tag 0x03 = index || account || kind || be64 deadline (L2 s) || be64 arg),
+/// written out by hand from VAULT.md 5.4 / SPEC 3.2, so the node codec is checked against the text, not itself.
+#[cfg(test)]
+mod forced_bytes {
+    use crate::types::{encode_inputs, ForcedEvent, ForcedKind, Input};
+
+    #[test]
+    fn forced_input_bytes_follow_vault_0_2() {
+        let (g, _) = crate::dev::dev_genesis("forced-bytes", 7, 5, 10, 0);
+        let f = ForcedEvent { index: 3, account: [0x11; 20], kind: ForcedKind::Withdraw, deadline: 1_800_000_000, arg: 5_000_000, head: [0; 32], l2_block: 0, l2_block_hash: [0; 32], l2_tx_hash: [0; 32], log_index: 0 };
+        let enc = encode_inputs(&g.types, &[Input::Forced(f)]).unwrap();
+        let mut want = vec![0, 0, 0, 1, 0x03, 0, 0, 0, 8 + 20 + 1 + 8 + 8];
+        want.extend_from_slice(&3u64.to_be_bytes());
+        want.extend_from_slice(&[0x11; 20]);
+        want.push(2);
+        want.extend_from_slice(&1_800_000_000u64.to_be_bytes());
+        want.extend_from_slice(&5_000_000u64.to_be_bytes());
+        assert_eq!(enc, want);
     }
 }

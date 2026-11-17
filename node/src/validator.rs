@@ -58,7 +58,7 @@ pub fn is_checkpoint_height(g: &Genesis, height: u64, inputs: &[Input], created_
 /// reproduce the block's state root (the equation the vault recomputes).
 pub fn checkpoint_body(g: &Genesis, e: &dyn Engine, b: &Block, view: &L2View) -> Result<CheckpointBody, String> {
     let dc = e.next_deposit_index();
-    let fp = e.next_forced_index();
+    let fp = e.forced_processed();
     let deposits_head = if dc == 0 {
         deposit_head0(700_770, &g.vault)
     } else {
@@ -254,7 +254,7 @@ impl Validator {
         // this validator's endpoints report, plus a submission margin
         let body = {
             let v = self.view.lock().unwrap();
-            let next = self.engine.next_forced_index();
+            let next = self.engine.forced_processed();
             if let Some((i, f)) = v.forced.range(next..).next() {
                 if f.deadline <= v.l2_time_s.saturating_add(FORCED_SUBMIT_MARGIN_S) {
                     return VResult::AppliedNotSigned(format!("forced request {i} is past its deadline and not processed: not signing"));

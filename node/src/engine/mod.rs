@@ -150,10 +150,11 @@ pub struct StateParts {
     pub total_escape: u128,
     pub dust: u128,
     pub aux_hash: H256,
+    pub withdrawal_count: u64,
     pub withdrawals_total: u64,
 }
 
-/// SPEC 11 state root from its components (the vault's `stateRootOf`).
+/// SPEC 0.1.5 section 11 state root from its components (the vault's `stateRootOf`, VAULT 64072cb).
 pub fn state_root_of(height: u64, time: u64, next_deposit: u64, next_forced: u64, p: &StateParts) -> H256 {
     let sys = keccak_parts(&[
         b"PPv1sys",
@@ -163,6 +164,8 @@ pub fn state_root_of(height: u64, time: u64, next_deposit: u64, next_forced: u64
         &p.total_escape.to_be_bytes(),
         &p.dust.to_be_bytes(),
         &p.aux_hash,
+        &p.withdrawal_count.to_be_bytes(),
+        &p.withdrawals_total.to_be_bytes(),
     ]);
     keccak_parts(&[b"PosternPerps/state/v1", &height.to_be_bytes(), &time.to_be_bytes(), &p.accounts_root, &p.markets_root, &p.withdrawals_root, &sys])
 }
@@ -181,7 +184,13 @@ pub trait Engine: Send + Sync {
     fn snapshot(&self) -> Vec<u8>;
     fn restore(&mut self, bytes: &[u8]) -> Result<(), String>;
     fn next_deposit_index(&self) -> u64;
+    /// Forced requests RECEIVED (the next input index the engine accepts).
     fn next_forced_index(&self) -> u64;
+    /// Forced requests PROCESSED (SPEC 0.1.5 / VAULT 5.2 `nextForcedIndex`; a request refused for a halt-caused
+    /// reason is received but not processed, R395-5).
+    fn forced_processed(&self) -> u64 {
+        self.next_forced_index()
+    }
     fn last_oracle_round(&self) -> u64;
     /// Admission pre-filter: may `signer` act for `account` with action `primary` at engine time `time`?
     fn authority(&self, account: &Address, signer: &Address, primary: &str, time: u64) -> Result<(), AuthorityError>;

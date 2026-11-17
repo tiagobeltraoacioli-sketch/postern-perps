@@ -646,6 +646,7 @@ impl Engine for StubEngine {
             total_escape: self.collateral.values().sum(),
             dust: 0,
             aux_hash: keccak_parts(&[b"stub aux v0", &self.serialize()]),
+            withdrawal_count: self.withdrawals.len() as u64,
             withdrawals_total: self.withdrawals.iter().map(|w| w.amount).sum(),
         }
     }

@@ -96,6 +96,9 @@ impl Engine for RealEngine {
     fn next_forced_index(&self) -> u64 {
         self.e.next_forced
     }
+    fn forced_processed(&self) -> u64 {
+        self.e.forced_processed
+    }
     fn last_oracle_round(&self) -> u64 {
         self.e.last_oracle_round.unwrap_or(0)
     }
@@ -129,7 +132,7 @@ impl Engine for RealEngine {
         Some(WithdrawalRecord { id: w.id, account: w.account, recipient: w.recipient, amount: w.amount, fee: self.g.withdrawal_fee as u64, height: w.height })
     }
     fn state_parts(&self) -> StateParts {
-        let total_escape: u128 = (0..self.e.accounts.len() as u32).map(|i| self.e.escape_value(i) as u128).sum();
+        let total_escape: u128 = self.e.escape_values().iter().map(|x| *x as u128).sum();
         StateParts {
             accounts_root: pe::merkle::root(&self.e.account_leaves(), pe::engine::ACCOUNT_DEPTH),
             markets_root: self.e.markets_root(),
@@ -138,6 +141,7 @@ impl Engine for RealEngine {
             total_escape,
             dust: self.e.dust as u128,
             aux_hash: self.e.aux_hash(),
+            withdrawal_count: self.e.withdrawals.len() as u64,
             withdrawals_total: self.e.withdrawals.iter().map(|w| w.amount).sum(),
         }
     }
@@ -199,18 +203,13 @@ impl Engine for RealEngine {
 /// the node's oracle committee and vault). THROWAWAY keys only.
 pub fn dev_engine_genesis(g: &Genesis) -> Result<pe::genesis::Checked, String> {
     let markets = g.markets.iter().map(|m| pe::testkit::market(m.market_id, &m.symbol)).collect();
-    let eg = pe::genesis::Genesis {
-        spec_version: "0.1".into(),
-        chain_id: 700770,
-        verifying_contract: to_hex(&g.vault),
-        fee_recipient: to_hex(&g.fee_recipient),
-        oracle_signers: g.oracle_committee.iter().map(|a| to_hex(a)).collect(),
-        oracle_quorum: g.oracle_quorum as u8,
-        oracle_max_future_ms: 1000,
-        oracle_max_age_ms: 6000,
-        withdrawal_fee: g.withdrawal_fee as u64,
-        min_fee_sweep: 1_000_000,
-        markets,
-    };
+    // start from the engine's own test genesis (every newer field at its documented test value), then bind the
+    // node's committee, vault, fee and markets
+    let mut eg = pe::testkit::genesis_raw(1, markets);
+    eg.verifying_contract = to_hex(&g.vault);
+    eg.fee_recipient = to_hex(&g.fee_recipient);
+    eg.oracle_signers = g.oracle_committee.iter().map(|a| to_hex(a)).collect();
+    eg.oracle_quorum = g.oracle_quorum as u8;
+    eg.withdrawal_fee = g.withdrawal_fee as u64;
     eg.check()
 }

@@ -6,7 +6,7 @@
 //! `contracts/test/vectors/vault-vectors.json`): EIP-712 under the VAULT domain
 //! `{name "PosternPerpsVault", version "1", chainId 700770, verifyingContract vault}`, primary type
 //! `Checkpoint(uint64 height,uint64 time,bytes32 logHash,bytes32 accountsRoot,bytes32 marketsRoot,bytes32 withdrawalsRoot,uint64 nextDepositIndex,uint64 nextForcedIndex,uint64 nextOrderId,uint128 totalEscape,uint128 dust,bytes32 auxHash,bytes32 depositsHead,bytes32 forcedHead,uint64 withdrawalCount,uint64 withdrawalsTotal)`.
-//! The first twelve fields are the inputs of SPEC 11's `stateRoot` (the vault recomputes it); the node checks the
+//! The first twelve fields plus withdrawalCount and withdrawalsTotal (SPEC 0.1.5 systemHash, VAULT 64072cb) are the inputs of SPEC 11's `stateRoot` (the vault recomputes it); the node checks the
 //! same equation against the replayed block before signing (`CheckpointBody::state_root`).
 //! The engine's user-action domain has another `name` (`PosternPerps`), hence another separator.
 //!
@@ -53,6 +53,8 @@ impl CheckpointBody {
             &self.total_escape.to_be_bytes(),
             &self.dust.to_be_bytes(),
             &self.aux_hash,
+            &self.withdrawal_count.to_be_bytes(),
+            &self.withdrawals_total.to_be_bytes(),
         ]);
         keccak_parts(&[
             b"PosternPerps/state/v1",

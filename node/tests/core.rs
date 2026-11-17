@@ -529,3 +529,23 @@ fn r395_37_waiting_for_the_own_l2_view_does_not_make_a_block_late() {
     assert_eq!(signed, 7);
     assert_eq!(n.seq.latest_final(), Some(1));
 }
+
+/// VAULT 0.2 forced input through the REAL engine's decoder. FAILS against engine 5a50d58, whose tag 0x03 still
+/// carries the vault's superseded v0.1 fields (kind, u32 marketId, u64 amount, deadline): the engine refuses the
+/// node's VAULT 0.2 bytes. Un-ignore when 388 aligns tag 0x03 (cross-area, 390 08:45 line).
+#[test]
+#[ignore = "fails until 388 aligns engine tag 0x03 with VAULT 0.2; run with --ignored"]
+fn forced_vault_0_2_input_accepted_by_the_real_engine() {
+    let mut n = net_real("forced-real", 1);
+    let u = user(70);
+    let ua = key_address(&u);
+    n.deposit_everywhere(deposit(0, ua, 5_000_000));
+    assert!(all_applied(&n.step()));
+    let f = ForcedEvent { index: 0, account: ua, kind: ForcedKind::CancelAll, deadline: now() / 1000 + 86_400, arg: 0, head: keccak(b"fh"), l2_block: 1, l2_block_hash: keccak(b"b"), l2_tx_hash: keccak(b"t"), log_index: 0 };
+    n.seq_view.lock().unwrap().forced.insert(0, f.clone());
+    for v in &n.val_views {
+        v.lock().unwrap().forced.insert(0, f.clone());
+    }
+    let r = n.seq.produce(now());
+    assert!(r.is_ok(), "the engine refused the node's VAULT 0.2 forced input: {:?}", r.err());
+}
