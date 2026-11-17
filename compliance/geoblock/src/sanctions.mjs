@@ -14,6 +14,7 @@
 
 import { walk } from './xml.mjs';
 import { sha256, hex } from './sha256.mjs';
+import { toChecksumAddress } from './keccak.mjs';
 
 export class SanctionsError extends Error {
   constructor(msg) { super(`sanctions: ${msg}`); this.name = 'SanctionsError'; }
@@ -135,12 +136,21 @@ export function buildSanctions({ sdn, advanced, files, builtUtc, previous = null
   }
   if (a.size === 0) throw new SanctionsError('no digital currency address in the publication (refusing an empty list)');
   const evm = new Map(); const other = {}; const anomalies = []; const byType = {};
+  const dupWithin = sdn.triples.length - a.size;
+  if (dupWithin > 0) anomalies.push(`SDN.XML repeats ${dupWithin} identical (uid, currency, address) triple(s) (counted once)`);
+  const seen = new Set();
   for (const t of sdn.triples) {
+    if (seen.has(key(t))) continue;
+    seen.add(key(t));
     byType[t.symbol] = (byType[t.symbol] ?? 0) + 1;
     if (EVM_RE.test(t.address)) {
       const addr = t.address.toLowerCase();
       const e = evm.get(addr) ?? { address: addr, symbols: new Set(), uids: new Set() };
       e.symbols.add(t.symbol); e.uids.add(t.uid); evm.set(addr, e);
+      const body = t.address.slice(2);
+      if (body !== body.toLowerCase() && body !== body.toUpperCase() && toChecksumAddress(t.address) !== t.address) {
+        anomalies.push(`listed with an invalid EIP-55 checksum (screened as lowercase): ${t.address}`);
+      }
       if (!EVM_SYMBOLS.includes(t.symbol) && !MULTICHAIN_TOKEN_SYMBOLS.includes(t.symbol)) anomalies.push(`EVM-shaped address listed under ${t.symbol} (screened): ${addr}`);
     } else {
       (other[t.symbol] ??= new Set()).add(t.address);
@@ -167,7 +177,7 @@ export function buildSanctions({ sdn, advanced, files, builtUtc, previous = null
       files: files.map((f) => ({ name: f.name, url: f.url, bytes: f.bytes.length, sha256: hex(sha256(f.bytes)) })),
       crossCheck: `SDN.XML and SDN_ADVANCED.XML name the same ${a.size} (uid, currency, address) triples`,
     },
-    counts: { triples: a.size, byType: Object.fromEntries(Object.entries(byType).sort()), evmAddresses: addresses.length },
+    counts: { triples: a.size, duplicatesWithinSdnXml: dupWithin, byType: Object.fromEntries(Object.entries(byType).sort()), evmAddresses: addresses.length },
     evmAddressesSha256: evmAddressesSha256(addresses),
     evm: evmList,
     other: Object.fromEntries(Object.entries(other).sort().map(([k, v]) => [k, [...v].sort()])),

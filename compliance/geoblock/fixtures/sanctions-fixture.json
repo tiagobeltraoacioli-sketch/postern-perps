@@ -26,6 +26,7 @@
  },
  "counts": {
   "triples": 11,
+  "duplicatesWithinSdnXml": 0,
   "byType": {
    "ETH": 3,
    "LTC": 1,
