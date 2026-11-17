@@ -1,0 +1,6 @@
+{
+  "_note": "MOCK / DEV FIXTURE ONLY. The real list is compliance/geoblock.json (agent 354), which has no 'allowed' entry yet. The entries marked allowed here exist so that frontend development and tests have an open country; they are NOT a legal statement about any country. Everything legal is for counsel.",
+  "mock_allowed_countries": ["PA", "ZZ"],
+  "mock_default_country": "PA",
+  "mock_sanctioned_addresses": ["0x000000000000000000000000000000000000dead"]
+}

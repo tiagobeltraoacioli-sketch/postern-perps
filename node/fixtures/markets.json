@@ -1,0 +1,26 @@
+{
+  "_note": "MOCK / DEV FIXTURE. Provisional parameters until agent 354 publishes compliance/markets.json and risk.json. UNAUDITED prototype.",
+  "collateral": {"symbol": "bUSDC", "decimals": 6},
+  "markets": [
+    {"symbol": "BTC-USD", "marketId": 1, "base": "BTC", "priceDecimals": 1, "sizeDecimals": 4, "tickSize": "0.5", "stepSize": "0.0001",
+     "minOrderSize": "0.0001", "maxOrderSize": "50", "maxLeverage": "50", "openInterestCap": "1000", "mockStartPrice": "67250.0", "mockVolBps": 4, "mockLevelSize": "0.8",
+     "marginTiers": [
+       {"notionalFloor": "0", "initialMarginFraction": "0.02", "maintenanceMarginFraction": "0.01", "maxLeverage": "50"},
+       {"notionalFloor": "1000000", "initialMarginFraction": "0.04", "maintenanceMarginFraction": "0.02", "maxLeverage": "25"},
+       {"notionalFloor": "5000000", "initialMarginFraction": "0.1", "maintenanceMarginFraction": "0.05", "maxLeverage": "10"}]},
+    {"symbol": "ETH-USD", "marketId": 2, "base": "ETH", "priceDecimals": 2, "sizeDecimals": 3, "tickSize": "0.05", "stepSize": "0.001",
+     "minOrderSize": "0.001", "maxOrderSize": "1000", "maxLeverage": "50", "openInterestCap": "20000", "mockStartPrice": "3480.00", "mockVolBps": 5, "mockLevelSize": "12",
+     "marginTiers": [
+       {"notionalFloor": "0", "initialMarginFraction": "0.02", "maintenanceMarginFraction": "0.01", "maxLeverage": "50"},
+       {"notionalFloor": "1000000", "initialMarginFraction": "0.04", "maintenanceMarginFraction": "0.02", "maxLeverage": "25"},
+       {"notionalFloor": "5000000", "initialMarginFraction": "0.1", "maintenanceMarginFraction": "0.05", "maxLeverage": "10"}]},
+    {"symbol": "SOL-USD", "marketId": 3, "base": "SOL", "priceDecimals": 3, "sizeDecimals": 2, "tickSize": "0.005", "stepSize": "0.01",
+     "minOrderSize": "0.01", "maxOrderSize": "20000", "maxLeverage": "20", "openInterestCap": "400000", "mockStartPrice": "182.400", "mockVolBps": 7, "mockLevelSize": "220",
+     "marginTiers": [
+       {"notionalFloor": "0", "initialMarginFraction": "0.05", "maintenanceMarginFraction": "0.025", "maxLeverage": "20"},
+       {"notionalFloor": "500000", "initialMarginFraction": "0.1", "maintenanceMarginFraction": "0.05", "maxLeverage": "10"}]}
+  ],
+  "defaults": {"quote": "USD", "makerFeeBps": "1.5", "takerFeeBps": "4.5", "liquidationFeeBps": "50", "fundingIntervalSec": 3600, "maxFundingRate": "0.0005",
+    "oracle": {"sources": ["binance", "coinbase", "kraken", "bitstamp", "okx"], "minSources": 3, "maxStalenessMs": 10000, "maxDeviationBps": "200"},
+    "withdrawalFee": "1.000000"}
+}
