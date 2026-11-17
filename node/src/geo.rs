@@ -26,6 +26,8 @@ pub struct GeoPolicy {
     pub country_header: String,
     pub subdivision_header: Option<String>,
     pub dev: bool,
+    /// dev only, explicit flag: the country of a request that names none (conformance runs); never in live mode
+    pub dev_default_country: Option<String>,
     pub tiers: BTreeMap<String, String>,
 }
 
@@ -79,6 +81,7 @@ impl GeoPolicy {
             country_header: "x-country".into(),
             subdivision_header: None,
             dev,
+            dev_default_country: None,
             tiers,
         })
     }
@@ -102,6 +105,9 @@ impl GeoPolicy {
         };
         if self.dev {
             if let Some(c) = headers.get("x-mock-country").and_then(|v| v.to_str().ok()).or(query_country) {
+                return (norm(c), None);
+            }
+            if let Some(c) = &self.dev_default_country {
                 return (norm(c), None);
             }
         }

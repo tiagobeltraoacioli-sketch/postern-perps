@@ -346,7 +346,7 @@ may still be a business rejection such as insufficient margin: `result.ok=false`
 `GET /v1/actions/{actionHash}` returns the same object later (`404` once pruned; kept at least 24 h).
 
 Admission refusals (HTTP 4xx, `Error`): `GEO_RESTRICTED` (451), `BAD_SIGNATURE`, `UNKNOWN_SIGNER`,
-`AGENT_NOT_ALLOWED`, `BAD_NONCE`, `MALFORMED`, `TOO_LARGE` (413), `RATE_LIMITED` (429), `MARKET_HALTED`,
+`AGENT_NOT_ALLOWED`, `NONCE_WINDOW`, `NONCE_USED`, `MALFORMED`, `TOO_LARGE` (413), `RATE_LIMITED` (429), `MARKET_HALTED`,
 `SEQUENCER_UNAVAILABLE` (503).
 
 ### 5.2 Agent (API) wallets
@@ -394,7 +394,8 @@ An agent wallet is a second key that may trade for an account but can never with
 |---|---|---|
 | 400 | `MALFORMED` | body or parameter does not parse or violates the schema (`details.path`) |
 | 400 | `BAD_SIGNATURE` | signature does not recover / wrong length / high-s |
-| 400 | `BAD_NONCE` | nonce not above the signer's highest used |
+| 400 | `NONCE_WINDOW` | nonce (milliseconds) outside `now - 120 s .. now + 30 s` (SPEC 2.5) |
+| 400 | `NONCE_USED` | nonce already used or pending for this signer, or not above the lowest of its 64 highest used (SPEC 2.5) |
 | 403 | `UNKNOWN_SIGNER` | signer is neither the account nor an approved agent |
 | 403 | `AGENT_NOT_ALLOWED` | action type requires the main key |
 | 404 | `NOT_FOUND` | unknown market, height, id |
@@ -505,4 +506,5 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-11-17 | first version, written before `docs/SPEC.md` exists: action names and typed fields are provisional and follow the spec |
+| 0.2 | 2026-11-17 | admission nonce errors are SPEC's `NONCE_WINDOW` / `NONCE_USED` (no `BAD_NONCE`); `GET /v1/node` holds node diagnostics outside `Status`; `ActionResult` fields flat (`ok`, `error`, `orderId`, `orderStatus`, `filledSize`, `withdrawalId`) |
 | 0.2 | 2026-11-17 | follows SPEC 0.1.1 and VAULT.md 0.1: engine domain chainId 700770 + verifyingContract = vault; FIXED scales (price and size 1e-8, USDC 1e-6; per-market decimals are display only); nonce rule SPEC 2.5 (window and 64-set, errors NONCE_WINDOW / NONCE_USED inside `BAD_NONCE` admissions); checkpoint = VAULT 5.2 13 fields; certificate = VAULT `withdraw` inputs (sum-tree proof); block input tags 0x01-0x04 (SPEC 3.2) |

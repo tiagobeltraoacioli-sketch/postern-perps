@@ -74,6 +74,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/accounts/{address}/nonce", get(account_nonce))
         .route("/v1/accounts/{address}/withdrawals", get(account_withdrawals))
         .route("/v1/accounts/{address}/deposits", get(account_deposits))
+        .route("/v1/accounts/{address}/fills", get(account_fills))
+        .route("/v1/accounts/{address}/funding", get(account_funding))
         .route("/v1/withdrawals/{id}", get(withdrawal))
         .route("/v1/deposits/{tx}", get(deposits_by_tx))
         .route("/v1/forced", get(forced))
@@ -354,7 +356,10 @@ pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_co
             return Err(error(429, "RATE_LIMITED", "per-IP action rate", serde_json::json!({})));
         }
     }
-    let a = parse_request(&app.g, req).map_err(|e| error(400, "MALFORMED", &e, serde_json::json!({})))?;
+    let a = parse_request(&app.g, req).map_err(|e| {
+        let code = if e.starts_with("signature:") { "BAD_SIGNATURE" } else { "MALFORMED" };
+        error(400, code, &e, serde_json::json!({}))
+    })?;
     let v = verify_signed_action(&app.g, &a).map_err(|e| error(400, "BAD_SIGNATURE", &e.to_string(), serde_json::json!({})))?;
     let (country, sub) = app.geo.country(peer.map(|p| p.ip()), headers, query_country);
     let d = app.geo.decide(country.as_deref(), sub.as_deref(), &v.account, &v.signer);
@@ -379,8 +384,12 @@ async fn post_action(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     q: Q,
-    body: axum::body::Bytes,
+    body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Response {
+    let body = match body {
+        Ok(b) => b,
+        Err(_) => return error(413, "TOO_LARGE", "body over 16 KiB", serde_json::json!({})),
+    };
     let req: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => return error(400, "MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
@@ -458,6 +467,21 @@ async fn account_agents(State(app): State<Arc<App>>, Path(a): Path<String>) -> R
     Json(app.seq.lock().unwrap().engine.agents_json(&a)).into_response()
 }
 
+async fn account_fills(Path(a): Path<String>) -> Response {
+    if let Err(r) = addr_param(&a) {
+        return r;
+    }
+    // fills are engine events; the node's fill index is not built yet (stated gap)
+    Json(serde_json::json!({"fills": []})).into_response()
+}
+
+async fn account_funding(Path(a): Path<String>) -> Response {
+    if let Err(r) = addr_param(&a) {
+        return r;
+    }
+    Json(serde_json::json!({"payments": []})).into_response()
+}
+
 async fn account_nonce(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
@@ -465,10 +489,17 @@ async fn account_nonce(State(app): State<Arc<App>>, Path(a): Path<String>) -> Re
     };
     let s = app.seq.lock().unwrap();
     let hi = s.engine.highest_nonce(&a);
-    Json(serde_json::json!({"account": to_hex(&a), "highestUsed": hi.map(|x| x.to_string()),
-        "nextNonce": hi.map(|x| (x + 1).to_string()).unwrap_or_else(|| "0".into()),
-        "rule": "nonce = milliseconds clock, strictly above the highest used, within blockTime-120000..blockTime+30000"}))
-    .into_response()
+    let agents: Vec<serde_json::Value> = s.engine.agents_json(&a)["agents"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|x| x["agent"].as_str().and_then(|h| parse_address(h).ok()))
+        .map(|ag| serde_json::json!({"agent": to_hex(&ag), "nextNonce": s.engine.highest_nonce(&ag).map(|x| x + 1).unwrap_or(0).to_string()}))
+        .collect();
+    // nextNonce = highest used + 1 (a lower bound: SPEC 2.5 wants a millisecond clock value in the window)
+    Json(serde_json::json!({"account": to_hex(&a), "nextNonce": hi.map(|x| (x + 1).to_string()).unwrap_or_else(|| "0".into()), "agents": agents}))
+        .into_response()
 }
 
 fn withdrawal_json(app: &App, id: u64) -> Option<serde_json::Value> {
@@ -590,6 +621,7 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
     let mut accounts: Vec<Address> = Vec::new();
     let mut ping = tokio::time::interval(Duration::from_secs(15));
     let mut last_in = tokio::time::Instant::now();
+    let mut reply_override: Option<serde_json::Value> = None;
     loop {
         tokio::select! {
             m = sock.recv() => {
@@ -606,7 +638,12 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                     Some("subscribe") => {
                         let ch = j.get("channel").and_then(|v| v.as_str()).unwrap_or("");
                         match ch {
-                            "status" => { status_sub = true; serde_json::json!({"op":"subscribed","id":id,"channel":"status"}) }
+                            "status" => {
+                                status_sub = true;
+                                let _ = sock.send(Message::Text(serde_json::json!({"op":"subscribed","id":id,"channel":"status"}).to_string().into())).await;
+                                let (lb, lf) = { let s = app.seq.lock().unwrap(); (s.block(s.log.last_height).ok().flatten().map(|b| block_summary(&b)), s.latest_final().and_then(|h| s.block(h).ok().flatten()).map(|b| block_summary(&b))) };
+                                serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": lb, "latestFinalized": lf}})
+                            }
                             "account" => match j.get("account").and_then(|v| v.as_str()).map(parse_address) {
                                 Some(Ok(a)) => {
                                     if accounts.len() >= 100 { serde_json::json!({"op":"error","id":id,"error":{"code":"RATE_LIMITED","message":"subscriptions per connection","details":{}}}) }
@@ -625,8 +662,25 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                                     serde_json::json!({"op":"error","id":id,"error":{"code":"NOT_FOUND","message":"unknown market","details":{}}})
                                 } else {
                                     let _ = sock.send(Message::Text(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}).to_string().into())).await;
-                                    let data = match ch { "book" => serde_json::json!({"symbol":sym,"seq":0,"bids":[],"asks":[]}), "trades" => serde_json::json!({"trades":[]}), "candles" => serde_json::json!({"candles":[]}), _ => serde_json::json!({}) };
-                                    serde_json::json!({"channel":ch,"symbol":sym,"type":"snapshot","data":data})
+                                    if ch == "ticker" {
+                                        let ms: Vec<&crate::genesis::Market> = if sym == "*" { app.g.markets.iter().collect() } else { app.g.market_by_symbol(sym).into_iter().collect() };
+                                        let last = ms.len().saturating_sub(1);
+                                        for (i, m) in ms.iter().enumerate() {
+                                            let msg = serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)});
+                                            if i < last { let _ = sock.send(Message::Text(msg.to_string().into())).await; } else { reply_override = Some(msg); }
+                                        }
+                                        reply_override.take().unwrap_or(serde_json::json!({"op":"pong","time":now_ms()}))
+                                    } else {
+                                        let (h, t) = { let s = app.seq.lock().unwrap(); (s.engine.height(), s.engine.time()) };
+                                        let data = match ch {
+                                            "book" => serde_json::json!({"symbol":sym,"seq":0,"height":h,"time":t,"bids":[],"asks":[]}),
+                                            "trades" => serde_json::json!({"trades":[]}),
+                                            _ => serde_json::json!({"candles":[]}),
+                                        };
+                                        let mut m = serde_json::json!({"channel":ch,"symbol":sym,"type":"snapshot","data":data});
+                                        if ch == "candles" { m["interval"] = j.get("interval").cloned().unwrap_or("1m".into()); }
+                                        m
+                                    }
                                 }
                             }
                             _ => serde_json::json!({"op":"error","id":id,"error":{"code":"MALFORMED","message":"unknown channel","details":{}}}),
@@ -660,7 +714,8 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                 } Err(_) => return };
                 if status_sub {
                     let fin = app.seq.lock().unwrap().latest_final();
-                    let m = serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": block_summary(&info.block), "latestFinalizedHeight": fin}});
+                    let lf = fin.and_then(|h| app.seq.lock().unwrap().block(h).ok().flatten()).map(|b| block_summary(&b));
+                    let m = serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": block_summary(&info.block), "latestFinalized": lf}});
                     if sock.send(Message::Text(m.to_string().into())).await.is_err() { return; }
                 }
                 if !accounts.is_empty() {

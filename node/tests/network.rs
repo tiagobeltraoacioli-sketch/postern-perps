@@ -258,7 +258,7 @@ async fn http_api_actions_finality_geo_and_websocket() {
     let wd = withdraw(&g, &u, ua, t + 3, 1_000_000_000, ua);
     let (s, wack) = post_json(&format!("{}/v1/actions?wait=included", n.url), &request(&g, &wd), &[("X-Mock-Country", "BR")]).await;
     assert_eq!(s, 200, "{wack}");
-    let wid = wack["result"]["detail"]["withdrawalId"].as_str().unwrap().to_string();
+    let wid = wack["result"]["withdrawalId"].as_str().unwrap().to_string();
     // the withdrawal becomes certified; the certificate verifies against /v1/committee alone
     let mut cert = serde_json::Value::Null;
     for _ in 0..60 {
@@ -278,8 +278,8 @@ async fn http_api_actions_finality_geo_and_websocket() {
     let (s, e) = post_json(&format!("{}/v1/actions", n.url), &serde_json::json!({"type": "PlaceOrder"}), &[]).await;
     assert_eq!((s, e["error"]["code"].as_str()), (400, Some("MALFORMED")));
     let big = serde_json::json!({"x": "a".repeat(20_000)});
-    let (s, _) = post_json(&format!("{}/v1/actions", n.url), &big, &[]).await;
-    assert_eq!(s, 413);
+    let (s, e) = post_json(&format!("{}/v1/actions", n.url), &big, &[]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (413, Some("TOO_LARGE")));
     // blocks are public and replayable: replay them with a fresh engine and compare every root
     let (_, bl) = get_json(&format!("{}/v1/blocks?from=1&limit=500&raw=1", n.url)).await;
     let mut e = StubEngine::new(g.clone());

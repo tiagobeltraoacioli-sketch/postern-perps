@@ -134,7 +134,7 @@ pub fn parse_request(g: &Genesis, req: &serde_json::Value) -> Result<SignedActio
         msg.insert(k.clone(), nv);
     }
     let message = g.types.registry.val_from_json(primary, &serde_json::Value::Object(msg))?;
-    let sig_s = obj.get("signature").and_then(|v| v.as_str()).ok_or("signature")?;
-    let signature = parse_hex_fixed::<65>(sig_s)?;
+    let sig_s = obj.get("signature").and_then(|v| v.as_str()).ok_or("signature: missing")?;
+    let signature = parse_hex_fixed::<65>(sig_s).map_err(|e| format!("signature: {e}"))?;
     Ok(SignedAction { type_index, message, signature })
 }

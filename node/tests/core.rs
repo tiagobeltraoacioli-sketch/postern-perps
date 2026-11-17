@@ -89,20 +89,20 @@ fn admission_and_engine_refuse_forgery_replay_window_and_authority() {
     // good, then replay, then lower nonce
     let ok = place_order(&n.g, &u, ua, t + 2, 1, 672505, 10, false);
     n.seq.admit(&request(&n.g, &ok), t).unwrap();
-    assert_eq!(n.seq.admit(&request(&n.g, &ok), t).unwrap_err().code, "BAD_NONCE");
+    assert_eq!(n.seq.admit(&request(&n.g, &ok), t).unwrap_err().code, "NONCE_USED");
     // SPEC 2.5 (replaces the strict-increase rule of the pre-SPEC proposal): a lower, unused nonce inside the
     // window is valid (out-of-order arrival); the same nonce twice never is, pending or applied
     let lower = place_order(&n.g, &u, ua, t + 1, 1, 672505, 11, false);
     n.seq.admit(&request(&n.g, &lower), t).unwrap();
     let lower_again = place_order(&n.g, &u, ua, t + 1, 1, 672505, 12, false);
-    assert_eq!(n.seq.admit(&request(&n.g, &lower_again), t).unwrap_err().code, "BAD_NONCE", "pending nonce reused");
+    assert_eq!(n.seq.admit(&request(&n.g, &lower_again), t).unwrap_err().code, "NONCE_USED", "pending nonce reused");
     // window
     let old = place_order(&n.g, &u, ua, t - 121_000, 1, 672505, 10, false);
-    assert_eq!(n.seq.admit(&request(&n.g, &old), t).unwrap_err().code, "BAD_NONCE");
+    assert_eq!(n.seq.admit(&request(&n.g, &old), t).unwrap_err().code, "NONCE_WINDOW");
     let future = place_order(&n.g, &u, ua, t + 31_000, 1, 672505, 10, false);
-    assert_eq!(n.seq.admit(&request(&n.g, &future), t).unwrap_err().code, "BAD_NONCE");
+    assert_eq!(n.seq.admit(&request(&n.g, &future), t).unwrap_err().code, "NONCE_WINDOW");
     assert!(all_applied(&n.step()));
-    assert_eq!(n.seq.admit(&request(&n.g, &lower_again), t).unwrap_err().code, "BAD_NONCE", "applied nonce reused");
+    assert_eq!(n.seq.admit(&request(&n.g, &lower_again), t).unwrap_err().code, "NONCE_USED", "applied nonce reused");
     // agent: approved by the main key, may trade, may not withdraw or approve
     let ag = user(4);
     let aga = key_address(&ag);

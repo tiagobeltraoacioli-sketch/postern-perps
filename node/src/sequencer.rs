@@ -274,7 +274,12 @@ impl Sequencer {
         }
         for (i, (inp, o)) in inputs.iter().zip(&out.outcomes).enumerate() {
             if let (Input::Action(_), Some(ah)) = (inp, o.action_hash) {
-                let result = serde_json::json!({"ok": o.ok, "error": o.error, "detail": o.result});
+                let mut result = serde_json::json!({"ok": o.ok, "error": o.error});
+                for k in ["orderId", "orderStatus", "filledSize", "withdrawalId"] {
+                    if let Some(v) = o.result.get(k) {
+                        result[k] = v.clone();
+                    }
+                }
                 if let Some(a) = self.acks.get_mut(&ah) {
                     a.status = "included";
                     a.height = Some(h);
@@ -306,7 +311,7 @@ impl Sequencer {
             ActionError::Malformed(s) => adm(400, "MALFORMED", s),
         })?;
         if self.acks.contains_key(&v.action_hash) {
-            return Err(adm(400, "BAD_NONCE", "action already received"));
+            return Err(adm(400, "NONCE_USED", "action already received"));
         }
         let t = self.engine.time().max(now_ms);
         self.engine.authority(&v.account, &v.signer, &v.primary, t).map_err(|e| match e {
@@ -315,10 +320,10 @@ impl Sequencer {
         })?;
         // SPEC S-2.5 against the applied state, plus nonces admitted but not yet applied (single use)
         if self.pending_nonce.get(&v.signer).is_some_and(|p| p.contains(&v.nonce)) {
-            return Err(adm(400, "BAD_NONCE", "nonce already pending for this signer"));
+            return Err(adm(400, "NONCE_USED", "nonce already pending for this signer"));
         }
         self.engine.nonce_ok(&v.signer, v.nonce, now_ms.max(self.engine.time())).map_err(|c| {
-            adm(400, "BAD_NONCE", format!("{c}: nonce = milliseconds clock in now-120 s..now+30 s, single use, above the 64th highest used"))
+            adm(400, c, "nonce = milliseconds clock in now-120 s..now+30 s, single use, above the 64th highest used (SPEC 2.5)")
         })?;
         if !self.rate.allow(&v.account, now_ms) {
             return Err(adm(429, "RATE_LIMITED", "per-account action rate"));

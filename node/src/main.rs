@@ -54,7 +54,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [--seed dev] [--validators 7] [--threshold 5] [--block-ms 200] [--checkpoint-interval 10] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--geoblock FILE] [--ip-rate 50] [--account-rate 20]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [--seed dev] [--validators 7] [--threshold 5] [--block-ms 200] [--checkpoint-interval 10] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--geoblock FILE] [--ip-rate 50] [--account-rate 20] [--dev-default-country ZZ]");
             eprintln!("       postern-perps-node verify-log --data DIR [--seed dev] [--validators 7] [--threshold 5] [--checkpoint-interval 10] [--genesis-time MS]");
             std::process::exit(2);
         }
@@ -147,6 +147,7 @@ async fn dev(a: HashMap<String, String>) {
     };
     let mut geo = GeoPolicy::from_json(&geo_json, true).expect("geoblock policy");
     geo.add_sanctioned(&["0x000000000000000000000000000000000000dead".into()]).unwrap();
+    geo.dev_default_country = a.get("dev-default-country").cloned();
     let l2: Option<[String; 2]> = a.get("l2").map(|s| {
         let v: Vec<String> = s.split(',').map(|x| x.to_string()).collect();
         assert!(v.len() == 2, "--l2 takes exactly two endpoints");
