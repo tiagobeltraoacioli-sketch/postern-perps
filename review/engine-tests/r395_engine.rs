@@ -69,6 +69,11 @@ fn r395_5_and_23_halt_blocks_exit_and_breaks_escape_solvency() {
     // Oracle rounds with BTC only: ETH goes stale and halts after 10 s; BTC climbs 4.5% per round.
     let mut p = P_BTC;
     let mut liquidated = false;
+    // first let ETH go stale (> maxStalenessMs = 10 s) with BTC unchanged, then move BTC
+    for _ in 0..5 {
+        r.block(3000, &[(BTC, p)], vec![]);
+    }
+    assert!(!r.e.markets[&ETH].oracle.status.eq(&postern_perps_engine::oracle::Status::Active), "ETH halted before the move");
     for _ in 0..8 {
         p = p / 10_000 * 10_450 / TICK * TICK;
         let out = r.block(3000, &[(BTC, p)], vec![]);
