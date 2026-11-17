@@ -75,11 +75,16 @@ Exit actions (never need an attestation): CancelOrder, CancelAll, reduce-only Pl
    forgeable by anyone reaching the origin; the MAC (HMAC-SHA256, 32-byte minimum secret, domain-separated, fixed
    field order, 30 s window, 5 s future tolerance, request-id replay cache that refuses when full) makes it
    unforgeable without the secret. The node still re-decides.
-10. **Attestation as an EIP-712 signature in its own domain** (`PosternPerps Attestation`, version 1, chain 7007701),
-    never the engine's action domain or the vault's, so no attestation can be replayed as an action or checkpoint.
-    It binds the exact statement text (keccak256), the statement id, the declared residence and a validity period
-    (at most 400 days). A text revision retires older ids. Verified in process (65 bytes, v 27/28, low-s, r and s in
-    range, recovered = account). Whether a signature is the right legal form is for counsel.
+10. **Attestation as an EIP-712 signature under the engine's SPEC 0.1.1 domain** (`PosternPerps`, version 1,
+    chainId 700770, verifyingContract = the PerpsVault). Changed on the coordinator's instruction (2026-11-17): the
+    first version used its own domain on chain 7007701, which wallets refuse because it is not the active chain
+    (391's report). Separation from engine actions now rests on the primary type `Attestation` (its type hash
+    starts every hashStruct; no action type shares it; 388 asked to reserve the name) and verifyingContract binds
+    it to one deployment. With no vault configured every function refuses (no typed data, no digest, no
+    verification). It binds the exact statement text (keccak256; 392's `compliance/legal/notices.json`
+    `attestation.statementId` / `statementHash`, checked against its own text at load), the declared residence and
+    a validity period (at most 400 days). A text revision retires older ids. Verified in process (65 bytes, v 27/28,
+    low-s, r and s in range, recovered = account). Whether a signature is the right legal form is for counsel.
 11. **No dependencies.** keccak256, SHA-256, HMAC, secp256k1 recovery and the XML reader are small, in this
     directory, and checked against independent implementations (`@noble` 1.8.0 for keccak and signatures,
     `node:crypto` for HMAC, NIST and RFC 4231 answers, EIP-55's own vectors). Recovery uses only public data, so
@@ -186,6 +191,6 @@ sanctioned countries (392's note).
 - Not deployed; the Worker entry point has never run on Cloudflare (local `Request`/`Response` only).
 - The Rust port for the node: see `rust/README.md` for its state.
 - No measurement of false positives on real users (none exist).
-- The attestation statement text is a fixture placeholder until 392 publishes it.
+- The attestation statement is 392's ATTEST-0.1-20261117 (draft for counsel).
 - The legal adequacy of IP geolocation plus attestation is not assessed (for counsel).
 - No independent review of this directory yet (395).

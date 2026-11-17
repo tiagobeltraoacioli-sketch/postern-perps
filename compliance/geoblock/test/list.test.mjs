@@ -14,9 +14,12 @@ function apply(obj, ops) {
   return o;
 }
 
-test("392's real list 0.1.1 loads, has no allowed entry, and keeps its guards", () => {
+test("392's real list 0.2.1 loads, has no allowed entry, and keeps its guards", () => {
   const l = realList();
-  assert.equal(l.version, '0.1.1');
+  // 0.1.1 -> 0.2.1 (392, merged on main 0cd66a0): every ISO 3166-1 code listed, still no allowed entry; the
+  // 0.1.1 guards below are unchanged.
+  assert.equal(l.version, '0.2.1');
+  assert.ok(Object.keys(l.countries).length >= 249, 'every ISO 3166-1 code is listed');
   assert.match(l.sha256, /^[0-9a-f]{64}$/);
   assert.equal(Object.values(l.countries).filter((e) => e.effect === 'allow').length, 0);
   assert.equal(l.deniedPolicy, 'exit_only');
@@ -30,10 +33,10 @@ test('the fixture list differs from the real one only by its FIXTURE allowed ent
   const real = readJson('../geoblock.json'); const fx = readJson('fixtures/geoblock.fixture.json');
   const { status: _a, countries: rc, ...r } = real; const { status: _b, countries: fc, ...f } = fx;
   assert.deepEqual(f, r);
-  for (const [k, v] of Object.entries(rc)) assert.deepEqual(fc[k], v, k);
-  const added = Object.keys(fc).filter((k) => !(k in rc));
-  assert.deepEqual(added.sort(), ['CH', 'PA', 'UA']);
-  for (const k of added) assert.match(fc[k].name, /FIXTURE/);
+  assert.deepEqual(Object.keys(fc).sort(), Object.keys(rc).sort(), 'same codes');
+  const changed = Object.keys(fc).filter((k) => JSON.stringify(fc[k]) !== JSON.stringify(rc[k]));
+  assert.deepEqual(changed.sort(), ['CH', 'PA', 'UA']);
+  for (const k of changed) { assert.match(fc[k].name, /FIXTURE/); assert.equal(fc[k].tier, 'allowed'); assert.notEqual(rc[k].tier, 'allowed'); }
   assert.equal(fixtureList().countries.PA.effect, 'allow');
 });
 

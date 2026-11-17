@@ -34,7 +34,7 @@ test('decisions name the list and sanctions versions they were made under', () =
   const d = decide(lists.fixture, { mode: 'live', surface: 'api', kind: 'action', action: { type: 'CancelOrder' },
     geo: { country: 'BR', trusted: true }, signals: { tor: false, vpnProxy: false, hosting: false },
     addresses: [{ role: 'account', address: '0x00000000000000000000000000000000000000a1' }], sanctions: fixtureSanctions(), nowMs: Date.parse('2026-11-17T01:00:00Z') });
-  assert.equal(d.listVersion, '0.1.1');
+  assert.equal(d.listVersion, '0.2.1');
   assert.match(d.listSha256, /^[0-9a-f]{64}$/);
   assert.match(d.sanctionsVersion, /^2026-11-13\+[0-9a-f]{12}$/);
 });
@@ -71,7 +71,7 @@ test('exhaustive over the fixture: only PA, CH and UA (with a known unrestricted
 test('geoStatus matches docs/API.md section 6 shape', () => {
   const g = geoStatus(lists.fixture, { mode: 'live', surface: 'api', geo: { country: 'BR', trusted: true }, signals: { tor: false, vpnProxy: false, hosting: false } });
   assert.equal(g.country, 'BR'); assert.equal(g.restricted, true); assert.equal(g.policy, 'exit_only');
-  assert.equal(g.listVersion, '0.1.1'); assert.equal(g.reasonCode, 'JURISDICTION'); assert.equal(g.sanctioned, false);
+  assert.equal(g.listVersion, '0.2.1'); assert.equal(g.reasonCode, 'JURISDICTION'); assert.equal(g.sanctioned, false);
   assert.match(g.message, /withdraw/);
   const o = geoStatus(lists.fixture, { mode: 'live', surface: 'api', geo: { country: 'PA', trusted: true }, signals: { tor: false, vpnProxy: false, hosting: false } });
   assert.equal(o.restricted, false); assert.equal(o.policy, 'open'); assert.equal(o.message, null);

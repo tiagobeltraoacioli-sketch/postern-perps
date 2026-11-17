@@ -534,7 +534,7 @@
    }
   },
   {
-   "name": "blocked country BR, revoke agent refused (not in 0.1.1 exit list)",
+   "name": "blocked country BR, revoke agent refused (not in the 0.2.1 exit list)",
    "list": "fixture",
    "sanctions": "fresh",
    "request": {
@@ -3225,7 +3225,7 @@
    }
   },
   {
-   "name": "real list 0.1.1: no allowed entry yet, PA order denied (the PA residence attestation is restricted too)",
+   "name": "real list (392, 0.2.1): no allowed entry yet, PA order denied (the PA residence attestation is restricted too)",
    "list": "real",
    "sanctions": "fresh",
    "request": {
@@ -3270,7 +3270,7 @@
    }
   },
   {
-   "name": "real list 0.1.1: BR cancel exit-only",
+   "name": "real list (392, 0.2.1): BR cancel exit-only",
    "list": "real",
    "sanctions": "fresh",
    "request": {
@@ -3310,7 +3310,7 @@
    }
   },
   {
-   "name": "real list 0.1.1: UA without subdivision",
+   "name": "real list (392, 0.2.1): UA without subdivision",
    "list": "real",
    "sanctions": "fresh",
    "request": {

@@ -138,22 +138,30 @@ fn geo_assertion_vectors() {
 #[test]
 fn attestation_vectors() {
     let v = json("vectors/attestation-vectors.json");
-    assert_eq!(format!("0x{}", attestation::domain_separator().iter().map(|x| format!("{x:02x}")).collect::<String>()), v["domainSeparator"].as_str().unwrap());
+    let vault_s = v["vault"].as_str().unwrap();
+    let vault = attestation::parse_vault(vault_s).unwrap();
+    assert_eq!(format!("0x{}", attestation::domain_separator(&vault).iter().map(|x| format!("{x:02x}")).collect::<String>()), v["domainSeparator"].as_str().unwrap());
     let mut st = BTreeMap::new();
     st.insert(v["statement"]["id"].as_str().unwrap().to_string(), v["statement"]["hash"].as_str().unwrap().to_string());
     let cases = v["vectors"].as_array().unwrap();
-    assert_eq!(cases.len(), 11);
+    assert_eq!(cases.len(), 13);
     for c in cases {
         let name = c["name"].as_str().unwrap();
         let m = attestation::parse_message(&c["message"]).unwrap();
-        let dg = attestation::digest(&m);
+        let dg = attestation::digest(&m, &vault);
         assert_eq!(format!("0x{}", dg.iter().map(|x| format!("{x:02x}")).collect::<String>()), c["digest"].as_str().unwrap(), "{name}: digest");
-        let r = attestation::verify(c, &st, c["nowMs"].as_u64().unwrap());
+        let r = attestation::verify(c, &st, c["nowMs"].as_u64().unwrap(), Some(vault_s)).unwrap();
         assert_eq!(r.status, c["expect"]["status"].as_str().unwrap(), "{name}: {:?}", r.reason);
         if let Some(s) = c["expect"].get("signer") {
             assert_eq!(r.signer.as_deref(), s.as_str(), "{name}");
         }
     }
+    for bad in [None, Some(""), Some("0x0000000000000000000000000000000000000000"), Some("vault")] {
+        assert!(attestation::verify(&cases[0], &st, 0, bad).is_err(), "no vault: {bad:?}");
+    }
+    let notices = json("../legal/notices.json");
+    assert_eq!(notices["attestation"]["statementId"], v["statement"]["id"]);
+    assert_eq!(notices["attestation"]["statementHash"], v["statement"]["hash"]);
     for kv in v["keccakVectors"].as_array().unwrap() {
         let inp = kv["input"].as_str().unwrap();
         let bytes: Vec<u8> = (2..inp.len()).step_by(2).map(|i| u8::from_str_radix(&inp[i..i + 2], 16).unwrap()).collect();

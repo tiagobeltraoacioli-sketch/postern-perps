@@ -1,6 +1,6 @@
-//! Attestation verification (port of verifyAttestation in ../src/attestation.mjs): EIP-712 under the domain
-//! {name "PosternPerps Attestation", version "1", chainId 7007701}; 65-byte r||s||v, v in {27,28}, 1 <= r,s < n,
-//! s <= n/2; recovered address = account.
+//! Attestation verification (port of verifyAttestation in ../src/attestation.mjs): EIP-712 under the engine's
+//! SPEC 0.1.1 section 2.1 domain {name "PosternPerps", version "1", chainId 700770, verifyingContract = vault};
+//! 65-byte r||s||v, v in {27,28}, 1 <= r,s < n, s <= n/2; recovered address = account. No vault: refused.
 
 use crate::addr::{keccak256, normalize_evm_address};
 use crate::list::RESERVED_CODES;
@@ -8,10 +8,10 @@ use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const DOMAIN_NAME: &str = "PosternPerps Attestation";
+pub const DOMAIN_NAME: &str = "PosternPerps";
 pub const DOMAIN_VERSION: &str = "1";
-pub const DOMAIN_CHAIN_ID: u64 = 7_007_701;
-pub const DOMAIN_TYPE: &str = "EIP712Domain(string name,string version,uint256 chainId)";
+pub const DOMAIN_CHAIN_ID: u64 = 700_770;
+pub const DOMAIN_TYPE: &str = "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 pub const ATTESTATION_TYPE: &str = "Attestation(address account,string statementId,bytes32 statementHash,string residenceCountry,uint64 issuedAt,uint64 expiresAt)";
 pub const MAX_VALIDITY_MS: u64 = 400 * 24 * 3600 * 1000;
 pub const MAX_CLOCK_SKEW_MS: u64 = 5 * 60 * 1000;
@@ -30,12 +30,27 @@ fn word_u64(v: u64) -> [u8; 32] {
     o
 }
 
-pub fn domain_separator() -> [u8; 32] {
-    let mut b = Vec::with_capacity(128);
+/// The vault address (20 bytes), or None when absent, malformed or zero: then nothing is verified.
+pub fn parse_vault(v: &str) -> Option<[u8; 20]> {
+    let n = normalize_evm_address(v)?;
+    let b = hex_bytes(&n)?;
+    if b.iter().all(|x| *x == 0) {
+        return None;
+    }
+    let mut o = [0u8; 20];
+    o.copy_from_slice(&b);
+    Some(o)
+}
+
+pub fn domain_separator(vault: &[u8; 20]) -> [u8; 32] {
+    let mut b = Vec::with_capacity(160);
     b.extend_from_slice(&keccak256(DOMAIN_TYPE.as_bytes()));
     b.extend_from_slice(&keccak256(DOMAIN_NAME.as_bytes()));
     b.extend_from_slice(&keccak256(DOMAIN_VERSION.as_bytes()));
     b.extend_from_slice(&word_u64(DOMAIN_CHAIN_ID));
+    let mut v = [0u8; 32];
+    v[12..].copy_from_slice(vault);
+    b.extend_from_slice(&v);
     keccak256(&b)
 }
 
@@ -93,7 +108,7 @@ pub fn parse_message(m: &Value) -> Result<Message, &'static str> {
     Ok(Message { account, statement_id: sid.to_string(), statement_hash, residence_country: rc.to_string(), issued_at, expires_at })
 }
 
-pub fn digest(m: &Message) -> [u8; 32] {
+pub fn digest(m: &Message, vault: &[u8; 20]) -> [u8; 32] {
     let mut s = Vec::with_capacity(224);
     s.extend_from_slice(&keccak256(ATTESTATION_TYPE.as_bytes()));
     let mut a = [0u8; 32];
@@ -105,7 +120,7 @@ pub fn digest(m: &Message) -> [u8; 32] {
     s.extend_from_slice(&word_u64(m.issued_at));
     s.extend_from_slice(&word_u64(m.expires_at));
     let mut b = vec![0x19, 0x01];
-    b.extend_from_slice(&domain_separator());
+    b.extend_from_slice(&domain_separator(vault));
     b.extend_from_slice(&keccak256(&s));
     keccak256(&b)
 }
@@ -126,8 +141,13 @@ pub fn recover(digest: &[u8; 32], sig: &[u8]) -> Option<String> {
     Some(format!("0x{}", crate::sanctions::hex(&h[12..])))
 }
 
-/// verify(record {message, signature}, statements {id -> hash}, now_ms).
-pub fn verify(record: &Value, statements: &BTreeMap<String, String>, now_ms: u64) -> Verification {
+/// verify(record {message, signature}, statements {id -> hash}, now_ms, vault). Err when no vault is configured.
+pub fn verify(record: &Value, statements: &BTreeMap<String, String>, now_ms: u64, vault: Option<&str>) -> Result<Verification, &'static str> {
+    let vault = vault.and_then(parse_vault).ok_or("no vault configured (verifyingContract required)")?;
+    Ok(verify_inner(record, statements, now_ms, &vault))
+}
+
+fn verify_inner(record: &Value, statements: &BTreeMap<String, String>, now_ms: u64, vault: &[u8; 20]) -> Verification {
     let no = |status: &'static str, reason: &str| Verification { status, reason: Some(reason.to_string()), residence_country: None, signer: None };
     let m = match record.get("message").map(parse_message) {
         Some(Ok(m)) => m,
@@ -145,7 +165,7 @@ pub fn verify(record: &Value, statements: &BTreeMap<String, String>, now_ms: u64
         _ => None,
     };
     let Some(sig) = sig else { return no("invalid", "signature shape") };
-    let Some(signer) = recover(&digest(&m), &sig) else {
+    let Some(signer) = recover(&digest(&m, vault), &sig) else {
         return no("invalid", "signature does not recover (length, v, r/s range or high-s)");
     };
     let acct = format!("0x{}", crate::sanctions::hex(&m.account));
