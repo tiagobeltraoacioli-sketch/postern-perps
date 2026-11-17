@@ -549,3 +549,44 @@ fn forced_vault_0_2_input_accepted_by_the_real_engine() {
     let r = n.seq.produce(now());
     assert!(r.is_ok(), "the engine refused the node's VAULT 0.2 forced input: {:?}", r.err());
 }
+
+/// R395-38 (395, Medium): first-seen keyed by height let a placeholder block (seen early, never applicable)
+/// lend its time to a different, 60 s-late block at the same height, which was then signed. Keyed by logHash
+/// now: the late block is judged on its own receipt time and is not signed (0/7). Failed on f1578be.
+#[test]
+fn r395_38_placeholder_at_the_same_height_does_not_lend_its_first_seen_time() {
+    use perps_node::log::block_digest;
+    use perps_node::types::{encode_inputs, log_hash, Block, BlockHeader};
+    let mut n = net("r395-38", 1);
+    let ua = key_address(&user(80));
+    // placeholder: a block with a deposit the validators never see (they wait on it)
+    n.seq_view.lock().unwrap().deposits.insert(0, deposit(0, ua, 999));
+    let t0 = now();
+    let placeholder = n.seq.produce(t0).unwrap().unwrap().block.as_ref().clone();
+    for v in n.vals.iter_mut() {
+        assert!(matches!(v.process(&placeholder, t0), VResult::Wait(_)));
+    }
+    // a different block at height 1, timed 60 s before the validators' clock, signed by the sequencer key
+    let d = deposit(0, ua, 1_000_000);
+    for v in &n.val_views {
+        v.lock().unwrap().deposits.insert(0, d.clone());
+    }
+    let inputs = vec![Input::Deposit(d)];
+    let t_late = now() - 60_000;
+    let mut e = fresh_engine(&n.g);
+    e.apply_block(1, t_late, &inputs).unwrap();
+    let enc = encode_inputs(&n.g.types, &inputs).unwrap();
+    let g0 = n.g.genesis_log_hash();
+    let mut late = Block {
+        header: BlockHeader { height: 1, time: t_late, prev_log_hash: g0, log_hash: log_hash(&g0, 1, t_late, &enc), state_root: e.state_root() },
+        inputs_encoded: enc,
+        sequencer_signature: [0u8; 65],
+    };
+    late.sequencer_signature = sign(&n.keys.sequencer, &block_digest(&n.g, &late));
+    for v in n.vals.iter_mut() {
+        match v.process(&late, now()) {
+            VResult::AppliedNotSigned(r) => assert!(r.contains("R395-29"), "{r}"),
+            r => panic!("late replacement block certified via the placeholder's first-seen time: {r:?}"),
+        }
+    }
+}
