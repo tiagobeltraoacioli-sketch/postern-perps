@@ -100,9 +100,9 @@ const be128 = (v) => word(v).slice(16);
 const tag32 = (t) => { const b = new Uint8Array(32); b.set(enc.encode(t)); return b; };
 /** VAULT.md 5.4 chain heads: head(0) = keccak(abi.encode(bytes32 tag, chainid, vault)). */
 export const chainHead0 = (tag, vault) => hex(keccak256(concat(tag32(tag), word(700770), word(BigInt(vault)))));
-/** VAULT.md 5.2 / SPEC 11: stateRoot from the first twelve checkpoint fields. */
+/** VAULT.md 5.2 / SPEC 0.1.5 section 11: stateRoot; systemHash includes withdrawalCount and withdrawalsTotal (64072cb). */
 export function stateRootOf(f) {
-  const sys = keccak256(concat(enc.encode('PPv1sys'), be64(f.nextDepositIndex), be64(f.nextForcedIndex), be64(f.nextOrderId), be128(f.totalEscape), be128(f.dust), unhex(f.auxHash)));
+  const sys = keccak256(concat(enc.encode('PPv1sys'), be64(f.nextDepositIndex), be64(f.nextForcedIndex), be64(f.nextOrderId), be128(f.totalEscape), be128(f.dust), unhex(f.auxHash), be64(f.withdrawalCount), be64(f.withdrawalsTotal)));
   return hex(keccak256(concat(enc.encode('PosternPerps/state/v1'), be64(f.height), be64(f.time), unhex(f.accountsRoot), unhex(f.marketsRoot), unhex(f.withdrawalsRoot), sys)));
 }
 // Mock withdrawal record (VAULT.md decides the real one). PROVISIONAL.
