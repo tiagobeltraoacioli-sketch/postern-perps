@@ -3,7 +3,8 @@
 // Node.js 20 or newer, no dependencies, loopback only. Owner: agent 393 (node/mock/). README.md in this directory.
 //
 //   node node/mock/server.mjs [--port 49300] [--seed 7] [--start-time 1794878400000] [--static] [--blocks 40]
-//                             [--block-ms 200] [--no-rate-limit] [--nonce-window 120000:30000] [--eip712 FILE]
+//                             [--block-ms 200] [--no-rate-limit] [--nonce-window 120000:30000|off] [--eip712 FILE]
+//                             [--start-time MS|now]
 //
 // --static: produce the initial blocks, then a block only when an action arrives or on /mock/scenario?step=N
 // (screenshots and tests are byte-stable). Scenario switches: GET /mock/scenario?<name>=<value> (README).
@@ -15,6 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { Exchange, INTERVALS, FEE_ACCOUNT, EngineError } from './lib/exchange.mjs';
 import * as W from './lib/wire.mjs';
 import { admit, ApiError, geoDecision } from './lib/admission.mjs';
+import { fromCompliance } from './lib/markets.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -22,7 +24,7 @@ const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 
 export function loadFixtures(opts = {}) {
   return {
-    markets: readJson(opts.marketsFile ?? join(HERE, 'fixtures', 'markets.json')),
+    markets: fromCompliance(readJson(opts.marketsFile ?? join(REPO, 'compliance', 'markets.json')), readJson(opts.riskFile ?? join(REPO, 'compliance', 'risk.json')), readJson(join(HERE, 'fixtures', 'sim.json'))),
     eip712: readJson(opts.eip712File ?? join(HERE, 'fixtures', 'eip712.json')),
     geo: readJson(opts.geoFile ?? join(REPO, 'compliance', 'geoblock.json')),
     mockGeo: readJson(opts.mockGeoFile ?? join(HERE, 'fixtures', 'geoblock.mock.json')),
@@ -59,7 +61,7 @@ export async function startMock(opts = {}) {
     const e = fx.geo.countries[c];
     if (e && e.tier !== 'allowed') throw new Error(`mock allow-list names ${c}, which compliance/geoblock.json lists as ${e.tier}`);
   }
-  const state = { geoDefault: fx.mockGeo.mock_default_country, eip712: 'pinned', refuseSockets: 0, nonceWindowMs: opts.nonceWindowMs ?? null };
+  const state = { geoDefault: fx.mockGeo.mock_default_country, eip712: 'pinned', refuseSockets: 0, nonceWindowMs: opts.nonceWindowMs === undefined ? [120_000, 30_000] : opts.nonceWindowMs };
   const buckets = { acct: new Bucket(...LIMITS.actionsPerAccount), ip: new Bucket(...LIMITS.actionsPerIp), read: new Bucket(...LIMITS.readsPerIp) };
   const sockets = new Set();
   const waiters = [];
@@ -247,7 +249,12 @@ export async function startMock(opts = {}) {
   get(new RegExp(`^/v1/accounts/${ADDR}/agents$`), (u, [a]) => ({ agents: [...acct(a).agents.values()].filter((g) => g.expiresAt > x.time).map(W.agent) }));
   get(new RegExp(`^/v1/accounts/${ADDR}/nonce$`), (u, [a]) => {
     const A = acct(a);
-    const next = (s) => String((x.nonceBySigner.get(s) ?? -1n) + 1n);
+    // A nonce valid now (SPEC 2.5): the engine time, or one above the highest used if that is later.
+    const next = (s) => {
+      const u = x.nonceBySigner.get(s) ?? [];
+      const hi = u.length ? u.at(-1) + 1n : 0n;
+      return String(hi > BigInt(x.time) ? hi : BigInt(x.time));
+    };
     return { account: A.address, nextNonce: next(A.address), agents: [...A.agents.keys()].map((g) => ({ agent: g, nextNonce: next(g) })) };
   });
   get(new RegExp(`^/v1/accounts/${ADDR}/proof$`), (u, [a]) => {
@@ -275,7 +282,7 @@ export async function startMock(opts = {}) {
     if (!ack) throw new ApiError(404, 'NOT_FOUND', 'unknown or pruned action');
     return ack;
   });
-  get(/^\/mock\/info$/, () => ({ mock: true, unaudited: true, seed: String(x.seed), demoAccount: x.demo, demoKeyLabel: `postern-perps-mock/demo/${x.seed}`, liquidityAccount: x.liquidity, feeAccount: FEE_ACCOUNT, sequencer: x.sequencer, conservation: (() => { const c = x.conservation(); return { ok: c.ok, sizesZero: c.sizesZero, lhs: String(c.lhs), rhs: String(c.rhs) }; })() }));
+  get(/^\/mock\/info$/, () => ({ mock: true, unaudited: true, seed: String(x.seed), demoAccount: x.demo, demoKeyLabel: `postern-perps-mock/demo/${x.seed}`, liquidityAccount: x.liquidity, feeAccount: FEE_ACCOUNT, feeRecipient: fx.markets.defaults.feeRecipient, marketsSource: fx.markets.source, sequencer: x.sequencer, conservation: (() => { const c = x.conservation(); return { ok: c.ok, sizesZero: c.sizesZero, lhs: String(c.lhs), rhs: String(c.rhs) }; })() }));
 
   // ---------- scenarios (mock only) ----------
   const SCENARIOS = {
@@ -283,7 +290,7 @@ export async function startMock(opts = {}) {
     resume: (v) => { const m = marketOf(v); m.status = 'active'; m.haltReason = null; m.oracleState = 'ok'; },
     closeOnly: (v) => { marketOf(v).status = 'closeOnly'; },
     oracle: (v) => { const [s, st] = v.split(':'); const m = marketOf(s); if (!['ok', 'stale', 'deviation', 'insufficientSources'].includes(st)) throw new ApiError(400, 'MALFORMED', 'oracle=SYMBOL:ok|stale|deviation|insufficientSources'); m.oracleState = st; if (st !== 'ok') { m.status = 'halted'; m.haltReason = `Oracle ${st}.`; } },
-    busy: (v) => { x.busy = v === '1'; x.blockMs = x.busy ? 20 : blockMs; schedule(); },
+    busy: (v) => { x.busy = v === '1'; x.blockMs = x.busy ? 10 : blockMs; schedule(); },
     geo: (v) => { state.geoDefault = v === 'none' ? '' : v.toUpperCase(); },
     sanction: (v) => { sanctioned.add(v.toLowerCase()); },
     unsanction: (v) => { sanctioned.delete(v.toLowerCase()); },
@@ -562,9 +569,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (opt('host', '127.0.0.1') !== '127.0.0.1') throw new Error('the mock listens on 127.0.0.1 only');
   const nw = opt('nonce-window', null);
   const m = await startMock({
-    port: Number(opt('port', '49300')), seed: Number(opt('seed', '7')), startTime: Number(opt('start-time', '1794878400000')),
+    port: Number(opt('port', '49300')), seed: Number(opt('seed', '7')), startTime: opt('start-time', '1794878400000') === 'now' ? Math.floor(Date.now() / 1000) * 1000 : Number(opt('start-time', '1794878400000')),
     static: args.includes('--static'), blocks: Number(opt('blocks', '40')), blockMs: Number(opt('block-ms', '200')),
-    rateLimit: !args.includes('--no-rate-limit'), nonceWindowMs: nw ? nw.split(':').map(Number) : null,
+    rateLimit: !args.includes('--no-rate-limit'), nonceWindowMs: nw === 'off' ? null : nw ? nw.split(':').map(Number) : undefined,
     eip712File: opt('eip712', undefined), marketsFile: opt('markets', undefined),
   });
   process.stdout.write(`postern-perps mock (UNAUDITED) on ${m.url}  pid ${process.pid}  seed ${m.x.seed}  demo ${m.x.demo}\n`);

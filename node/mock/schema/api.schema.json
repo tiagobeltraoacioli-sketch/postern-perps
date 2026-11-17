@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "postern-perps/api/0.1",
  "title": "PosternDEX Perpetuals API v0.1 (UNAUDITED prototype)",
- "description": "Draft by agent 393 from docs/API.md v0.1 (2811600) for node/api/schema.json (owner 389). Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
+ "description": "Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries every field of the signed digest (389 proposal B) so anyone can recompute it; VAULT.md (390) will extend it. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
  "$defs": {
   "Dec": {
    "type": "string",
@@ -683,24 +683,7 @@
      "type": "object",
      "properties": {
       "eip712": {
-       "type": "object",
-       "properties": {
-        "name": {
-         "const": "PosternPerps"
-        },
-        "version": {
-         "const": "1"
-        },
-        "chainId": {
-         "const": 7007701
-        }
-       },
-       "required": [
-        "name",
-        "version",
-        "chainId"
-       ],
-       "additionalProperties": false
+       "$ref": "#/$defs/Domain"
       },
       "collateralChainId": {
        "const": 700770
@@ -870,6 +853,15 @@
     "logHash": {
      "$ref": "#/$defs/Hash"
     },
+    "withdrawalsRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "depositsCredited": {
+     "$ref": "#/$defs/Int"
+    },
+    "forcedProcessed": {
+     "$ref": "#/$defs/Int"
+    },
     "digest": {
      "$ref": "#/$defs/Hash"
     },
@@ -892,6 +884,9 @@
     "blockHash",
     "stateRoot",
     "logHash",
+    "withdrawalsRoot",
+    "depositsCredited",
+    "forcedProcessed",
     "digest",
     "threshold",
     "final",
@@ -1751,26 +1746,53 @@
    ],
    "additionalProperties": false
   },
+  "Domain": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "const": "PosternPerps"
+    },
+    "version": {
+     "const": "1"
+    },
+    "chainId": {
+     "const": 700770
+    },
+    "verifyingContract": {
+     "$ref": "#/$defs/Address"
+    }
+   },
+   "required": [
+    "name",
+    "version",
+    "chainId",
+    "verifyingContract"
+   ],
+   "additionalProperties": false
+  },
   "Eip712": {
    "type": "object",
    "properties": {
     "domain": {
+     "$ref": "#/$defs/Domain"
+    },
+    "scales": {
      "type": "object",
      "properties": {
-      "name": {
-       "const": "PosternPerps"
+      "price": {
+       "const": 8
       },
-      "version": {
-       "const": "1"
+      "size": {
+       "const": 8
       },
-      "chainId": {
-       "const": 7007701
+      "usdc": {
+       "const": 6
       }
      },
      "required": [
-      "name",
-      "version",
-      "chainId"
+      "price",
+      "size",
+      "usdc"
      ],
      "additionalProperties": false
     },
@@ -1812,6 +1834,7 @@
    },
    "required": [
     "domain",
+    "scales",
     "types",
     "actions",
     "agentAllowed",

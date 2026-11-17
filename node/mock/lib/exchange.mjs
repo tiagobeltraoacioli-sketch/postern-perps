@@ -22,7 +22,9 @@ const FRAC_DP = 6; // margin fractions
 const BPS_DP = 2; // fee bps with 2 decimals ("4.5" -> 450)
 export const INTERVALS = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 };
 const HISTORY_CANDLES = 1500;
-export const FEE_ACCOUNT = '0x775a993f09bd80aecf8f8c2ade0c84158e3a0544'; // owner's fee address (BRIEF-PERPS "Fees and revenue")
+// System account PROTOCOL_FEE of SPEC section 8 (no key); its balance is swept to the fee recipient
+// 0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544 (risk.json global.feeRecipient) by SPEC S-9.3; the mock does not sweep.
+export const FEE_ACCOUNT = '0x0000000000000000000000000000000000000001';
 const ZERO32 = '0x' + '00'.repeat(32);
 
 /** A throwaway key derived from a public label: mock only, never a real key. */
@@ -105,7 +107,8 @@ export class Exchange {
     this.rng = new Rng(this.seed);
     this.blockMs = blockMs;
     this.eip712 = eip712Fx;
-    this.vault = vault ?? addressOf(mockKey(`vault/${seed}`));
+    this.vault = (vault ?? eip712Fx.domain.verifyingContract ?? addressOf(mockKey('vault'))).toLowerCase();
+    this.wireScale = { price: eip712Fx.scales?.price ?? null, size: eip712Fx.scales?.size ?? null }; // SPEC 1: fixed 8
     this.collateralToken = addressOf(mockKey(`token/${seed}`));
     this.height = startHeight;
     this.time = startTime;
@@ -119,7 +122,7 @@ export class Exchange {
     this.vaultMode = 'normal';
     this.pending = [];
     this.acks = new Map();
-    this.nonceBySigner = new Map(); // highest nonce per signer (main key or agent), API.md 5.1
+    this.nonceBySigner = new Map(); // per signer: its 64 highest used nonces, ascending (SPEC 2.5)
     this.ids = { order: 9_912_000n, trade: 771_000n, fill: 5_512_000n, withdrawal: 70n, deposit: 40n, forced: 0n };
     this.depositsCredited = 0n;
     this.forcedProcessed = 0n;
@@ -168,14 +171,15 @@ export class Exchange {
       minSize: parseFixed(f.minOrderSize, sd), maxSize: parseFixed(f.maxOrderSize, sd),
       maxLev: BigInt(f.maxLeverage), oiCap: parseFixed(f.openInterestCap, sd),
       tiers: f.marginTiers.map((t) => ({ floor: parseFixed(t.notionalFloor, USDC_DP), imf: parseFixed(t.initialMarginFraction, FRAC_DP), mmf: parseFixed(t.maintenanceMarginFraction, FRAC_DP), lev: t.maxLeverage, raw: t })),
-      makerBps: parseFixed(d.makerFeeBps, BPS_DP), takerBps: parseFixed(d.takerFeeBps, BPS_DP), liqBps: parseFixed(d.liquidationFeeBps, BPS_DP),
-      maxFunding: parseFixed(d.maxFundingRate, RATE_DP),
+      makerBps: parseFixed(f.makerFeeBps ?? d.makerFeeBps, BPS_DP), takerBps: parseFixed(f.takerFeeBps ?? d.takerFeeBps, BPS_DP), liqBps: parseFixed(f.liquidationFeeBps ?? d.liquidationFeeBps, BPS_DP),
+      maxFunding: parseFixed(f.maxFundingRate ?? d.maxFundingRate, RATE_DP), interest: BigInt(f.interest ?? 12500) * 10n, // RATE_SCALE 1e9 -> mock 1e10
+      slipBps: BigInt(f.marketSlippageBps ?? 500), bandBps: BigInt(f.markBandBps ?? 50),
       status: 'active', haltReason: null, oracleState: 'ok',
       rng: this.rng.fork(`market/${f.symbol}`),
       vol: BigInt(f.mockVolBps ?? 4) * 10n, // per-block uniform step bound, in millionths
       levelSize: parseFixed(f.mockLevelSize ?? '1', sd),
       bids: new Map(), asks: new Map(), seq: 88_000 + f.marketId * 1000,
-      trades: [], candles: {}, funding: [], premiumSum: 0n, premiumN: 0n, fundingRate: 125_000n, oi: 0n,
+      trades: [], candles: {}, funding: [], premiumSum: 0n, premiumN: 0n, fundingRate: BigInt(f.interest ?? 12500) * 10n, oi: 0n,
     };
     m.index = parseFixed(f.mockStartPrice, pd);
     m.index -= m.index % m.tick;
@@ -203,7 +207,7 @@ export class Exchange {
         const hi = this.roundTick(m, max(open, close) + r.range(0n, stepBound / 2n + m.tick));
         const lo = this.roundTick(m, min(open, close) - r.range(0n, stepBound / 2n + m.tick));
         const n = Number(r.range(5n, 400n));
-        const v = (m.levelSize * BigInt(n)) / 8n;
+        const v = (m.levelSize * BigInt(n)) / 200n;
         list.push({ t, o: open, h: hi, l: max(lo, m.tick), c: close, v, q: this.usdc(m, (v * (open + close)) / 2n), n });
         close = open;
       }
@@ -608,11 +612,12 @@ export class Exchange {
       }
       case 'UpdateLeverage': {
         const m = this.marketById(msg.marketId);
+        if (m.status === 'halted') throw new EngineError('MARKET_HALTED');
         const lev = BigInt(msg.leverage);
-        if (lev < 1n || lev > m.maxLev) throw new EngineError('LEVERAGE_OUT_OF_RANGE');
+        if (lev < 1n || lev > m.maxLev) throw new EngineError('LEVERAGE');
         const p = this.position(acc, m);
         const mode = msg.isolated ? 'isolated' : 'cross';
-        if (p.size !== 0n && p.mode !== mode) throw new EngineError('POSITION_OPEN', 'margin mode changes only without a position');
+        if (p.size !== 0n && p.mode !== mode) throw new EngineError('LEVERAGE', 'margin mode changes only without a position');
         const prev = acc.leverage.get(m.id);
         acc.leverage.set(m.id, lev);
         p.mode = mode;
@@ -627,6 +632,7 @@ export class Exchange {
       }
       case 'UpdateMargin': {
         const m = this.marketById(msg.marketId);
+        if (m.status === 'halted') throw new EngineError('MARKET_HALTED');
         const p = this.position(acc, m);
         if (p.mode !== 'isolated' || p.size === 0n) throw new EngineError('NOT_ISOLATED');
         const amount = BigInt(msg.amount);
@@ -653,7 +659,9 @@ export class Exchange {
       case 'Withdraw': {
         const amount = BigInt(msg.amount);
         const fee = parseFixed(this.markets.values().next().value.cfg.withdrawalFee ?? '1', USDC_DP);
-        if (amount <= fee) throw new EngineError('WITHDRAWAL_TOO_SMALL');
+        if (amount <= fee) throw new EngineError('WITHDRAW_TOO_SMALL');
+        if (/^0x0{40}$/.test(msg.recipient)) throw new EngineError('MALFORMED', 'recipient is the zero address');
+        for (const [id, p] of acc.positions) if (p.size !== 0n && this.byId.get(id).status === 'halted') throw new EngineError('POSITION_IN_HALTED_MARKET');
         if (amount > this.withdrawable(acc)) throw new EngineError('INSUFFICIENT_MARGIN');
         acc.collateral -= amount;
         this.account(FEE_ACCOUNT).collateral += fee;
@@ -666,27 +674,49 @@ export class Exchange {
       }
       case 'ApproveAgent': {
         const agent = msg.agent.toLowerCase();
-        if (agent === acc.address) throw new EngineError('AGENT_IS_ACCOUNT');
-        if (BigInt(msg.expiresAt) <= BigInt(this.time)) throw new EngineError('AGENT_EXPIRED');
-        if (msg.name.length > 64) throw new EngineError('AGENT_NAME_TOO_LONG');
+        if (agent === acc.address) throw new EngineError('AGENT_INVALID');
+        const exp = BigInt(msg.expiresAt);
+        if (exp <= BigInt(this.time) || exp > BigInt(this.time) + 180n * 86_400_000n) throw new EngineError('MALFORMED', 'expiresAt must be in (T, T + 180 days]');
+        if (this.accounts.has(agent) && agent !== acc.address) throw new EngineError('AGENT_INVALID', 'agent address is an existing account');
+        for (const other of this.accounts.values()) if (other !== acc && other.agents.has(agent)) throw new EngineError('AGENT_INVALID', 'agent of another account');
+        for (const [k, g] of acc.agents) if (g.expiresAt <= this.time) acc.agents.delete(k);
+        if (!acc.agents.has(agent) && acc.agents.size >= 4) throw new EngineError('AGENT_INVALID', 'at most 4 agents');
+        if (Buffer.byteLength(msg.name, 'utf8') > 32) throw new EngineError('MALFORMED', 'agent name over 32 bytes');
         acc.agents.set(agent, { agent, name: msg.name, approvedAt: this.time, expiresAt: Number(msg.expiresAt), height: this.height });
         ev.agents(acc);
         return { ok: true };
       }
       case 'RevokeAgent': {
         const agent = msg.agent.toLowerCase();
-        if (!acc.agents.delete(agent)) throw new EngineError('AGENT_NOT_FOUND');
+        if (!acc.agents.delete(agent)) throw new EngineError('AGENT_INVALID', 'not an agent of this account');
         ev.agents(acc);
         return { ok: true };
       }
       default:
-        throw new EngineError('UNKNOWN_ACTION');
+        throw new EngineError('MALFORMED');
     }
   }
   marketById(id) {
     const m = this.byId.get(Number(id));
     if (!m) throw new EngineError('UNKNOWN_MARKET');
     return m;
+  }
+  /**
+   * A signed integer in SPEC's fixed scale (1e-8) to the market's internal scale (10^-priceDecimals or
+   * 10^-sizeDecimals). Exact or refused: a value finer than the tick / step is TICK / STEP, never rounded.
+   */
+  fromWire(m, kind, v) {
+    const scale = this.wireScale[kind];
+    const internal = kind === 'price' ? m.pd : m.sd;
+    const raw = BigInt(v);
+    if (scale === null) return raw;
+    const k = pow10(scale - internal);
+    if (raw % k !== 0n) throw new EngineError(kind === 'price' ? 'TICK' : 'STEP');
+    return raw / k;
+  }
+  toWire(m, kind, v) {
+    const scale = this.wireScale[kind];
+    return scale === null ? v : v * pow10(scale - (kind === 'price' ? m.pd : m.sd));
   }
   withdrawable(acc) {
     const g = this.margins(acc);
@@ -697,23 +727,26 @@ export class Exchange {
     const m = this.marketById(msg.marketId);
     const type = ORDER_TYPES[Number(msg.orderType)];
     const tif = TIFS[Number(msg.timeInForce)];
-    if (!type || !tif) throw new EngineError('BAD_ORDER_TYPE');
-    const price = BigInt(msg.price), size = BigInt(msg.size), trigger = BigInt(msg.triggerPrice);
+    if (!type || !tif) throw new EngineError('MALFORMED', 'unknown orderType or timeInForce');
+    const [price, size, trigger] = [this.fromWire(m, 'price', msg.price), this.fromWire(m, 'size', msg.size), this.fromWire(m, 'price', msg.triggerPrice)];
     const isBuy = msg.isBuy;
     if (m.status === 'halted' || m.status === 'settled') throw new EngineError('MARKET_HALTED');
-    if (m.status === 'closeOnly' && !msg.reduceOnly) throw new EngineError('MARKET_CLOSE_ONLY');
-    if (size <= 0n || size % m.step !== 0n) throw new EngineError('BAD_SIZE_STEP');
-    if (size < m.minSize || size > m.maxSize) throw new EngineError('SIZE_OUT_OF_RANGE');
+    if (m.status === 'closeOnly' && !msg.reduceOnly) throw new EngineError('MARKET_HALTED', 'close-only: reduce-only orders only');
+    if (size <= 0n || size % m.step !== 0n) throw new EngineError('STEP');
+    if (size < m.minSize || size > m.maxSize) throw new EngineError('SIZE_BOUNDS');
     // Market orders carry a worst price (agreed 391/389 in the cross-area log; price 0 = "any price" refused).
-    if (price <= 0n) throw new EngineError('PRICE_REQUIRED', 'every order carries a limit or worst price');
-    if (price % m.tick !== 0n) throw new EngineError('BAD_PRICE_TICK');
+    if (price <= 0n) throw new EngineError('MALFORMED', 'price is mandatory: a limit or worst price (SPEC 2.3)');
+    if (price % m.tick !== 0n) throw new EngineError('TICK');
     const isTrigger = type.startsWith('stop') || type.startsWith('takeProfit');
-    if (isTrigger && (trigger <= 0n || trigger % m.tick !== 0n)) throw new EngineError('BAD_TRIGGER');
-    if (!isTrigger && trigger !== 0n) throw new EngineError('BAD_TRIGGER');
+    if (isTrigger && trigger <= 0n) throw new EngineError('MALFORMED', 'triggerPrice >= 1 for trigger types');
+    if (isTrigger && trigger % m.tick !== 0n) throw new EngineError('TICK');
+    if (!isTrigger && trigger !== 0n) throw new EngineError('MALFORMED', 'triggerPrice is 0 for limit and market');
+    const marketType = type === 'market' || type === 'stopMarket' || type === 'takeProfitMarket';
+    if (marketType && tif !== 'IOC') throw new EngineError('MALFORMED', 'market types must be IOC (SPEC 2.3)');
     const p = this.position(acc, m);
     let sz = size;
     if (msg.reduceOnly) {
-      if (p.size === 0n || (p.size > 0n) === isBuy) throw new EngineError('REDUCE_ONLY_VIOLATION');
+      if (p.size === 0n || (p.size > 0n) === isBuy) throw new EngineError('REDUCE_ONLY');
       sz = min(size, abs(p.size));
     }
     const o = this.newOrder(acc, m, { isBuy, type, tif, price, size: sz, reduceOnly: msg.reduceOnly, trigger: isTrigger ? trigger : null, clientOrderId: msg.clientOrderId === ZERO32 ? null : msg.clientOrderId });
@@ -747,18 +780,24 @@ export class Exchange {
       const q = a.positions.get(m.id);
       if (q && q.size > 0n) oi += q.size;
     }
-    if (newSize > 0n && oi + delta > m.oiCap && delta > 0n && acc.address !== this.liquidity) throw new EngineError('OPEN_INTEREST_CAP');
+    if (newSize > 0n && oi + delta > m.oiCap && delta > 0n && acc.address !== this.liquidity) throw new EngineError('OI_CAP');
   }
   execute(acc, m, o, ev) {
-    const limit = o.price;
+    let limit = o.price;
+    const isMkt = o.type === 'market' || o.type === 'stopMarket' || o.type === 'takeProfitMarket';
+    if (isMkt) {
+      // S-4.3: a market order never fills beyond marketSlippageBps from the mark; the tighter bound wins.
+      const band = (m.mark * m.slipBps) / 10_000n;
+      limit = o.isBuy ? min(limit, m.mark + band) : max(limit, m.mark - band);
+    }
     if (o.tif === 'POST_ONLY') {
       const opp = this.best(m, o.isBuy ? 'asks' : 'bids');
       if (opp !== null && (o.isBuy ? opp <= limit : opp >= limit)) {
         o.status = 'rejected';
-        o.rejectReason = 'POST_ONLY_WOULD_CROSS';
+        o.rejectReason = 'WOULD_CROSS';
         acc.history.unshift(o);
         ev.orders(acc, o);
-        throw new EngineError('POST_ONLY_WOULD_CROSS');
+        throw new EngineError('WOULD_CROSS');
       }
     }
     this.match(m, acc, o, limit, ev);
@@ -984,7 +1023,7 @@ export class Exchange {
   updateMark(m) {
     const bb = this.best(m, 'bids'), ba = this.best(m, 'asks');
     const vals = [m.index, bb ?? m.index, ba ?? m.index].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    const cap = (m.index * 5n) / 1000n; // book component bounded to 0.5 % of the index
+    const cap = (m.index * m.bandBps) / 10_000n; // S-5.2: the book component is bounded to markBandBps
     let mark = vals[1];
     if (mark > m.index + cap) mark = m.index + cap;
     if (mark < m.index - cap) mark = m.index - cap;
@@ -1051,7 +1090,7 @@ export class Exchange {
     for (const m of this.markets.values()) {
       if (BigInt(this.time) < m.nextFunding) continue;
       const premium = m.premiumN ? m.premiumSum / m.premiumN : 0n;
-      const interest = 125_000n; // 0.00125 % per hour, in RATE_DP
+      const interest = m.interest;
       let rate = premium + interest;
       if (rate > m.maxFunding) rate = m.maxFunding;
       if (rate < -m.maxFunding) rate = -m.maxFunding;

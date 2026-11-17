@@ -143,14 +143,21 @@ export function admit(x, req, ctx) {
     if (type === 'PlaceOrder' && (m.status === 'halted' || m.status === 'settled')) throw new ApiError(409, 'MARKET_HALTED', `${m.symbol} is ${m.status}`, { reason: m.haltReason });
     if (type === 'PlaceOrder' && m.status === 'closeOnly' && msg.reduceOnly !== true) throw new ApiError(409, 'MARKET_HALTED', `${m.symbol} accepts reduce-only orders only`);
   }
+  // SPEC 2.5: the nonce is a millisecond time in [T - 120000, T + 30000] of the engine time and single use per
+  // signer, among the signer's 64 highest used (above their minimum once the set is full). The window can be
+  // switched off in the mock only (development against a wall clock that differs from the mock's engine time).
   const nonce = BigInt(msg.nonce);
-  const prev = x.nonceBySigner.get(signer) ?? -1n;
-  if (nonce <= prev) throw new ApiError(400, 'BAD_NONCE', 'nonce not above the signer\'s highest used', { highest: String(prev) });
   if (ctx.nonceWindowMs) {
     const [back, ahead] = ctx.nonceWindowMs;
-    if (nonce < BigInt(x.time - back) || nonce > BigInt(x.time + ahead)) throw new ApiError(400, 'BAD_NONCE', 'nonce outside the time window', { time: x.time });
+    if (nonce < BigInt(x.time - back) || nonce > BigInt(x.time + ahead)) throw new ApiError(400, 'NONCE_WINDOW', 'nonce outside [T - 120 s, T + 30 s] of the engine time', { time: x.time });
   }
-  x.nonceBySigner.set(signer, nonce);
+  let used = x.nonceBySigner.get(signer);
+  if (!used) x.nonceBySigner.set(signer, (used = []));
+  if (used.includes(nonce)) throw new ApiError(400, 'NONCE_USED', 'nonce already used by this signer');
+  if (used.length >= 64 && nonce <= used[0]) throw new ApiError(400, 'NONCE_USED', 'nonce not above the minimum of the 64 highest used', { min: String(used[0]) });
+  used.push(nonce);
+  used.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (used.length > 64) used.shift();
   const actionHash = hex(keccak256(concat(digest, unhex(signer))));
   return { type, msg, wireMessage: msg, account, signer, signature: signature.toLowerCase(), actionHash, receivedAt: ctx.now, digest: hex(digest) };
 }

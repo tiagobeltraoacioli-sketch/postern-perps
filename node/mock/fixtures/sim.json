@@ -1,0 +1,27 @@
+{
+ "_note": "MOCK simulation parameters only (start prices, per-block volatility bound, maker level size). Market parameters come from compliance/markets.json and compliance/risk.json (392); nothing here is a market parameter. UNAUDITED prototype.",
+ "oracleSources": [
+  "sourceA",
+  "sourceB",
+  "sourceC",
+  "sourceD",
+  "sourceE"
+ ],
+ "markets": {
+  "BTC-USD": {
+   "startPrice": "67250.0",
+   "volBps": 4,
+   "levelSize": "0.8"
+  },
+  "ETH-USD": {
+   "startPrice": "3480.00",
+   "volBps": 5,
+   "levelSize": "12"
+  },
+  "SOL-USD": {
+   "startPrice": "182.400",
+   "volBps": 7,
+   "levelSize": "220"
+  }
+ }
+}

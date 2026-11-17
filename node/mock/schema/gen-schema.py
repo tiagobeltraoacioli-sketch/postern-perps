@@ -40,13 +40,13 @@ D["OracleStatus"]=obj({"symbol":R("Symbol"),"status":enum("ok","stale","insuffic
  "sources":arr(R("OracleSource")),"signers":R("Int"),"threshold":R("Int"),"haltReason":{"type":["string","null"]}})
 D["BlockRef"]=obj({"height":R("Int"),"time":R("Ms"),"hash":R("Hash"),"stateRoot":R("Hash"),"logHash":R("Hash")})
 D["Status"]=obj({"name":{"type":"string"},"version":{"type":"string"},"apiVersion":{"type":"string","pattern":r"^[0-9]+\.[0-9]+$"},"mode":enum("mock","dev","live"),"unaudited":{"type":"boolean"},
- "network":obj({"eip712":obj({"name":{"const":"PosternPerps"},"version":{"const":"1"},"chainId":{"const":7007701}}),"collateralChainId":{"const":700770},"vault":R("Address"),"collateralToken":R("Address"),"collateralSymbol":{"type":"string"},"collateralDecimals":{"const":6}}),
+ "network":obj({"eip712":R("Domain"),"collateralChainId":{"const":700770},"vault":R("Address"),"collateralToken":R("Address"),"collateralSymbol":{"type":"string"},"collateralDecimals":{"const":6}}),
  "time":R("Ms"),"latestBlock":R("BlockRef"),"latestFinalized":nul(R("BlockRef")),
  "sequencer":obj({"state":enum("running","recovering","halted"),"blockIntervalMs":R("Int"),"pendingActions":R("Int")}),
  "committee":obj({"n":R("Int"),"threshold":R("Int"),"online":R("Int")}),"vaultMode":enum("normal","paused","escape","unknown"),
  "l2":obj({"finalizedBlock":R("Int"),"lastDepositBlock":R("Int"),"endpointsAgree":{"type":"boolean"}})})
 D["CheckpointSig"]=obj({"validator":R("Address"),"signature":R("Sig")})
-D["Checkpoint"]=obj({"height":R("Int"),"time":R("Ms"),"blockHash":R("Hash"),"stateRoot":R("Hash"),"logHash":R("Hash"),"digest":R("Hash"),"threshold":R("Int"),"final":{"type":"boolean"},"signatures":arr(R("CheckpointSig"))})
+D["Checkpoint"]=obj({"height":R("Int"),"time":R("Ms"),"blockHash":R("Hash"),"stateRoot":R("Hash"),"logHash":R("Hash"),"withdrawalsRoot":R("Hash"),"depositsCredited":R("Int"),"forcedProcessed":R("Int"),"digest":R("Hash"),"threshold":R("Int"),"final":{"type":"boolean"},"signatures":arr(R("CheckpointSig"))})
 D["Committee"]=obj({"threshold":R("Int"),"validators":arr(R("Address"),minItems=1),"setHash":R("Hash")})
 D["BlockInput"]={"oneOf":[
  obj({"kind":{"const":"action"},"account":R("Address"),"signer":R("Address"),"type":{"type":"string"},"message":{"type":"object"},"signature":R("Sig")},opt=("signer",)),
@@ -73,9 +73,10 @@ D["Withdrawal"]=obj({"withdrawalId":R("U64"),"account":R("Address"),"recipient":
  "certificate":nul(R("WithdrawalCertificate")),"l2TxHash":nul(R("Hash")),"availableAt":nul(R("Ms")),"time":R("Ms")})
 D["ForcedAction"]=obj({"forcedId":R("U64"),"account":R("Address"),"kind":enum("cancelAll","close","withdraw"),"l2TxHash":R("Hash"),"l2Block":R("Int"),"deadlineTime":R("Ms"),"status":enum("queued","included","expired"),"includedHeight":nul(R("Int"))})
 D["TypedField"]=obj({"name":{"type":"string","pattern":"^[a-zA-Z][a-zA-Z0-9]*$"},"type":{"type":"string","pattern":r"^(address|bool|string|bytes32|u?int(8|16|32|64|128|256))$"}})
-D["Eip712"]={"type":"object","properties":{"domain":obj({"name":{"const":"PosternPerps"},"version":{"const":"1"},"chainId":{"const":7007701}}),
+D["Domain"]=obj({"name":{"const":"PosternPerps"},"version":{"const":"1"},"chainId":{"const":700770},"verifyingContract":R("Address")})
+D["Eip712"]={"type":"object","properties":{"domain":R("Domain"),"scales":obj({"price":{"const":8},"size":{"const":8},"usdc":{"const":6}}),
  "types":{"type":"object","additionalProperties":arr(R("TypedField"),minItems=2)},"actions":arr({"type":"string"},minItems=1),"agentAllowed":arr({"type":"string"}),"specVersion":{"type":"string"},
- "enums":{"type":"object"},"notes":{"type":"object"},"_note":{"type":"string"}},"required":["domain","types","actions","agentAllowed","specVersion"],"additionalProperties":False}
+ "enums":{"type":"object"},"notes":{"type":"object"},"_note":{"type":"string"}},"required":["domain","scales","types","actions","agentAllowed","specVersion"],"additionalProperties":False}
 D["ActionResult"]=obj({"ok":{"type":"boolean"},"orderId":nul(R("U64")),"orderStatus":{"type":["string","null"]},"filledSize":nul(R("UDec")),"withdrawalId":nul(R("U64")),"error":{"type":["string","null"]}},opt=("orderId","orderStatus","filledSize","withdrawalId"))
 D["ActionAck"]=obj({"actionHash":R("Hash"),"status":enum("accepted","included","rejected"),"receivedAt":R("Ms"),"height":R("Int"),"index":R("Int"),"result":R("ActionResult")},opt=("height","index","result"))
 D["GeoStatus"]=obj({"country":{"type":["string","null"],"pattern":"^[A-Z0-9]{2}$"},"restricted":{"type":"boolean"},"policy":enum("actions_refused","exit_only","open"),"listVersion":{"type":"string"},
@@ -115,6 +116,6 @@ D["WsControl"]={"oneOf":[
 D["WsMessage"]={"anyOf":[R("WsData"),R("WsControl")]}
 D["ActionRequest"]={"type":"object","properties":{"type":{"type":"string","pattern":"^[A-Z][A-Za-z]+$"},"message":{"type":"object"},"signature":R("Sig"),"wire":{"type":"boolean"}},"required":["type","message","signature"],"additionalProperties":False}
 schema={"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"postern-perps/api/0.1","title":"PosternDEX Perpetuals API v0.1 (UNAUDITED prototype)",
- "description":"Draft by agent 393 from docs/API.md v0.1 (2811600) for node/api/schema.json (owner 389). Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
+ "description":"Draft by agent 393 from docs/API.md v0.1 (2811600) and docs/SPEC.md v0.1 (014c466: domain 700770 + verifyingContract, fixed scales) for node/api/schema.json (owner 389). Checkpoint carries every field of the signed digest (389 proposal B) so anyone can recompute it; VAULT.md (390) will extend it. Response objects are closed (additionalProperties false): an added field is a schema change first, so the node, the mock and the frontend cannot drift silently.",
  "$defs":D}
 json.dump(schema,open(sys.argv[1],'w'),indent=1)

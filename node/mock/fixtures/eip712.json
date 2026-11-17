@@ -1,26 +1,233 @@
 {
-  "_note": "PROVISIONAL (written before docs/SPEC.md exists). The node serves this at GET /v1/eip712; it is replaced by the engine's definitions when agent 350 publishes them. `message` in POST /v1/actions is exactly the typed message below: prices, sizes and amounts are the scaled integers (price * 10^priceDecimals, size * 10^sizeDecimals, USDC * 10^6) as decimal strings.",
-  "specVersion": "provisional-0.1",
-  "domain": {"name": "PosternPerps", "version": "1", "chainId": 7007701},
-  "types": {
-    "PlaceOrder": [
-      {"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "marketId", "type": "uint32"},
-      {"name": "isBuy", "type": "bool"}, {"name": "orderType", "type": "uint8"}, {"name": "timeInForce", "type": "uint8"},
-      {"name": "price", "type": "uint64"}, {"name": "size", "type": "uint64"}, {"name": "reduceOnly", "type": "bool"},
-      {"name": "triggerPrice", "type": "uint64"}, {"name": "clientOrderId", "type": "bytes32"}],
-    "CancelOrder": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "marketId", "type": "uint32"}, {"name": "orderId", "type": "uint64"}],
-    "CancelAll": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "marketId", "type": "uint32"}],
-    "UpdateLeverage": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "marketId", "type": "uint32"}, {"name": "leverage", "type": "uint32"}, {"name": "isolated", "type": "bool"}],
-    "UpdateMargin": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "marketId", "type": "uint32"}, {"name": "amount", "type": "uint64"}, {"name": "add", "type": "bool"}],
-    "Withdraw": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "amount", "type": "uint64"}, {"name": "recipient", "type": "address"}],
-    "ApproveAgent": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "agent", "type": "address"}, {"name": "name", "type": "string"}, {"name": "expiresAt", "type": "uint64"}],
-    "RevokeAgent": [{"name": "account", "type": "address"}, {"name": "nonce", "type": "uint64"}, {"name": "agent", "type": "address"}]
+ "_note": "MOCK typed data, transcribed from docs/SPEC.md v0.1 (014c466) sections 1, 2.1, 2.3, 2.4 by agent 393. The domain's verifyingContract is the MOCK vault address (derived from the public label 'postern-perps-mock/vault', no real contract): SPEC 2.1 says a development deployment uses its own vault address, so a signature made for this mock is never valid for any other deployment. Prices and sizes in messages are integers in the FIXED scales of SPEC 1 (1e-8 USD, 1e-8 base unit); USDC amounts in 1e-6. UNAUDITED prototype.",
+ "specVersion": "0.1",
+ "domain": {
+  "name": "PosternPerps",
+  "version": "1",
+  "chainId": 700770,
+  "verifyingContract": "0xdb0b1676ac81645ca3e2fbe136b6ad00b2eb908c"
+ },
+ "scales": {
+  "price": 8,
+  "size": 8,
+  "usdc": 6
+ },
+ "types": {
+  "PlaceOrder": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "isBuy",
+    "type": "bool"
+   },
+   {
+    "name": "orderType",
+    "type": "uint8"
+   },
+   {
+    "name": "timeInForce",
+    "type": "uint8"
+   },
+   {
+    "name": "price",
+    "type": "uint64"
+   },
+   {
+    "name": "size",
+    "type": "uint64"
+   },
+   {
+    "name": "reduceOnly",
+    "type": "bool"
+   },
+   {
+    "name": "triggerPrice",
+    "type": "uint64"
+   },
+   {
+    "name": "clientOrderId",
+    "type": "bytes32"
+   }
+  ],
+  "CancelOrder": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "orderId",
+    "type": "uint64"
+   }
+  ],
+  "CancelAll": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   }
+  ],
+  "UpdateLeverage": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "leverage",
+    "type": "uint32"
+   },
+   {
+    "name": "isolated",
+    "type": "bool"
+   }
+  ],
+  "UpdateMargin": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "marketId",
+    "type": "uint32"
+   },
+   {
+    "name": "amount",
+    "type": "uint64"
+   },
+   {
+    "name": "add",
+    "type": "bool"
+   }
+  ],
+  "Withdraw": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "amount",
+    "type": "uint64"
+   },
+   {
+    "name": "recipient",
+    "type": "address"
+   }
+  ],
+  "ApproveAgent": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "agent",
+    "type": "address"
+   },
+   {
+    "name": "name",
+    "type": "string"
+   },
+   {
+    "name": "expiresAt",
+    "type": "uint64"
+   }
+  ],
+  "RevokeAgent": [
+   {
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "name": "nonce",
+    "type": "uint64"
+   },
+   {
+    "name": "agent",
+    "type": "address"
+   }
+  ]
+ },
+ "actions": [
+  "PlaceOrder",
+  "CancelOrder",
+  "CancelAll",
+  "UpdateLeverage",
+  "UpdateMargin",
+  "Withdraw",
+  "ApproveAgent",
+  "RevokeAgent"
+ ],
+ "agentAllowed": [
+  "PlaceOrder",
+  "CancelOrder",
+  "CancelAll",
+  "UpdateLeverage",
+  "UpdateMargin"
+ ],
+ "enums": {
+  "orderType": {
+   "limit": 0,
+   "market": 1,
+   "stopMarket": 2,
+   "stopLimit": 3,
+   "takeProfitMarket": 4,
+   "takeProfitLimit": 5
   },
-  "actions": ["PlaceOrder", "CancelOrder", "CancelAll", "UpdateLeverage", "UpdateMargin", "Withdraw", "ApproveAgent", "RevokeAgent"],
-  "agentAllowed": ["PlaceOrder", "CancelOrder", "CancelAll", "UpdateLeverage", "UpdateMargin"],
-  "enums": {
-    "orderType": {"limit": 0, "market": 1, "stopMarket": 2, "stopLimit": 3, "takeProfitMarket": 4, "takeProfitLimit": 5},
-    "timeInForce": {"GTC": 0, "IOC": 1, "POST_ONLY": 2}
-  },
-  "notes": {"CancelAll.marketId": "0 = every market", "PlaceOrder.price": "0 for market orders", "PlaceOrder.triggerPrice": "0 = no trigger", "expiresAt": "Unix milliseconds, engine time"}
+  "timeInForce": {
+   "GTC": 0,
+   "IOC": 1,
+   "POST_ONLY": 2
+  }
+ },
+ "notes": {
+  "CancelAll.marketId": "0 = every market",
+  "PlaceOrder.price": "MANDATORY >= 1: limit price, or the worst acceptable price of a market order (SPEC 2.3)",
+  "PlaceOrder.timeInForce": "market and *Market types MUST be IOC",
+  "PlaceOrder.triggerPrice": "0 for types 0 and 1",
+  "nonce": "Unix ms in [T-120000, T+30000] of the block time, single use per signer (SPEC 2.5)",
+  "ApproveAgent.expiresAt": "Unix ms, T < expiresAt <= T + 180 days; name 0 to 32 UTF-8 bytes; at most 4 agents"
+ }
 }

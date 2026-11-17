@@ -61,7 +61,7 @@ export function ticker(x, m) {
 }
 function currentFunding(m) {
   const premium = m.premiumN ? m.premiumSum / m.premiumN : 0n;
-  let r = premium + 125_000n;
+  let r = premium + m.interest;
   if (r > m.maxFunding) r = m.maxFunding;
   if (r < -m.maxFunding) r = -m.maxFunding;
   return r;
@@ -100,7 +100,7 @@ export function status(x, mode, pendingOverride) {
   const cp = x.checkpoints.at(-1);
   return {
     name: 'postern-perps-mock', version: '0.1.0', apiVersion: '0.1', mode, unaudited: true,
-    network: { eip712: { name: x.eip712.domain.name, version: x.eip712.domain.version, chainId: x.eip712.domain.chainId }, collateralChainId: 700770, vault: x.vault, collateralToken: x.collateralToken, collateralSymbol: 'bUSDC', collateralDecimals: 6 },
+    network: { eip712: { ...x.eip712.domain }, collateralChainId: 700770, vault: x.vault, collateralToken: x.collateralToken, collateralSymbol: 'bUSDC', collateralDecimals: 6 },
     time: x.time,
     latestBlock: blockRef(latest) ?? { height: x.height, time: x.time, hash: x.genesisLogHash, stateRoot: x.genesisLogHash, logHash: x.lastLogHash },
     latestFinalized: cp ? { height: cp.height, time: cp.time, hash: cp.blockHash, stateRoot: cp.stateRoot, logHash: cp.logHash } : null,
