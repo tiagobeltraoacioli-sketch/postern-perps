@@ -116,12 +116,12 @@ pub struct OracleUpdate {
     pub observations: Vec<SignedObservation>,
 }
 
-/// Forced request kinds = VAULT.md `requestForced` kinds (390).
-pub const FORCED_CANCEL_ALL: u8 = 1;
-/// Close positions (`market_id` 0 = every market).
-pub const FORCED_CLOSE: u8 = 2;
-/// Withdraw `amount` (0 = everything withdrawable) to the account itself.
-pub const FORCED_WITHDRAW: u8 = 3;
+/// Forced request kinds = VAULT.md 0.2 `requestForced(uint8 kind, uint64 arg)` (390, 64072cb).
+pub const FORCED_CANCEL_ALL: u8 = 0;
+/// Close every position.
+pub const FORCED_CLOSE: u8 = 1;
+/// Withdraw `arg` gross (0 = everything withdrawable) to the account itself.
+pub const FORCED_WITHDRAW: u8 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -129,7 +129,7 @@ pub enum Input {
     Deposit { index: u64, account: Addr, amount: u64 },
     /// `deadline` is the vault's (L2 `block.timestamp`, seconds): carried for the forced chain head only; the vault
     /// enforces it (SPEC section 14).
-    Forced { index: u64, account: Addr, kind: u8, market_id: u32, amount: u64, deadline: u64 },
+    Forced { index: u64, account: Addr, kind: u8, deadline: u64, arg: u64 },
     Action(SignedAction),
 }
 

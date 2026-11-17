@@ -112,9 +112,8 @@ pub struct ForcedReq {
     pub index: u64,
     pub account: Addr,
     pub kind: u8,
-    pub market_id: u32,
-    pub amount: u64,
     pub deadline: u64,
+    pub arg: u64,
 }
 
 enum ForcedResult {
@@ -144,7 +143,7 @@ pub fn deposit_link(head: &H256, i: u64, account: &Addr, amount: u64) -> H256 {
 
 pub fn forced_link(head: &H256, r: &ForcedReq) -> H256 {
     use crate::hash::{word_addr, word_u};
-    keccak_parts(&[head, &word_u(r.index as u128), &word_addr(&r.account), &word_u(r.kind as u128), &word_u(r.market_id as u128), &word_u(r.amount as u128), &word_u(r.deadline as u128)])
+    keccak_parts(&[head, &word_u(r.index as u128), &word_addr(&r.account), &word_u(r.kind as u128), &word_u(r.deadline as u128), &word_u(r.arg as u128)])
 }
 
 /// The fields of `systemHash` (SPEC 11, 0.1.5). `next_forced_index` is the number of PROCESSED forced requests
@@ -442,8 +441,8 @@ impl Engine {
             let r = match i {
                 Input::Oracle(_) => unreachable!("checked: at most one oracle input, first"),
                 Input::Deposit { index, account, amount } => self.apply_deposit(*index, *account, *amount),
-                Input::Forced { index, account, kind, market_id, amount, deadline } => {
-                    self.receive_forced(ForcedReq { index: *index, account: *account, kind: *kind, market_id: *market_id, amount: *amount, deadline: *deadline })
+                Input::Forced { index, account, kind, deadline, arg } => {
+                    self.receive_forced(ForcedReq { index: *index, account: *account, kind: *kind, deadline: *deadline, arg: *arg })
                 }
                 Input::Action(sa) => self.apply_action(sa),
             };
@@ -962,16 +961,14 @@ impl Engine {
             None => return ForcedResult::Pending(Error::UnknownAccount),
         };
         match r.kind {
+            FORCED_CANCEL_ALL | FORCED_CLOSE if r.arg != 0 => ForcedResult::Rejected(Error::Malformed),
             FORCED_CANCEL_ALL => {
                 self.cancel_all(ai, 0);
                 ForcedResult::Served
             }
             FORCED_CLOSE => {
-                if r.market_id != 0 && !self.markets.contains_key(&r.market_id) {
-                    return ForcedResult::Rejected(Error::UnknownMarket);
-                }
-                self.cancel_all(ai, r.market_id);
-                let mids: Vec<u32> = self.accounts[ai as usize].positions.keys().copied().filter(|m| r.market_id == 0 || *m == r.market_id).collect();
+                self.cancel_all(ai, 0);
+                let mids: Vec<u32> = self.accounts[ai as usize].positions.keys().copied().collect();
                 let mut pending = None;
                 for mid in mids {
                     if let Err(e) = self.forced_close(ai, mid) {
@@ -987,7 +984,7 @@ impl Engine {
                 let free = self.free_collateral(ai);
                 let halted = self.halted_involved(ai);
                 let fee = self.g.g.withdrawal_fee as i128;
-                let want = if r.amount == 0 { free } else { r.amount as i128 };
+                let want = if r.arg == 0 { free } else { r.arg as i128 };
                 if want <= fee || want > free {
                     let e = if want <= fee { Error::WithdrawTooSmall } else { Error::InsufficientMargin };
                     // only the halt can make a request that is servable on live prices unservable now
@@ -1826,9 +1823,8 @@ impl Engine {
             b.extend_from_slice(&r.index.to_be_bytes());
             b.extend_from_slice(&r.account);
             b.push(r.kind);
-            b.extend_from_slice(&r.market_id.to_be_bytes());
-            b.extend_from_slice(&r.amount.to_be_bytes());
             b.extend_from_slice(&r.deadline.to_be_bytes());
+            b.extend_from_slice(&r.arg.to_be_bytes());
         }
         for (s, set) in &self.nonces {
             b.extend_from_slice(s);
