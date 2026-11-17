@@ -230,3 +230,38 @@ pub async fn run_remote_validator(base: String, mut v: Validator, mut stop: toki
         }
     }
 }
+
+/// Builds one oracle round signed by every given (THROWAWAY) oracle key: the observation of agent 394's format,
+/// digest from the ENGINE crate's own `oracle_struct_hash` under the node's engine domain.
+pub fn dev_oracle_update(g: &crate::genesis::Genesis, keys: &[k256::ecdsa::SigningKey], t_ms: u64, prices: &[(u32, u64)]) -> crate::types::OracleUpdate {
+    use postern_perps_engine as pe;
+    let round = t_ms / 3000;
+    let time_ms = round * 3000 + (t_ms % 3000).min(1);
+    let pe_prices: Vec<pe::OraclePrice> = prices.iter().map(|(m, p)| pe::OraclePrice { market_id: *m, price: *p, sources: 5 }).collect();
+    let d = pe::eip712::digest(&g.engine_domain.separator(), &pe::eip712::oracle_struct_hash(round, time_ms, &pe_prices));
+    let observations = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| crate::types::SignedObservation {
+            signer: i as u8,
+            time_ms,
+            prices: prices.iter().map(|(m, p)| crate::types::OraclePrice { market_id: *m, price: *p, sources: 5 }).collect(),
+            signature: crate::sig::sign(k, &d),
+        })
+        .collect();
+    crate::types::OracleUpdate { round, observations }
+}
+
+/// DEV ONLY: a stand-in oracle committee (throwaway keys, FIXED prices) so a dev node's markets are active and
+/// its book moves; agent 394's feeder is the real source. Not a price source of any kind.
+pub async fn run_dev_oracle(app: Arc<App>, keys: Vec<k256::ecdsa::SigningKey>, prices: Vec<(u32, u64)>, mut stop: tokio::sync::watch::Receiver<bool>) {
+    let mut iv = tokio::time::interval(Duration::from_millis(3000));
+    loop {
+        tokio::select! {
+            _ = iv.tick() => {}
+            _ = stop.changed() => return,
+        }
+        let u = dev_oracle_update(&app.g, &keys, now_ms(), &prices);
+        let _ = app.seq.lock().unwrap().submit_oracle(u);
+    }
+}

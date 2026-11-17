@@ -609,3 +609,70 @@ fn r395_38_placeholder_at_the_same_height_does_not_lend_its_first_seen_time() {
         }
     }
 }
+
+/// R393-N1 (393, Medium): the API's market table must be the table the engine enforces (single source:
+/// compliance/markets.json through the engine's converter). On e9b0aba /v1/markets published the node fixture
+/// (BTC min 0.0001) while the engine enforced testkit's (step 0.001): an order on the published minimum was
+/// refused STEP and no book delta could ever appear. Here: an order at the PUBLISHED minimum and step rests, and
+/// the block publishes a book delta chained from seq 0.
+#[test]
+fn r393_n1_published_market_table_is_enforced_and_the_book_moves() {
+    let mut n = net_real("r393-n1", 1000);
+    let u = user(90);
+    let ua = key_address(&u);
+    let t0 = now() - 30_000;
+    n.deposit_everywhere(deposit(0, ua, 100_000_000_000));
+    n.seq.produce(t0).unwrap().unwrap();
+    // dev oracle rounds until the markets are active
+    let keys = n.keys.oracle.clone();
+    for i in 1..=6u64 {
+        let t = t0 + 3000 * i;
+        n.seq.submit_oracle(perps_node::node::dev_oracle_update(&n.g, &keys, t, &perps_node::dev::dev_prices())).unwrap();
+        n.seq.produce(t + 100).unwrap();
+    }
+    let table = n.seq.engine.market_table(&n.g).expect("engine table");
+    let btc = table.iter().find(|m| m["symbol"] == "BTC-USD").unwrap();
+    assert_eq!(btc["status"], "active", "{btc}");
+    // the published values are the engine's own parameters
+    assert_eq!((btc["tickSize"].as_str(), btc["stepSize"].as_str(), btc["minOrderSize"].as_str()), (Some("0.5"), Some("0.0001"), Some("0.0002")));
+    let to_units = |s: &str| perps_node::util::decimal_to_scaled(s, 8, u64::MAX as u128).unwrap() as u64;
+    let (min, step) = (to_units(btc["minOrderSize"].as_str().unwrap()), to_units(btc["stepSize"].as_str().unwrap()));
+    assert_eq!(min % step, 0);
+    // a limit buy at the published minimum, 1% under the dev price, on the tick
+    let t = t0 + 3000 * 6 + 500;
+    let po = place_order(&n.g, &u, ua, t, 1, 6_658_000_000_000, min, false);
+    let ack = n.seq.admit(&request(&n.g, &po), t).unwrap();
+    let info = n.seq.produce(t + 10).unwrap().unwrap();
+    let res = n.seq.acks[&ack.action_hash].result.clone().unwrap();
+    assert_eq!(res["ok"], true, "order at the published minimum refused: {res}");
+    let (bids, _) = n.seq.engine.book_levels(1).unwrap();
+    assert_eq!(bids, vec![(6_658_000_000_000, min)]);
+    let d = info.book_deltas.iter().find(|d| d["symbol"] == "BTC-USD").expect("a book delta");
+    assert_eq!((d["prevSeq"].as_u64(), d["seq"].as_u64()), (Some(0), Some(1)));
+    assert_eq!(d["bids"], serde_json::json!([["66580.0", "0.0002"]]));
+    assert_eq!(n.seq.book_json("BTC-USD", 50).unwrap()["seq"], 1);
+}
+
+/// R393-N2 (393, Low): a block's deposit input in JSON carries exactly SPEC S-3.2.2's encoded fields.
+#[test]
+fn r393_n2_block_deposit_json_is_the_encoded_fields() {
+    let (g, _k) = perps_node::dev::dev_genesis("n2", 7, 5, 10, 0);
+    let j = perps_node::types::input_json(&g.types, &Input::Deposit(deposit(4, [0xab; 20], 77)));
+    assert_eq!(j, serde_json::json!({"kind": "deposit", "payload": {"depositIndex": "4", "account": to_hex(&[0xab; 20]), "amount": "77"}}));
+}
+
+/// 393's conformance (decoder `node/mock/lib/encoding.mjs`): oracle JSON = round and timeMs as decimal strings,
+/// signer, marketId and sources as numbers, price as a decimal string; forced kind a number.
+#[test]
+fn r393_oracle_and_forced_json_forms() {
+    let (g, k) = perps_node::dev::dev_genesis("json-forms", 7, 5, 10, 0);
+    let u = perps_node::node::dev_oracle_update(&g, &k.oracle[..1], 1_800_000_000_123, &[(1, 5)]);
+    let j = perps_node::types::input_json(&g.types, &Input::Oracle(u));
+    assert_eq!(j["payload"]["round"], "600000000");
+    assert_eq!(j["payload"]["observations"][0]["timeMs"], "1800000000001");
+    assert_eq!(j["payload"]["observations"][0]["signer"], 0);
+    assert_eq!(j["payload"]["observations"][0]["prices"][0], serde_json::json!({"marketId": 1, "price": "5", "sources": 5}));
+    let f = ForcedEvent { index: 1, account: [1; 20], kind: ForcedKind::Withdraw, deadline: 9, arg: 3, head: [0; 32], l2_block: 0, l2_block_hash: [0; 32], l2_tx_hash: [0; 32], log_index: 0 };
+    let j = perps_node::types::input_json(&g.types, &Input::Forced(f));
+    assert_eq!(j["payload"], serde_json::json!({"forcedIndex": "1", "account": to_hex(&[1u8; 20]), "kind": 2, "deadline": "9", "arg": "3"}));
+}

@@ -61,13 +61,43 @@ pub fn dev_genesis(seed: &str, n: usize, threshold: usize, checkpoint_interval: 
     (Arc::new(g), k)
 }
 
-/// Dev genesis for the REAL engine (agent 388's): the node genesis with `logHash(0)` taken from the engine,
-/// plus the engine's checked genesis. THROWAWAY keys only.
+pub fn compliance_file(name: &str) -> Vec<u8> {
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../compliance").join(name);
+    std::fs::read(&p).unwrap_or_else(|e| panic!("compliance file {}: {e}", p.display()))
+}
+
+/// Dev genesis for the REAL engine (agent 388's): markets from 392's `compliance/markets.json` + `risk.json` through
+/// the engine's converter; the node's genesis reads the SAME markets file (ids, symbols, display decimals), its
+/// withdrawal fee is the engine's, and `logHash(0)` is the engine's. THROWAWAY keys only.
 pub fn dev_genesis_real(seed: &str, n: usize, threshold: usize, checkpoint_interval: u64, genesis_time: u64) -> (Arc<Genesis>, DevKeys, postern_perps_engine::genesis::Checked) {
-    let (g, k) = dev_genesis(seed, n, threshold, checkpoint_interval, genesis_time);
-    let checked = crate::engine::real::dev_engine_genesis(&g).expect("dev engine genesis");
-    let probe = crate::engine::real::RealEngine::new(g.clone(), checked.clone()).expect("engine and node genesis agree");
+    let k = dev_keys(seed, n);
+    let mb = compliance_file("markets.json");
+    let rb = compliance_file("risk.json");
+    let mut g = Genesis::new(
+        &fixture("eip712.json"),
+        &mb,
+        k.validators.iter().map(key_address).collect(),
+        threshold,
+        k.oracle.iter().map(key_address).collect(),
+        threshold,
+        key_address(&k.sequencer),
+        dev_vault(seed),
+        parse_address(OWNER_FEE_ADDRESS).unwrap(),
+        genesis_time,
+        checkpoint_interval,
+    )
+    .expect("dev genesis (compliance markets)");
+    let mj: serde_json::Value = serde_json::from_slice(&mb).unwrap();
+    let rj: serde_json::Value = serde_json::from_slice(&rb).unwrap();
+    let checked = crate::engine::real::dev_engine_genesis_compliance(&g, &mj, &rj).expect("dev engine genesis");
+    g.withdrawal_fee = checked.g.withdrawal_fee as u128;
+    let probe = crate::engine::real::RealEngine::new(Arc::new(g.clone()), checked.clone()).expect("engine and node genesis agree");
     use crate::engine::Engine;
-    let g2 = (*g).clone().with_log_hash0(probe.genesis_log_hash());
+    let g2 = g.with_log_hash0(probe.genesis_log_hash());
     (Arc::new(g2), k, checked)
+}
+
+/// Dev prices for the dev oracle (USD per base unit, on each compliance market's tick).
+pub fn dev_prices() -> Vec<(u32, u64)> {
+    vec![(1, 6_725_000_000_000), (2, 348_000_000_000), (3, 18_240_000_000)]
 }

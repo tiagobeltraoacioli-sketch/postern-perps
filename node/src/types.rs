@@ -404,9 +404,10 @@ pub fn forced_json(f: &ForcedEvent) -> serde_json::Value {
 
 pub fn oracle_json(u: &OracleUpdate) -> serde_json::Value {
     serde_json::json!({
-        "round": u.round,
+        // 64-bit integers as decimal strings, small ones as numbers (SPEC S-3.2.2, 394's JSON form)
+        "round": u.round.to_string(),
         "observations": u.observations.iter().map(|o| serde_json::json!({
-            "signer": o.signer, "timeMs": o.time_ms,
+            "signer": o.signer, "timeMs": o.time_ms.to_string(),
             "prices": o.prices.iter().map(|p| serde_json::json!({"marketId": p.market_id, "price": p.price.to_string(), "sources": p.sources})).collect::<Vec<_>>(),
             "signature": to_hex(&o.signature)
         })).collect::<Vec<_>>()
@@ -416,8 +417,9 @@ pub fn oracle_json(u: &OracleUpdate) -> serde_json::Value {
 pub fn input_json(types: &ActionTypes, inp: &Input) -> serde_json::Value {
     match inp {
         Input::Oracle(u) => serde_json::json!({"kind": "oracle", "payload": oracle_json(u)}),
-        Input::Deposit(d) => serde_json::json!({"kind": "deposit", "payload": deposit_json(d)}),
-        Input::Forced(f) => serde_json::json!({"kind": "forced", "payload": forced_json(f)}),
+        // SPEC S-3.2.2: the JSON form carries exactly the encoded fields (R393-N2)
+        Input::Deposit(d) => serde_json::json!({"kind": "deposit", "payload": {"depositIndex": d.index.to_string(), "account": to_hex(&d.account), "amount": d.amount.to_string()}}),
+        Input::Forced(f) => serde_json::json!({"kind": "forced", "payload": {"forcedIndex": f.index.to_string(), "account": to_hex(&f.account), "kind": f.kind as u8, "deadline": f.deadline.to_string(), "arg": f.arg.to_string()}}),
         Input::Action(a) => {
             let name = types.name(a.type_index).unwrap_or("?");
             serde_json::json!({"kind": "action", "type": name,

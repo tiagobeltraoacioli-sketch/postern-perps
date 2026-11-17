@@ -165,13 +165,21 @@ fn market_json(app: &App, m: &crate::genesis::Market) -> serde_json::Value {
     j
 }
 
+/// R393-N1: the published table IS the engine's (when the engine has one); the fixture only for the stub.
+fn market_list(app: &App) -> Vec<serde_json::Value> {
+    if let Some(t) = app.seq.lock().unwrap().engine.market_table(&app.g) {
+        return t;
+    }
+    app.g.markets.iter().map(|m| market_json(app, m)).collect()
+}
+
 async fn markets(State(app): State<Arc<App>>) -> Response {
-    Json(serde_json::json!({"markets": app.g.markets.iter().map(|m| market_json(&app, m)).collect::<Vec<_>>()})).into_response()
+    Json(serde_json::json!({"markets": market_list(&app)})).into_response()
 }
 
 async fn market(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
-    match app.g.market_by_symbol(&sym) {
-        Some(m) => Json(market_json(&app, m)).into_response(),
+    match market_list(&app).into_iter().find(|m| m["symbol"] == sym.as_str()) {
+        Some(m) => Json(m).into_response(),
         None => not_found("unknown market"),
     }
 }
@@ -206,8 +214,9 @@ async fn book(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Res
             _ => return error(400, "MALFORMED", "depth must be 1 to 500", serde_json::json!({"path": "depth"})),
         }
     }
+    let depth: usize = q.get("depth").and_then(|d| d.parse().ok()).unwrap_or(50);
     let s = app.seq.lock().unwrap();
-    Json(serde_json::json!({"symbol": sym, "seq": 0, "height": s.engine.height(), "time": s.engine.time(), "bids": [], "asks": []})).into_response()
+    Json(s.book_json(&sym, depth).unwrap_or(serde_json::Value::Null)).into_response()
 }
 
 async fn empty_list_trades(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
@@ -651,6 +660,7 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
     let mut ping = tokio::time::interval(Duration::from_secs(15));
     let mut last_in = tokio::time::Instant::now();
     let mut reply_override: Option<serde_json::Value> = None;
+    let mut books: Vec<String> = Vec::new();
     loop {
         tokio::select! {
             m = sock.recv() => {
@@ -691,6 +701,7 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                                     serde_json::json!({"op":"error","id":id,"error":{"code":"NOT_FOUND","message":"unknown market","details":{}}})
                                 } else {
                                     let _ = sock.send(Message::Text(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}).to_string().into())).await;
+                                    if ch == "book" { books.push(sym.to_string()); }
                                     if ch == "ticker" {
                                         let ms: Vec<&crate::genesis::Market> = if sym == "*" { app.g.markets.iter().collect() } else { app.g.market_by_symbol(sym).into_iter().collect() };
                                         let last = ms.len().saturating_sub(1);
@@ -702,7 +713,7 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                                     } else {
                                         let (h, t) = { let s = app.seq.lock().unwrap(); (s.engine.height(), s.engine.time()) };
                                         let data = match ch {
-                                            "book" => serde_json::json!({"symbol":sym,"seq":0,"height":h,"time":t,"bids":[],"asks":[]}),
+                                            "book" => { let _ = (h, t); app.seq.lock().unwrap().book_json(sym, j.get("depth").and_then(|d| d.as_u64()).unwrap_or(50) as usize).unwrap_or(serde_json::Value::Null) }
                                             "trades" => serde_json::json!({"trades":[]}),
                                             _ => serde_json::json!({"candles":[]}),
                                         };
@@ -745,6 +756,12 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                     let _ = sock.send(Message::Text(serde_json::json!({"op":"error","error":{"code":"SLOW_CONSUMER","message":"fell behind","details":{}}}).to_string().into())).await;
                     return;
                 } Err(_) => return };
+                for d in &info.book_deltas {
+                    if books.iter().any(|b| d["symbol"] == b.as_str()) {
+                        let m = serde_json::json!({"channel":"book","symbol":d["symbol"],"type":"delta","data":d});
+                        if sock.send(Message::Text(m.to_string().into())).await.is_err() { return; }
+                    }
+                }
                 if status_sub {
                     let fin = app.seq.lock().unwrap().latest_final();
                     let lf = fin.and_then(|h| app.seq.lock().unwrap().block(h).ok().flatten()).map(|b| block_summary(&b));

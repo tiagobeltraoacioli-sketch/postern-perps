@@ -109,6 +109,21 @@ impl RateLimit {
 pub struct BlockInfo {
     pub block: Arc<Block>,
     pub outcome: BlockOutcome,
+    /// API `BookDelta` objects of this block, one per market whose book changed
+    pub book_deltas: Vec<serde_json::Value>,
+}
+
+/// Per market: (seq, bids, asks) of the last published book, engine units.
+pub type BookState = (u64, Vec<(u64, u64)>, Vec<(u64, u64)>);
+
+/// Engine units (1e-8) to a decimal string at the market's display decimals (exact: prices are on the tick).
+pub fn disp(v: u64, decimals: u32) -> String {
+    let d = decimals.min(8);
+    crate::util::scaled_to_decimal((v / 10u64.pow(8 - d)) as u128, d)
+}
+
+pub fn levels_json(levels: &[(u64, u64)], pd: u32, sd: u32) -> Vec<serde_json::Value> {
+    levels.iter().map(|(p, q)| serde_json::json!([disp(*p, pd), disp(*q, sd)])).collect()
 }
 
 pub struct Sequencer {
@@ -136,6 +151,7 @@ pub struct Sequencer {
     pub recovered: RecoveryReport,
     checkpoints_file: PathBuf,
     pub halted: Option<String>,
+    pub books: BTreeMap<u32, BookState>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -211,6 +227,7 @@ impl Sequencer {
             forced_heights: BTreeMap::new(),
             recovered,
             halted: None,
+            books: BTreeMap::new(),
         };
         for h in (start + 1)..=s.log.last_height {
             let b = s.log.read(h)?.ok_or("log read")?;
@@ -288,7 +305,27 @@ impl Sequencer {
                 }
             }
         }
-        let info = Arc::new(BlockInfo { block: Arc::new(b.clone()), outcome: out.clone() });
+        let mut book_deltas = Vec::new();
+        for m in self.g.markets.clone() {
+            let Some((bids, asks)) = self.engine.book_levels(m.market_id) else { continue };
+            let prev = self.books.get(&m.market_id).cloned().unwrap_or((0, Vec::new(), Vec::new()));
+            if prev.1 == bids && prev.2 == asks {
+                continue;
+            }
+            let diff = |old: &[(u64, u64)], new: &[(u64, u64)]| -> Vec<(u64, u64)> {
+                let o: BTreeMap<u64, u64> = old.iter().copied().collect();
+                let n: BTreeMap<u64, u64> = new.iter().copied().collect();
+                let mut out: Vec<(u64, u64)> = n.iter().filter(|(p, q)| o.get(p) != Some(q)).map(|(p, q)| (*p, *q)).collect();
+                out.extend(o.keys().filter(|p| !n.contains_key(p)).map(|p| (*p, 0)));
+                out
+            };
+            let (db, da) = (diff(&prev.1, &bids), diff(&prev.2, &asks));
+            let seq = prev.0 + 1;
+            book_deltas.push(serde_json::json!({"symbol": m.symbol, "seq": seq, "prevSeq": prev.0, "height": h, "time": b.header.time,
+                "bids": levels_json(&db, m.price_decimals, m.size_decimals), "asks": levels_json(&da, m.price_decimals, m.size_decimals)}));
+            self.books.insert(m.market_id, (seq, bids, asks));
+        }
+        let info = Arc::new(BlockInfo { block: Arc::new(b.clone()), outcome: out.clone(), book_deltas });
         self.recent.push_back(info);
         while self.recent.len() > self.recent_keep {
             self.recent.pop_front();
@@ -491,6 +528,15 @@ impl Sequencer {
 
     pub fn checkpoint_for(&self, height: u64) -> Option<CheckpointBody> {
         self.aggregator.by_height.get(&height).map(|c| c.body.clone())
+    }
+
+    /// API `Book` snapshot (depth levels per side) with the seq the deltas continue from.
+    pub fn book_json(&self, symbol: &str, depth: usize) -> Option<serde_json::Value> {
+        let m = self.g.market_by_symbol(symbol)?;
+        let (seq, bids, asks) = self.books.get(&m.market_id).cloned().unwrap_or((0, Vec::new(), Vec::new()));
+        Some(serde_json::json!({"symbol": symbol, "seq": seq, "height": self.engine.height(), "time": self.engine.time(),
+            "bids": levels_json(&bids[..bids.len().min(depth)], m.price_decimals, m.size_decimals),
+            "asks": levels_json(&asks[..asks.len().min(depth)], m.price_decimals, m.size_decimals)}))
     }
 
     pub fn mempool_len(&self) -> usize {

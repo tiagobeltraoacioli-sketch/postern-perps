@@ -54,7 +54,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [--seed dev] [--validators 7] [--threshold 5] [--block-ms 200] [--checkpoint-interval 10] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--geoblock FILE] [--ip-rate 50] [--account-rate 20] [--dev-default-country ZZ] [--edge-secret-file F]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [--seed dev] [--validators 7] [--threshold 5] [--block-ms 200] [--checkpoint-interval 10] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--geoblock FILE] [--ip-rate 50] [--account-rate 20] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node verify-log --data DIR [--seed dev] [--validators 7] [--threshold 5] [--checkpoint-interval 10] [--genesis-time MS]");
             std::process::exit(2);
         }
@@ -187,6 +187,10 @@ async fn dev(a: HashMap<String, String>) {
     let engines: Vec<Box<dyn Engine>> = (0..n).map(|_| mk_engine(&g)).collect();
     spawn_local_validators(&app, keys.validators.clone(), engines, val_views, &stop_rx).expect("validators");
     tokio::spawn(run_producer(app.clone(), stop_rx.clone()));
+    if a.contains_key("dev-oracle") {
+        eprintln!("DEV ORACLE: throwaway oracle keys, FIXED prices (not a price source)");
+        tokio::spawn(perps_node::node::run_dev_oracle(app.clone(), keys.oracle.clone(), perps_node::dev::dev_prices(), stop_rx.clone()));
+    }
     let listener = tokio::net::TcpListener::bind(listen).await.expect("bind");
     eprintln!("postern-perps-node dev (UNAUDITED, THROWAWAY keys) on http://{listen} data {}", data.display());
     let srv = axum::serve(listener, router(app.clone()).into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(async {

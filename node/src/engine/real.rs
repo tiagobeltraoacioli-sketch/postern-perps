@@ -194,6 +194,54 @@ impl Engine for RealEngine {
     fn name(&self) -> &'static str {
         "postern-perps-engine"
     }
+    fn market_table(&self, g: &Genesis) -> Option<Vec<serde_json::Value>> {
+        use crate::util::scaled_to_decimal as d;
+        let frac = |ppm: u32| d(ppm as u128, 6);
+        Some(
+            self.e
+                .g
+                .g
+                .markets
+                .iter()
+                .map(|m| {
+                    let disp = g.market(m.market_id);
+                    let base = m.symbol.split('-').next().unwrap_or("").to_string();
+                    let tiers: Vec<_> = m
+                        .tiers
+                        .iter()
+                        .map(|t| {
+                            serde_json::json!({"notionalFloor": d(t.floor as u128, 6), "initialMarginFraction": frac(t.imf_ppm),
+                                "maintenanceMarginFraction": frac(t.mmf_ppm), "maxLeverage": (1_000_000 / t.imf_ppm.max(1)).min(m.max_leverage).to_string()})
+                        })
+                        .collect();
+                    let status = match self.e.markets.get(&m.market_id).map(|x| x.oracle.status) {
+                        Some(pe::oracle::Status::Active) => "active",
+                        _ => "halted",
+                    };
+                    serde_json::json!({
+                        "symbol": m.symbol, "marketId": m.market_id, "base": base, "quote": "USD", "status": status,
+                        "priceDecimals": disp.map(|x| x.price_decimals).unwrap_or(8), "sizeDecimals": disp.map(|x| x.size_decimals).unwrap_or(8),
+                        "tickSize": trim(d(m.tick as u128, 8)), "stepSize": trim(d(m.step as u128, 8)),
+                        "minOrderSize": trim(d(m.min_size as u128, 8)), "maxOrderSize": trim(d(m.max_size as u128, 8)),
+                        "maxLeverage": m.max_leverage.to_string(), "marginTiers": tiers,
+                        "makerFeeBps": trim(d(m.maker_fee_ppm as u128, 2)), "takerFeeBps": trim(d(m.taker_fee_ppm as u128, 2)),
+                        "liquidationFeeBps": trim(d(m.liquidation_fee_ppm as u128, 2)),
+                        "fundingIntervalSec": m.funding_interval_ms / 1000, "maxFundingRate": trim(d(m.max_funding_rate.max(0) as u128, 9)),
+                        "oracle": {"sources": ["committee"], "minSources": m.oracle.min_sources, "maxStalenessMs": m.oracle.max_staleness_ms,
+                            "maxDeviationBps": m.oracle.jump_bps.to_string()},
+                        "openInterestCap": trim(d(m.oi_cap as u128, 8)),
+                    })
+                })
+                .collect(),
+        )
+    }
+    fn book_levels(&self, market_id: u32) -> Option<(Vec<(u64, u64)>, Vec<(u64, u64)>)> {
+        let m = self.e.markets.get(&market_id)?;
+        let agg = |q: &std::collections::VecDeque<u64>| q.iter().filter_map(|id| self.e.orders.get(id)).map(|o| o.remaining).sum::<u64>();
+        let bids = m.book.bids.iter().rev().map(|(p, q)| (*p, agg(q))).filter(|(_, s)| *s > 0).collect();
+        let asks = m.book.asks.iter().map(|(p, q)| (*p, agg(q))).filter(|(_, s)| *s > 0).collect();
+        Some((bids, asks))
+    }
     fn clone_box(&self) -> Box<dyn Engine> {
         Box::new(self.clone())
     }
@@ -211,5 +259,26 @@ pub fn dev_engine_genesis(g: &Genesis) -> Result<pe::genesis::Checked, String> {
     eg.oracle_signers = g.oracle_committee.iter().map(|a| to_hex(a)).collect();
     eg.oracle_quorum = g.oracle_quorum as u8;
     eg.withdrawal_fee = g.withdrawal_fee as u64;
+    eg.check()
+}
+
+/// "67250.50000000" -> "67250.5"; "1.00000000" -> "1".
+pub fn trim(s: String) -> String {
+    if !s.contains('.') {
+        return s;
+    }
+    let t = s.trim_end_matches('0');
+    t.trim_end_matches('.').to_string()
+}
+
+/// Dev: the engine genesis from 392's compliance/markets.json + risk.json through the ENGINE's own converter
+/// (single source for the table the engine enforces and the API publishes, R393-N1), bound to the node's
+/// committee and vault. Dev overrides, stated: backstop seed 0 and launch insurance minimum 0 (the real values are
+/// owner inputs; with them nothing trades until the funds are seeded).
+pub fn dev_engine_genesis_compliance(g: &Genesis, markets: &serde_json::Value, risk: &serde_json::Value) -> Result<pe::genesis::Checked, String> {
+    let signers = g.oracle_committee.iter().map(|a| to_hex(a)).collect();
+    let mut eg = pe::genesis::from_compliance(markets, risk, &to_hex(&g.vault), signers, g.oracle_quorum as u8, "0", 250_000)?;
+    eg.launch_insurance_min = 0;
+    eg.launch_backstop_min = 0;
     eg.check()
 }

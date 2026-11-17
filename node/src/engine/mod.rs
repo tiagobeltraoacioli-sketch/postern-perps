@@ -210,6 +210,14 @@ pub trait Engine: Send + Sync {
     fn agents_json(&self, a: &Address) -> serde_json::Value;
     fn name(&self) -> &'static str;
     fn clone_box(&self) -> Box<dyn Engine>;
+    /// The market table the engine ENFORCES, as API `Market` objects (R393-N1: the API publishes exactly this).
+    fn market_table(&self, _g: &crate::genesis::Genesis) -> Option<Vec<serde_json::Value>> {
+        None
+    }
+    /// Aggregated resting book of a market in engine units: (bids descending, asks ascending) of (price, size).
+    fn book_levels(&self, _market_id: u32) -> Option<(Vec<(u64, u64)>, Vec<(u64, u64)>)> {
+        None
+    }
 }
 
 #[cfg(test)]
