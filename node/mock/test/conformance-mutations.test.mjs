@@ -42,3 +42,8 @@ test('a crossed book is caught', { timeout: 240_000 }, () =>
     m.bids.set(ask + m.tick * 10n, [{ maker: true, account: x.liquidity, remaining: m.step, isBuy: true }]);
     x.requote = () => {};
   }, [/book not crossed/]));
+
+test('a server that breaks an assumption fails the run with a reason, never aborts it', { timeout: 240_000 }, () =>
+  withMutation((x) => {
+    for (const cp of x.checkpoints) cp.withdrawalsRoot = undefined;
+  }, [/checkpoint digest recomputed|matches Checkpoint/]));

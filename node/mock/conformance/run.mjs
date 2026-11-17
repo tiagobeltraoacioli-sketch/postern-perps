@@ -38,9 +38,21 @@ export function schemaPath(explicit) {
   return existsSync(shared) ? shared : join(HERE, '..', 'schema', 'api.schema.json');
 }
 
-export async function runConformance(base, { mock = false, schema, runId = String(Date.now()) } = {}) {
-  const V = new Validator(JSON.parse(readFileSync(schemaPath(schema), 'utf8')));
+export async function runConformance(base, opts = {}) {
   const results = [];
+  try {
+    await suite(base, opts, results);
+  } catch (e) {
+    // A server that breaks an assumption the suite needs (a missing field, a refused request) fails the run with
+    // the reason; it never passes by aborting.
+    results.push({ name: 'suite aborted', ok: false, detail: String(e?.stack ?? e).slice(0, 400) });
+  }
+  const failed = results.filter((r) => !r.ok);
+  return { total: results.length, passed: results.length - failed.length, failed, results };
+}
+
+async function suite(base, { mock = false, schema, runId = String(Date.now()) } = {}, results) {
+  const V = new Validator(JSON.parse(readFileSync(schemaPath(schema), 'utf8')));
   const ok = (name, cond, detail = '') => {
     results.push({ name, ok: !!cond, detail: cond ? '' : String(detail).slice(0, 400) });
     return !!cond;
@@ -151,8 +163,13 @@ export async function runConformance(base, { mock = false, schema, runId = Strin
   valid('GET /v1/finality/latest', 'Checkpoint', cp.body);
   const C = cp.body;
   const vaultDomain = { name: 'PosternPerpsVault', version: '1', chainId: 700770, verifyingContract: status.body.network.vault };
-  const digest = hex(typedDataHash(vaultDomain, 'Checkpoint', CHECKPOINT_FIELDS, { height: String(C.height), time: String(C.time), stateRoot: C.stateRoot, logHash: C.logHash, withdrawalsRoot: C.withdrawalsRoot, depositsCredited: String(C.depositsCredited), forcedProcessed: String(C.forcedProcessed) }));
-  ok('checkpoint digest recomputed from its fields (vault domain)', digest === C.digest, `${digest} vs ${C.digest}`);
+  let digest = null, why = '';
+  try {
+    digest = hex(typedDataHash(vaultDomain, 'Checkpoint', CHECKPOINT_FIELDS, { height: String(C.height), time: String(C.time), stateRoot: C.stateRoot, logHash: C.logHash, withdrawalsRoot: C.withdrawalsRoot, depositsCredited: String(C.depositsCredited), forcedProcessed: String(C.forcedProcessed) }));
+  } catch (e) {
+    why = `cannot recompute: ${e.message}`;
+  }
+  ok('checkpoint digest recomputed from its fields (vault domain)', digest !== null && digest === C.digest, why || `${digest} vs ${C.digest}`);
   ok('checkpoint has at least threshold signatures', C.signatures.length >= committee.body.threshold);
   ok('checkpoint signatures strictly ascending by validator', C.signatures.every((s, i) => i === 0 || s.validator > C.signatures[i - 1].validator));
   ok('every checkpoint signer is in the committee', C.signatures.every((s) => committee.body.validators.includes(s.validator)));
@@ -382,8 +399,6 @@ export async function runConformance(base, { mock = false, schema, runId = Strin
   // ---------- WebSocket ----------
   await wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel: () => signed('CancelAll', { account: mainAddr, nonce: nextNonce(), marketId: 0 }, main), mock });
 
-  const failed = results.filter((r) => !r.ok);
-  return { total: results.length, passed: results.length - failed.length, failed, results };
 }
 
 async function wsChecks(base, V, ok, valid, { sym, demo, mainAddr, signedCancel, mock }) {
