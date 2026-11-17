@@ -168,55 +168,79 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   const cs = s.series.candles;
   const slots = s.series.slots;
   const bw = bodyWidth(view.spacing, dpr);
+  // Candles and volume are drawn in three colour groups (up, down, and the muted live candle when stale): one path
+  // and one stroke per group for the wicks and hollow bodies, one fillStyle per group for the solid bodies. Measured
+  // reason: a stroke per candle dominated the frame time under CPU throttling.
+  const group = (i: number) => (s.stale && i === cs.length - 1 ? 2 : cs[i].c >= cs[i].o ? 0 : 1);
+  const inks = [p.up, p.down, p.text3];
   // Volume (own scale, bottom band).
   if (s.volMax > 0) {
     const band = plotH * VOLUME_SHARE;
     const vw = Math.max(1 / dpr, snap(view.spacing * 0.8, dpr));
-    for (let i = s.i0; i < s.i1; i++) {
-      const c = cs[i];
-      if (!(c.v > 0)) continue;
-      const h = Math.max(1 / dpr, (c.v / s.volMax) * band);
-      const x = snap(slotX(slots[i], view, plotW) - vw / 2, dpr);
-      ctx.fillStyle = withAlpha(c.c >= c.o ? p.up : p.down, s.stale && i === cs.length - 1 ? 0.07 : 0.14);
-      ctx.fillRect(x, snap(plotH - h, dpr), vw, plotH - snap(plotH - h, dpr));
-      drawn.volumes++;
+    const alphas = [0.14, 0.14, 0.07];
+    for (let g = 0; g < 3; g++) {
+      ctx.fillStyle = withAlpha(inks[g], alphas[g]);
+      for (let i = s.i0; i < s.i1; i++) {
+        if (group(i) !== g) continue;
+        const c = cs[i];
+        if (!(c.v > 0)) continue;
+        const h = Math.max(1 / dpr, (c.v / s.volMax) * band);
+        const x = snap(slotX(slots[i], view, plotW) - vw / 2, dpr);
+        ctx.fillRect(x, snap(plotH - h, dpr), vw, plotH - snap(plotH - h, dpr));
+        drawn.volumes++;
+      }
     }
   }
 
   // Candles.
   if (range) {
     const thin = view.spacing < 3;
-    for (let i = s.i0; i < s.i1; i++) {
-      const c = cs[i];
-      const up = c.c >= c.o;
-      const muted = s.stale && i === cs.length - 1;
-      const color = muted ? p.text3 : up ? p.up : p.down;
-      const xc = crisp(slotX(slots[i], view, plotW), dpr);
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1 / dpr;
-      const yh = toY(c.h);
-      const yl = toY(c.l);
-      if (thin) {
-        line(ctx, xc, snap(yh, dpr), xc, Math.max(snap(yl, dpr), snap(yh, dpr) + 1 / dpr));
+    ctx.lineWidth = 1 / dpr;
+    for (let g = 0; g < 3; g++) {
+      ctx.strokeStyle = inks[g];
+      ctx.fillStyle = inks[g];
+      ctx.beginPath();
+      let solid = 0;
+      for (let i = s.i0; i < s.i1; i++) {
+        if (group(i) !== g) continue;
+        const c = cs[i];
+        const xc = crisp(slotX(slots[i], view, plotW), dpr);
+        const yh = snap(toY(c.h), dpr);
+        const yl = snap(toY(c.l), dpr);
         drawn.candles++;
-        continue;
+        if (thin) {
+          ctx.moveTo(xc, yh);
+          ctx.lineTo(xc, Math.max(yl, yh + 1 / dpr));
+          continue;
+        }
+        const yo = toY(c.o);
+        const yc = toY(c.c);
+        const top = snap(Math.min(yo, yc), dpr);
+        const bottom = Math.max(snap(Math.max(yo, yc), dpr), top + 1 / dpr);
+        // Wick: above and below the body only, so a hollow body stays empty.
+        ctx.moveTo(xc, yh);
+        ctx.lineTo(xc, top);
+        ctx.moveTo(xc, bottom);
+        ctx.lineTo(xc, Math.max(yl, bottom));
+        const up = c.c >= c.o;
+        if (up && s.candleStyle === 'hollow' && bw >= 3 / dpr && bottom - top >= 3 / dpr) {
+          ctx.rect(snap(xc - bw / 2, dpr) + 0.5 / dpr, top + 0.5 / dpr, bw - 1 / dpr, bottom - top - 1 / dpr);
+        } else solid++;
       }
-      const yo = toY(c.o);
-      const yc = toY(c.c);
-      const top = snap(Math.min(yo, yc), dpr);
-      const bottom = Math.max(snap(Math.max(yo, yc), dpr), top + 1 / dpr);
-      const x0 = snap(xc - bw / 2, dpr);
-      const hollow = up && s.candleStyle === 'hollow' && bw >= 3 / dpr && bottom - top >= 3 / dpr;
-      // Wick: above and below the body only, so a hollow body stays empty.
-      line(ctx, xc, snap(yh, dpr), xc, top);
-      line(ctx, xc, bottom, xc, Math.max(snap(yl, dpr), bottom));
-      if (hollow) {
-        ctx.strokeRect(x0 + 0.5 / dpr, top + 0.5 / dpr, bw - 1 / dpr, bottom - top - 1 / dpr);
-      } else {
-        ctx.fillRect(x0, top, bw, bottom - top);
+      ctx.stroke();
+      if (thin || !solid) continue;
+      for (let i = s.i0; i < s.i1; i++) {
+        if (group(i) !== g) continue;
+        const c = cs[i];
+        const up = c.c >= c.o;
+        const yo = toY(c.o);
+        const yc = toY(c.c);
+        const top = snap(Math.min(yo, yc), dpr);
+        const bottom = Math.max(snap(Math.max(yo, yc), dpr), top + 1 / dpr);
+        if (up && s.candleStyle === 'hollow' && bw >= 3 / dpr && bottom - top >= 3 / dpr) continue;
+        const xc = crisp(slotX(slots[i], view, plotW), dpr);
+        ctx.fillRect(snap(xc - bw / 2, dpr), top, bw, bottom - top);
       }
-      drawn.candles++;
     }
   }
 
