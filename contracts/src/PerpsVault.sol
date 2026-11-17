@@ -404,11 +404,19 @@ contract PerpsVault {
 
     /// @notice SPEC 11 (0.1.1): `stateRoot = H("PosternPerps/state/v1" || be64 height || be64 time || accountsRoot ||
     ///         marketsRoot || withdrawalsRoot || systemHash)`, `systemHash = H("PPv1sys" || be64 nextDepositIndex ||
-    ///         be64 nextForcedIndex || be64 nextOrderId || be128 totalEscape || be128 dust || auxHash)`.
+    ///         be64 nextForcedIndex || be64 nextOrderId || be128 totalEscape || be128 dust || auxHash || be64 withdrawalCount || be64 withdrawalsTotal)` (SPEC 0.1.5).
     function stateRootOf(Checkpoint calldata cp) public pure returns (bytes32) {
         bytes32 systemHash = keccak256(
             abi.encodePacked(
-                "PPv1sys", cp.nextDepositIndex, cp.nextForcedIndex, cp.nextOrderId, cp.totalEscape, cp.dust, cp.auxHash
+                "PPv1sys",
+                cp.nextDepositIndex,
+                cp.nextForcedIndex,
+                cp.nextOrderId,
+                cp.totalEscape,
+                cp.dust,
+                cp.auxHash,
+                cp.withdrawalCount,
+                cp.withdrawalsTotal
             )
         );
         return keccak256(

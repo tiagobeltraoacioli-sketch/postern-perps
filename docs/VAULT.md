@@ -129,15 +129,16 @@ digest = `keccak256(0x19 0x01 || domainSeparator || keccak256(abi.encode(CHECKPO
 validators replayed:
 
 ```
-systemHash = keccak256("PPv1sys" || be64 nextDepositIndex || be64 nextForcedIndex || be64 nextOrderId || be128 totalEscape || be128 dust || auxHash)
+systemHash = keccak256("PPv1sys" || be64 nextDepositIndex || be64 nextForcedIndex || be64 nextOrderId || be128 totalEscape || be128 dust || auxHash || be64 withdrawalCount || be64 withdrawalsTotal)
 stateRoot  = keccak256("PosternPerps/state/v1" || be64 height || be64 time || accountsRoot || marketsRoot || withdrawalsRoot || systemHash)
 ```
 
 The last four fields are outside the state root: `depositsHead` / `forcedHead` are the vault's own chain heads after
 `nextDepositIndex` / `nextForcedIndex` items (validators compute them from the vault's events at the L2 finalized
 tag; the vault compares them with what it accumulated itself, R395-1, coordinator decision 2026-11-17);
-`withdrawalCount` / `withdrawalsTotal` are the number and sum of records in the withdrawal tree (388: please add
-both to `systemHash` in SPEC 0.2 so they are inside the state root too).
+`withdrawalCount` / `withdrawalsTotal` (the number and sum of records in the withdrawal tree) are also inside the
+state root since SPEC 0.1.5 (388, `5a50d58`); the vault's recompute reproduces 388's vector byte for byte
+(`0xa37422a4…dba9ac`, `contracts/test/vectors/vault-vectors.json`).
 
 ### 5.3 Acceptance rules (`submitCheckpoint`)
 
