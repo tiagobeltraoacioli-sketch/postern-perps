@@ -15,7 +15,8 @@ pub const DOMAIN_NAME: &str = "PosternPerps";
 pub const DOMAIN_VERSION: &str = "1";
 pub const DOMAIN_CHAIN_ID: u64 = 700_770;
 
-pub const DOMAIN_TYPE: &str = "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
+pub const DOMAIN_TYPE: &str =
+    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 pub const PRICE_TYPE: &str = "OraclePrice(uint32 marketId,uint64 price,uint8 sources)";
 /// The primary type followed by its referenced types in alphabetical order (EIP-712 `encodeType`).
 pub const OBSERVATION_TYPE: &str =
@@ -32,7 +33,12 @@ pub fn domain_separator(vault: &[u8; 20]) -> [u8; 32] {
     domain_separator_for(DOMAIN_NAME, DOMAIN_VERSION, DOMAIN_CHAIN_ID, vault)
 }
 
-pub fn domain_separator_for(name: &str, version: &str, chain_id: u64, vault: &[u8; 20]) -> [u8; 32] {
+pub fn domain_separator_for(
+    name: &str,
+    version: &str,
+    chain_id: u64,
+    vault: &[u8; 20],
+) -> [u8; 32] {
     let mut b = Vec::with_capacity(32 * 5);
     b.extend_from_slice(&keccak256(DOMAIN_TYPE.as_bytes()));
     b.extend_from_slice(&keccak256(name.as_bytes()));
@@ -91,7 +97,11 @@ mod tests {
         let base = Observation {
             round: 5,
             time_ms: 15_001,
-            prices: vec![OraclePrice { market_id: 1, price: 100, sources: 3 }],
+            prices: vec![OraclePrice {
+                market_id: 1,
+                price: 100,
+                sources: 3,
+            }],
         };
         let vault = [0x11u8; 20];
         let dom = domain_separator(&vault);
@@ -112,12 +122,34 @@ mod tests {
         v.prices[0].sources = 4;
         assert_ne!(digest(&dom, &v), d);
         let mut v = base.clone();
-        v.prices.push(OraclePrice { market_id: 2, price: 1, sources: 3 });
+        v.prices.push(OraclePrice {
+            market_id: 2,
+            price: 1,
+            sources: 3,
+        });
         assert_ne!(digest(&dom, &v), d);
         // Another deployment (vault), the provisional chain id, the vault's own domain name, another version.
         assert_ne!(digest(&domain_separator(&[0x12; 20]), &base), d);
-        assert_ne!(digest(&domain_separator_for(DOMAIN_NAME, DOMAIN_VERSION, 7_007_701, &vault), &base), d);
-        assert_ne!(digest(&domain_separator_for("PosternPerpsVault", DOMAIN_VERSION, DOMAIN_CHAIN_ID, &vault), &base), d);
-        assert_ne!(digest(&domain_separator_for(DOMAIN_NAME, "2", DOMAIN_CHAIN_ID, &vault), &base), d);
+        assert_ne!(
+            digest(
+                &domain_separator_for(DOMAIN_NAME, DOMAIN_VERSION, 7_007_701, &vault),
+                &base
+            ),
+            d
+        );
+        assert_ne!(
+            digest(
+                &domain_separator_for("PosternPerpsVault", DOMAIN_VERSION, DOMAIN_CHAIN_ID, &vault),
+                &base
+            ),
+            d
+        );
+        assert_ne!(
+            digest(
+                &domain_separator_for(DOMAIN_NAME, "2", DOMAIN_CHAIN_ID, &vault),
+                &base
+            ),
+            d
+        );
     }
 }

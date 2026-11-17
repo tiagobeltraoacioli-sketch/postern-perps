@@ -43,17 +43,54 @@ fn typed(o: &Observation) -> Value {
 
 fn build() -> Value {
     let cases: Vec<(&str, Observation)> = vec![
-        ("one-market", Observation { round: 598_296_643, time_ms: 1_794_889_929_012, prices: vec![OraclePrice { market_id: 1, price: 648_703, sources: 7 }] }),
-        ("three-markets", Observation {
-            round: 598_296_644,
-            time_ms: 1_794_889_932_000,
-            prices: vec![
-                OraclePrice { market_id: 1, price: 648_703, sources: 7 },
-                OraclePrice { market_id: 2, price: 182_784, sources: 6 },
-                OraclePrice { market_id: 3, price: 72_660, sources: 5 },
-            ],
-        }),
-        ("max-values", Observation { round: u64::MAX / 3000 - 1, time_ms: (u64::MAX / 3000 - 1) * 3000 + 2999, prices: vec![OraclePrice { market_id: u32::MAX, price: u64::MAX, sources: 255 }] }),
+        (
+            "one-market",
+            Observation {
+                round: 598_296_643,
+                time_ms: 1_794_889_929_012,
+                prices: vec![OraclePrice {
+                    market_id: 1,
+                    price: 648_703,
+                    sources: 7,
+                }],
+            },
+        ),
+        (
+            "three-markets",
+            Observation {
+                round: 598_296_644,
+                time_ms: 1_794_889_932_000,
+                prices: vec![
+                    OraclePrice {
+                        market_id: 1,
+                        price: 648_703,
+                        sources: 7,
+                    },
+                    OraclePrice {
+                        market_id: 2,
+                        price: 182_784,
+                        sources: 6,
+                    },
+                    OraclePrice {
+                        market_id: 3,
+                        price: 72_660,
+                        sources: 5,
+                    },
+                ],
+            },
+        ),
+        (
+            "max-values",
+            Observation {
+                round: u64::MAX / 3000 - 1,
+                time_ms: (u64::MAX / 3000 - 1) * 3000 + 2999,
+                prices: vec![OraclePrice {
+                    market_id: u32::MAX,
+                    price: u64::MAX,
+                    sources: 255,
+                }],
+            },
+        ),
     ];
     let mut out = Vec::new();
     let mut signed = Vec::new();
@@ -71,11 +108,25 @@ fn build() -> Value {
             "digest": format!("0x{}", hex::encode(d)),
             "signature": format!("0x{}", hex::encode(s)),
         }));
-        signed.push(SignedObservation { signer: i as u8, time_ms: o.time_ms, prices: o.prices.clone(), signature: s });
+        signed.push(SignedObservation {
+            signer: i as u8,
+            time_ms: o.time_ms,
+            prices: o.prices.clone(),
+            signature: s,
+        });
     }
     // One OracleUpdate carrying the first case twice under signers 0 and 1 (structure only; signer 1's signature
     // is signer 0's, so the engine rejects it: ORACLE_BAD_SIGNATURE at observation 1).
-    let u = OracleUpdate { round: cases[0].1.round, observations: vec![signed[0].clone(), SignedObservation { signer: 1, ..signed[0].clone() }] };
+    let u = OracleUpdate {
+        round: cases[0].1.round,
+        observations: vec![
+            signed[0].clone(),
+            SignedObservation {
+                signer: 1,
+                ..signed[0].clone()
+            },
+        ],
+    };
     json!({
         "_note": "UNAUDITED PROTOTYPE test vectors. Keys are THROWAWAY keys derived from public labels: never use them.",
         "verifyingContract": format!("0x{VAULT_HEX}"),
@@ -96,6 +147,10 @@ fn vectors_match_the_committed_file() {
     if std::env::var_os("ORACLE_WRITE_VECTORS").is_some() {
         fs::write(&path, serde_json::to_string_pretty(&v).unwrap() + "\n").unwrap();
     }
-    let committed: Value = serde_json::from_str(&fs::read_to_string(&path).expect("vectors/eip712.json")).unwrap();
-    assert_eq!(committed, v, "vectors changed: a format change must be deliberate and announced in the cross-area log");
+    let committed: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("vectors/eip712.json")).unwrap();
+    assert_eq!(
+        committed, v,
+        "vectors changed: a format change must be deliberate and announced in the cross-area log"
+    );
 }

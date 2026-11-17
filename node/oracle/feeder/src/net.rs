@@ -21,7 +21,10 @@ pub const FETCH_TIMEOUT_MS: u64 = 1500;
 pub const MAX_CLOCK_SKEW_MS: u64 = 1000;
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }
 
 fn all_sources(c: &FeederConfig) -> Vec<Source> {
@@ -49,18 +52,52 @@ pub fn fetch_all(sources: &[Source]) -> Vec<(Response, Option<u64>, String)> {
                 let received = now_ms();
                 match res {
                     Ok(mut r) => {
-                        let date = r.headers().get("date").and_then(|d| d.to_str().ok()).and_then(parse_http_date_ms);
+                        let date = r
+                            .headers()
+                            .get("date")
+                            .and_then(|d| d.to_str().ok())
+                            .and_then(parse_http_date_ms);
                         match r.body_mut().with_config().limit(64 * 1024).read_to_string() {
-                            Ok(b) => (Response { source: name, body: Some(b), received_ms: received, error: None }, date, url),
-                            Err(e) => (Response { source: name, body: None, received_ms: received, error: Some(e.to_string()) }, date, url),
+                            Ok(b) => (
+                                Response {
+                                    source: name,
+                                    body: Some(b),
+                                    received_ms: received,
+                                    error: None,
+                                },
+                                date,
+                                url,
+                            ),
+                            Err(e) => (
+                                Response {
+                                    source: name,
+                                    body: None,
+                                    received_ms: received,
+                                    error: Some(e.to_string()),
+                                },
+                                date,
+                                url,
+                            ),
                         }
                     }
-                    Err(e) => (Response { source: name, body: None, received_ms: received, error: Some(e.to_string()) }, None, url),
+                    Err(e) => (
+                        Response {
+                            source: name,
+                            body: None,
+                            received_ms: received,
+                            error: Some(e.to_string()),
+                        },
+                        None,
+                        url,
+                    ),
                 }
             })
         })
         .collect();
-    handles.into_iter().map(|h| h.join().expect("fetch thread")).collect()
+    handles
+        .into_iter()
+        .map(|h| h.join().expect("fetch thread"))
+        .collect()
 }
 
 /// `Tue, 17 Nov 2026 04:06:08 GMT` (RFC 9110 IMF-fixdate) to Unix ms.
@@ -69,8 +106,19 @@ pub fn parse_http_date_ms(s: &str) -> Option<u64> {
     if p.len() != 6 || p[5] != "GMT" {
         return None;
     }
-    let mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().position(|m| *m == p[2])? + 1;
-    let iso = format!("{}-{:02}-{:02}T{}Z", p[3], mon, p[1].parse::<u32>().ok()?, p[4]);
+    let mon = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    .iter()
+    .position(|m| *m == p[2])?
+        + 1;
+    let iso = format!(
+        "{}-{:02}-{:02}T{}Z",
+        p[3],
+        mon,
+        p[1].parse::<u32>().ok()?,
+        p[4]
+    );
     crate::venues::parse_rfc3339_ms(&iso).ok()
 }
 
@@ -78,14 +126,22 @@ pub fn parse_http_date_ms(s: &str) -> Option<u64> {
 /// one-second resolution of the receive time.
 pub fn clock_ok(dates: &[(u64, u64)]) -> Result<(), String> {
     if dates.len() < 3 {
-        return Err(format!("clock check: only {} venue Date headers", dates.len()));
+        return Err(format!(
+            "clock check: only {} venue Date headers",
+            dates.len()
+        ));
     }
-    let mut skews: Vec<i64> = dates.iter().map(|&(date, recv)| recv as i64 - date as i64).collect();
+    let mut skews: Vec<i64> = dates
+        .iter()
+        .map(|&(date, recv)| recv as i64 - date as i64)
+        .collect();
     skews.sort_unstable();
     let med = skews[skews.len() / 2];
     // Date is truncated to the second: an exact clock shows a skew in [0, 1000).
     if med < -(MAX_CLOCK_SKEW_MS as i64) || med >= 1000 + MAX_CLOCK_SKEW_MS as i64 {
-        return Err(format!("clock check: local clock off by {med} ms from the median venue Date"));
+        return Err(format!(
+            "clock check: local clock off by {med} ms from the median venue Date"
+        ));
     }
     Ok(())
 }
@@ -123,7 +179,11 @@ pub fn record(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
         for (r, date, url) in fetch_all(&sources) {
             let v = json!({"venue": r.source, "url": url, "sentMs": sent, "receivedMs": r.received_ms,
                            "httpDateMs": date, "error": r.error, "body": r.body.unwrap_or_default()});
-            fs::write(dir.join(format!("{}.json", v["venue"].as_str().unwrap())), serde_json::to_string(&v).unwrap()).map_err(|e| e.to_string())?;
+            fs::write(
+                dir.join(format!("{}.json", v["venue"].as_str().unwrap())),
+                serde_json::to_string(&v).unwrap(),
+            )
+            .map_err(|e| e.to_string())?;
         }
         eprintln!("recorded {}", dir.display());
     }
@@ -141,21 +201,37 @@ pub fn run_live(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
         return Err("--vault: the zero address".into());
     }
     let domain = eip712::domain_separator(&vault);
-    let mut out = fs::OpenOptions::new().create(true).append(true).open(one(m, "out")?).map_err(|e| e.to_string())?;
+    let mut out = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(one(m, "out")?)
+        .map_err(|e| e.to_string())?;
     let mut feeder = Feeder::new(default_config()).map_err(|e| format!("{e:?}"))?;
     let sources = all_sources(&feeder.config);
     for _ in 0..rounds_arg(m)? {
         let t0 = wait_for_round_start();
         let fetched = fetch_all(&sources);
-        let dates: Vec<(u64, u64)> = fetched.iter().filter_map(|(r, d, _)| d.map(|d| (d, r.received_ms))).collect();
+        let dates: Vec<(u64, u64)> = fetched
+            .iter()
+            .filter_map(|(r, d, _)| d.map(|d| (d, r.received_ms)))
+            .collect();
         let resp: Vec<Response> = fetched.into_iter().map(|(r, _, _)| r).collect();
         let (obs, rep) = feeder.observe(round_of(t0), t0, &resp);
         let line = match (clock_ok(&dates), obs) {
-            (Err(e), _) => json!({"round": round_of(t0), "refused": e, "report": json::round_report_to_json(&rep)}),
-            (Ok(()), None) => json!({"round": round_of(t0), "observation": null, "report": json::round_report_to_json(&rep)}),
+            (Err(e), _) => {
+                json!({"round": round_of(t0), "refused": e, "report": json::round_report_to_json(&rep)})
+            }
+            (Ok(()), None) => {
+                json!({"round": round_of(t0), "observation": null, "report": json::round_report_to_json(&rep)})
+            }
             (Ok(()), Some(o)) => {
                 let s = sig::sign(&key, &eip712::digest(&domain, &o));
-                let so = perps_oracle::types::SignedObservation { signer, time_ms: o.time_ms, prices: o.prices.clone(), signature: s };
+                let so = perps_oracle::types::SignedObservation {
+                    signer,
+                    time_ms: o.time_ms,
+                    prices: o.prices.clone(),
+                    signature: s,
+                };
                 json!({"observation": json::signed_to_json(&so, o.round), "report": json::round_report_to_json(&rep)})
             }
         };
@@ -170,7 +246,10 @@ mod tests {
 
     #[test]
     fn http_date_and_clock() {
-        assert_eq!(parse_http_date_ms("Tue, 17 Nov 2026 04:06:08 GMT"), Some(1_794_888_368_000));
+        assert_eq!(
+            parse_http_date_ms("Tue, 17 Nov 2026 04:06:08 GMT"),
+            Some(1_794_888_368_000)
+        );
         assert_eq!(parse_http_date_ms("Tue, 17 Nov 2026 04:06:08 UTC"), None);
         let d = 1_794_888_368_000;
         assert!(clock_ok(&[(d, d + 400), (d, d + 900), (d, d + 100)]).is_ok());

@@ -28,12 +28,24 @@ pub const PRICE_LEN: usize = 4 + 8 + 1;
 pub const OBS_FIXED_LEN: usize = 1 + 8 + 2 + 65;
 
 pub fn encode(u: &OracleUpdate) -> Vec<u8> {
-    assert!(u.observations.len() <= 255, "encode: more than 255 observations");
-    let mut out = Vec::with_capacity(9 + u.observations.iter().map(|o| OBS_FIXED_LEN + o.prices.len() * PRICE_LEN).sum::<usize>());
+    assert!(
+        u.observations.len() <= 255,
+        "encode: more than 255 observations"
+    );
+    let mut out = Vec::with_capacity(
+        9 + u
+            .observations
+            .iter()
+            .map(|o| OBS_FIXED_LEN + o.prices.len() * PRICE_LEN)
+            .sum::<usize>(),
+    );
     out.extend_from_slice(&u.round.to_be_bytes());
     out.push(u.observations.len() as u8);
     for o in &u.observations {
-        assert!(o.prices.len() <= MAX_PRICES, "encode: more than MAX_PRICES prices");
+        assert!(
+            o.prices.len() <= MAX_PRICES,
+            "encode: more than MAX_PRICES prices"
+        );
         out.push(o.signer);
         out.extend_from_slice(&o.time_ms.to_be_bytes());
         out.extend_from_slice(&(o.prices.len() as u16).to_be_bytes());
@@ -90,18 +102,33 @@ pub fn decode(b: &[u8]) -> Result<OracleUpdate, DecodeError> {
         }
         // Check the bytes exist before allocating for them.
         let price_bytes = r.take(n * PRICE_LEN)?;
-        let mut pr = Reader { b: price_bytes, at: 0 };
+        let mut pr = Reader {
+            b: price_bytes,
+            at: 0,
+        };
         let mut prices = Vec::with_capacity(n);
         for _ in 0..n {
-            prices.push(OraclePrice { market_id: pr.u32()?, price: pr.u64()?, sources: pr.u8()? });
+            prices.push(OraclePrice {
+                market_id: pr.u32()?,
+                price: pr.u64()?,
+                sources: pr.u8()?,
+            });
         }
         let signature: [u8; 65] = r.take(65)?.try_into().unwrap();
-        observations.push(SignedObservation { signer, time_ms, prices, signature });
+        observations.push(SignedObservation {
+            signer,
+            time_ms,
+            prices,
+            signature,
+        });
     }
     if r.at != b.len() {
         return Err(DecodeError::TrailingBytes);
     }
-    Ok(OracleUpdate { round, observations })
+    Ok(OracleUpdate {
+        round,
+        observations,
+    })
 }
 
 #[cfg(test)]
@@ -116,12 +143,25 @@ mod tests {
                     signer: 0,
                     time_ms: 1_794_888_369_100,
                     prices: vec![
-                        OraclePrice { market_id: 1, price: 648_703, sources: 7 },
-                        OraclePrice { market_id: 3, price: 72_660, sources: 5 },
+                        OraclePrice {
+                            market_id: 1,
+                            price: 648_703,
+                            sources: 7,
+                        },
+                        OraclePrice {
+                            market_id: 3,
+                            price: 72_660,
+                            sources: 5,
+                        },
                     ],
                     signature: [0x11; 65],
                 },
-                SignedObservation { signer: 4, time_ms: 1_794_888_369_900, prices: vec![], signature: [0x22; 65] },
+                SignedObservation {
+                    signer: 4,
+                    time_ms: 1_794_888_369_900,
+                    prices: vec![],
+                    signature: [0x22; 65],
+                },
             ],
         }
     }
@@ -141,7 +181,11 @@ mod tests {
     fn every_truncation_and_extension_is_refused() {
         let b = encode(&sample());
         for cut in 0..b.len() {
-            assert_eq!(decode(&b[..cut]), Err(DecodeError::Truncated), "cut at {cut}");
+            assert_eq!(
+                decode(&b[..cut]),
+                Err(DecodeError::Truncated),
+                "cut at {cut}"
+            );
         }
         let mut longer = b.clone();
         longer.push(0);

@@ -13,7 +13,8 @@ use k256::ecdsa::SigningKey;
 use perps_oracle::keccak256;
 
 pub fn read_key(path: &Path) -> Result<SigningKey, String> {
-    let meta = fs::symlink_metadata(path).map_err(|e| format!("key file {}: {e}", path.display()))?;
+    let meta =
+        fs::symlink_metadata(path).map_err(|e| format!("key file {}: {e}", path.display()))?;
     if meta.file_type().is_symlink() || !meta.is_file() {
         return Err("key file: must be a regular file, not a link".into());
     }
@@ -22,7 +23,9 @@ pub fn read_key(path: &Path) -> Result<SigningKey, String> {
         use std::os::unix::fs::PermissionsExt;
         let mode = meta.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
-            return Err(format!("key file: mode {mode:o} lets others read or write it; use chmod 600"));
+            return Err(format!(
+                "key file: mode {mode:o} lets others read or write it; use chmod 600"
+            ));
         }
     }
     let text = fs::read_to_string(path).map_err(|e| format!("key file: {e}"))?;
@@ -56,7 +59,9 @@ pub fn write_dev_key(label: &str, path: &Path) -> Result<SigningKey, String> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    let mut f = opts.open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut f = opts
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     writeln!(f, "{}", hex::encode(k.to_bytes())).map_err(|e| e.to_string())?;
     Ok(k)
 }

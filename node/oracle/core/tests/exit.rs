@@ -11,13 +11,18 @@ use perps_oracle::{eip712, keccak256, sig, ROUND_MS};
 const VAULT: [u8; 20] = [0xdb; 20];
 
 fn key(i: u8) -> SigningKey {
-    SigningKey::from_bytes(&keccak256(format!("postern-perps-oracle-test-signer-{i}").as_bytes()).into()).unwrap()
+    SigningKey::from_bytes(
+        &keccak256(format!("postern-perps-oracle-test-signer-{i}").as_bytes()).into(),
+    )
+    .unwrap()
 }
 
 fn params() -> CommitteeParams {
     CommitteeParams {
         verifying_contract: VAULT,
-        signers: (0..7).map(|i| sig::address_of(key(i).verifying_key())).collect(),
+        signers: (0..7)
+            .map(|i| sig::address_of(key(i).verifying_key()))
+            .collect(),
         quorum: 5,
         max_future_ms: 1000,
         max_age_ms: 6000,
@@ -44,8 +49,21 @@ fn upd(round: u64, p: u64) -> OracleUpdate {
         round,
         observations: (0..7u8)
             .map(|i| {
-                let o = Observation { round, time_ms: round * ROUND_MS + 100, prices: vec![OraclePrice { market_id: 1, price: p, sources: 5 }] };
-                SignedObservation { signer: i, time_ms: o.time_ms, prices: o.prices.clone(), signature: sig::sign(&key(i), &eip712::digest(&dom, &o)) }
+                let o = Observation {
+                    round,
+                    time_ms: round * ROUND_MS + 100,
+                    prices: vec![OraclePrice {
+                        market_id: 1,
+                        price: p,
+                        sources: 5,
+                    }],
+                };
+                SignedObservation {
+                    signer: i,
+                    time_ms: o.time_ms,
+                    prices: o.prices.clone(),
+                    signature: sig::sign(&key(i), &eip712::digest(&dom, &o)),
+                }
             })
             .collect(),
     }
@@ -78,7 +96,10 @@ fn genesis_has_no_exit_price_because_nothing_can_have_traded() {
 fn active_market_exits_at_the_index() {
     let (prm, st, r) = active(650_000);
     let x = exit_price(&prm, &st, 1, t_of(r)).unwrap();
-    assert_eq!((x.source, x.low, x.high, x.reference, x.settle), (ExitSource::Index, 650_000, 650_000, 650_000, 650_000));
+    assert_eq!(
+        (x.source, x.low, x.high, x.reference, x.settle),
+        (ExitSource::Index, 650_000, 650_000, 650_000, 650_000)
+    );
     assert!(!x.settle_due);
 }
 
@@ -94,7 +115,10 @@ fn withheld_oracle_inputs_leave_a_widening_band_and_a_settlement_deadline() {
     let x = exit_price(&prm, &st, 1, it + 10_001).unwrap();
     assert_eq!(x.source, ExitSource::HaltBand);
     // 5% half-width in the first minute: low rounded down, high rounded up.
-    assert_eq!((x.low, x.high, x.reference, x.settle), (617_500, 682_500, 650_000, 650_000));
+    assert_eq!(
+        (x.low, x.high, x.reference, x.settle),
+        (617_500, 682_500, 650_000, 650_000)
+    );
     assert_eq!(x.age_ms, 10_001);
     // 10 whole minutes after the last good index: 5% + 10 * 1% = 15%.
     let x = exit_price(&prm, &st, 1, it + 600_000).unwrap();
@@ -104,7 +128,10 @@ fn withheld_oracle_inputs_leave_a_widening_band_and_a_settlement_deadline() {
     assert_eq!((x.low, x.high), (325_000, 975_000));
     assert!(!x.settle_due);
     let x = exit_price(&prm, &st, 1, it + 3_600_000).unwrap();
-    assert!(x.settle_due, "one hour without a good index: settlement due");
+    assert!(
+        x.settle_due,
+        "one hour without a good index: settlement due"
+    );
 }
 
 #[test]
@@ -123,9 +150,15 @@ fn rounding_is_outward() {
 fn a_jump_halt_band_covers_every_committee_price_since_the_halt() {
     let (prm, mut st, r) = active(650_000);
     let out = apply_update(&prm, &mut st, &upd(r, 520_000), t_of(r)).unwrap();
-    assert_eq!(out.outcomes[0].1, MarketOutcome::HaltedJump { price: 520_000 });
+    assert_eq!(
+        out.outcomes[0].1,
+        MarketOutcome::HaltedJump { price: 520_000 }
+    );
     let x = exit_price(&prm, &st, 1, t_of(r)).unwrap();
-    assert_eq!((x.low, x.high, x.reference, x.settle), (494_000, 682_500, 650_000, 520_000));
+    assert_eq!(
+        (x.low, x.high, x.reference, x.settle),
+        (494_000, 682_500, 650_000, 520_000)
+    );
     // Next round the committee sees 700000 (an oscillation): the band now covers both extremes.
     begin_block(&prm, &mut st, t_of(r + 1));
     apply_update(&prm, &mut st, &upd(r + 1, 700_000), t_of(r + 1)).unwrap();
@@ -144,7 +177,10 @@ fn a_jump_halt_band_covers_every_committee_price_since_the_halt() {
     assert_eq!(st.safe_index(1), Some(600_000));
     let m = st.market(1).unwrap();
     assert_eq!((m.halt_low, m.halt_high), (0, 0));
-    assert_eq!(exit_price(&prm, &st, 1, t_of(r + 7)).unwrap().source, ExitSource::Index);
+    assert_eq!(
+        exit_price(&prm, &st, 1, t_of(r + 7)).unwrap().source,
+        ExitSource::Index
+    );
 }
 
 #[test]

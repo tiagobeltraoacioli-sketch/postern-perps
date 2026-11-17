@@ -2,7 +2,9 @@
 //! times and rounds as numbers, bytes as 0x-hex). Parsing is strict: unknown or missing fields, wrong types and
 //! non-canonical hex are refused.
 
-use perps_oracle::committee::{CommitteeParams, MarketOutcome, MarketParams, OracleError, UpdateReport};
+use perps_oracle::committee::{
+    CommitteeParams, MarketOutcome, MarketParams, OracleError, UpdateReport,
+};
 use perps_oracle::types::{OraclePrice, OracleUpdate, SignedObservation};
 use serde_json::{json, Map, Value};
 
@@ -21,12 +23,21 @@ fn obj<'a>(v: &'a Value, what: &str, allowed: &[&str]) -> R<&'a Map<String, Valu
 }
 
 fn u64f(o: &Map<String, Value>, k: &str) -> R<u64> {
-    o.get(k).and_then(Value::as_u64).ok_or(format!("field {k}: not an unsigned integer"))
+    o.get(k)
+        .and_then(Value::as_u64)
+        .ok_or(format!("field {k}: not an unsigned integer"))
 }
 
 fn u64s(o: &Map<String, Value>, k: &str) -> R<u64> {
-    let s = o.get(k).and_then(Value::as_str).ok_or(format!("field {k}: not a decimal string"))?;
-    if s.is_empty() || s.len() > 20 || !s.bytes().all(|b| b.is_ascii_digit()) || (s.len() > 1 && s.starts_with('0')) {
+    let s = o
+        .get(k)
+        .and_then(Value::as_str)
+        .ok_or(format!("field {k}: not a decimal string"))?;
+    if s.is_empty()
+        || s.len() > 20
+        || !s.bytes().all(|b| b.is_ascii_digit())
+        || (s.len() > 1 && s.starts_with('0'))
+    {
         return Err(format!("field {k}: not a canonical decimal string"));
     }
     s.parse().map_err(|_| format!("field {k}: out of range"))
@@ -47,9 +58,15 @@ pub fn price_to_json(p: &OraclePrice) -> Value {
 
 pub fn price_from_json(v: &Value) -> R<OraclePrice> {
     let o = obj(v, "price", &["marketId", "price", "sources"])?;
-    let market_id = u32::try_from(u64f(o, "marketId")?).map_err(|_| "marketId out of range".to_string())?;
-    let sources = u8::try_from(u64f(o, "sources")?).map_err(|_| "sources out of range".to_string())?;
-    Ok(OraclePrice { market_id, price: u64s(o, "price")?, sources })
+    let market_id =
+        u32::try_from(u64f(o, "marketId")?).map_err(|_| "marketId out of range".to_string())?;
+    let sources =
+        u8::try_from(u64f(o, "sources")?).map_err(|_| "sources out of range".to_string())?;
+    Ok(OraclePrice {
+        market_id,
+        price: u64s(o, "price")?,
+        sources,
+    })
 }
 
 pub fn signed_to_json(o: &SignedObservation, round: u64) -> Value {
@@ -64,14 +81,32 @@ pub fn signed_to_json(o: &SignedObservation, round: u64) -> Value {
 
 fn signed_body(o: &Map<String, Value>) -> R<SignedObservation> {
     let signer = u8::try_from(u64f(o, "signer")?).map_err(|_| "signer out of range".to_string())?;
-    let prices = o.get("prices").and_then(Value::as_array).ok_or("prices: not an array")?.iter().map(price_from_json).collect::<R<Vec<_>>>()?;
-    let sig = o.get("signature").and_then(Value::as_str).ok_or("signature: not a string")?;
-    Ok(SignedObservation { signer, time_ms: u64f(o, "timeMs")?, prices, signature: hex_bytes::<65>(sig, "signature")? })
+    let prices = o
+        .get("prices")
+        .and_then(Value::as_array)
+        .ok_or("prices: not an array")?
+        .iter()
+        .map(price_from_json)
+        .collect::<R<Vec<_>>>()?;
+    let sig = o
+        .get("signature")
+        .and_then(Value::as_str)
+        .ok_or("signature: not a string")?;
+    Ok(SignedObservation {
+        signer,
+        time_ms: u64f(o, "timeMs")?,
+        prices,
+        signature: hex_bytes::<65>(sig, "signature")?,
+    })
 }
 
 /// A feeder's submission: `{"round", "signer", "timeMs", "prices", "signature"}`.
 pub fn signed_from_json(v: &Value) -> R<(u64, SignedObservation)> {
-    let o = obj(v, "observation", &["round", "signer", "timeMs", "prices", "signature"])?;
+    let o = obj(
+        v,
+        "observation",
+        &["round", "signer", "timeMs", "prices", "signature"],
+    )?;
     Ok((u64f(o, "round")?, signed_body(o)?))
 }
 
@@ -93,21 +128,50 @@ pub fn update_from_json(v: &Value) -> R<OracleUpdate> {
         .and_then(Value::as_array)
         .ok_or("observations: not an array")?
         .iter()
-        .map(|e| obj(e, "observation", &["signer", "timeMs", "prices", "signature"]).and_then(signed_body))
+        .map(|e| {
+            obj(
+                e,
+                "observation",
+                &["signer", "timeMs", "prices", "signature"],
+            )
+            .and_then(signed_body)
+        })
         .collect::<R<Vec<_>>>()?;
-    Ok(OracleUpdate { round: u64f(o, "round")?, observations })
+    Ok(OracleUpdate {
+        round: u64f(o, "round")?,
+        observations,
+    })
 }
 
 pub fn committee_from_json(v: &Value) -> R<CommitteeParams> {
-    let o = obj(v, "committee", &["_note", "verifyingContract", "signers", "quorum", "maxFutureMs", "maxAgeMs", "markets"])?;
-    let vault = o.get("verifyingContract").and_then(Value::as_str).ok_or("verifyingContract: not a string")?;
+    let o = obj(
+        v,
+        "committee",
+        &[
+            "_note",
+            "verifyingContract",
+            "signers",
+            "quorum",
+            "maxFutureMs",
+            "maxAgeMs",
+            "markets",
+        ],
+    )?;
+    let vault = o
+        .get("verifyingContract")
+        .and_then(Value::as_str)
+        .ok_or("verifyingContract: not a string")?;
     let verifying_contract = hex_bytes::<20>(&vault.to_lowercase(), "verifyingContract")?;
     let signers = o
         .get("signers")
         .and_then(Value::as_array)
         .ok_or("signers: not an array")?
         .iter()
-        .map(|s| s.as_str().ok_or("signer: not a string".to_string()).and_then(|s| hex_bytes::<20>(&s.to_lowercase(), "signer")))
+        .map(|s| {
+            s.as_str()
+                .ok_or("signer: not a string".to_string())
+                .and_then(|s| hex_bytes::<20>(&s.to_lowercase(), "signer"))
+        })
         .collect::<R<Vec<_>>>()?;
     let markets = o
         .get("markets")
@@ -118,7 +182,19 @@ pub fn committee_from_json(v: &Value) -> R<CommitteeParams> {
             let o = obj(
                 m,
                 "market",
-                &["marketId", "symbol", "minSources", "agreeBps", "jumpBps", "maxStalenessMs", "confirmRounds", "exitHaircutBps", "exitHaircutPerMinBps", "exitMaxHaircutBps", "maxHaltMs"],
+                &[
+                    "marketId",
+                    "symbol",
+                    "minSources",
+                    "agreeBps",
+                    "jumpBps",
+                    "maxStalenessMs",
+                    "confirmRounds",
+                    "exitHaircutBps",
+                    "exitHaircutPerMinBps",
+                    "exitMaxHaircutBps",
+                    "maxHaltMs",
+                ],
             )?;
             let small = |k: &str, max: u64| -> R<u64> {
                 let v = u64f(o, k)?;
@@ -142,19 +218,35 @@ pub fn committee_from_json(v: &Value) -> R<CommitteeParams> {
         })
         .collect::<R<Vec<_>>>()?;
     let quorum = u8::try_from(u64f(o, "quorum")?).map_err(|_| "quorum out of range".to_string())?;
-    let p = CommitteeParams { verifying_contract, signers, quorum, max_future_ms: u64f(o, "maxFutureMs")?, max_age_ms: u64f(o, "maxAgeMs")?, markets };
-    p.validate().map_err(|e| format!("committee parameters refused: {e:?}"))?;
+    let p = CommitteeParams {
+        verifying_contract,
+        signers,
+        quorum,
+        max_future_ms: u64f(o, "maxFutureMs")?,
+        max_age_ms: u64f(o, "maxAgeMs")?,
+        markets,
+    };
+    p.validate()
+        .map_err(|e| format!("committee parameters refused: {e:?}"))?;
     Ok(p)
 }
 
 pub fn outcome_to_json(o: &MarketOutcome) -> Value {
     match *o {
         MarketOutcome::NoQuorum { have } => json!({"outcome": "noQuorum", "have": have}),
-        MarketOutcome::Disagree { median, agree } => json!({"outcome": "disagree", "median": median.to_string(), "agree": agree}),
+        MarketOutcome::Disagree { median, agree } => {
+            json!({"outcome": "disagree", "median": median.to_string(), "agree": agree})
+        }
         MarketOutcome::Moved { price } => json!({"outcome": "moved", "price": price.to_string()}),
-        MarketOutcome::HaltedJump { price } => json!({"outcome": "haltedJump", "price": price.to_string()}),
-        MarketOutcome::Confirming { price, count } => json!({"outcome": "confirming", "price": price.to_string(), "count": count}),
-        MarketOutcome::Resumed { price, confirmed } => json!({"outcome": "resumed", "price": price.to_string(), "confirmed": confirmed}),
+        MarketOutcome::HaltedJump { price } => {
+            json!({"outcome": "haltedJump", "price": price.to_string()})
+        }
+        MarketOutcome::Confirming { price, count } => {
+            json!({"outcome": "confirming", "price": price.to_string(), "count": count})
+        }
+        MarketOutcome::Resumed { price, confirmed } => {
+            json!({"outcome": "resumed", "price": price.to_string(), "confirmed": confirmed})
+        }
     }
 }
 

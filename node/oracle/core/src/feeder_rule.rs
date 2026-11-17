@@ -131,27 +131,46 @@ pub enum Abstain {
 
 /// F4 to F5: the reference median of the valid USD prices, the survivors within `max_source_deviation_bps` of it,
 /// and the strict-majority rule. Returns `(sort(survivors)[len/2], survivors)` at 1e-18 (F6 before rounding).
-pub fn aggregate(prices: &[u128], min_sources: u8, max_source_deviation_bps: u32) -> Result<(u128, u8), Abstain> {
+pub fn aggregate(
+    prices: &[u128],
+    min_sources: u8,
+    max_source_deviation_bps: u32,
+) -> Result<(u128, u8), Abstain> {
     if prices.is_empty() {
         return Err(Abstain::NoReadings);
     }
     let mut v = prices.to_vec();
     v.sort_unstable();
     let m0 = v[v.len() / 2];
-    let surv: Vec<u128> = v.iter().copied().filter(|&p| within_bps(p, m0, max_source_deviation_bps, m0)).collect();
+    let surv: Vec<u128> = v
+        .iter()
+        .copied()
+        .filter(|&p| within_bps(p, m0, max_source_deviation_bps, m0))
+        .collect();
     let c = v.len().min(255) as u8;
     let s = surv.len().min(255) as u8;
     if surv.len() < usize::from(min_sources) {
-        return Err(Abstain::TooFewSurvivors { survivors: s, valid: c });
+        return Err(Abstain::TooFewSurvivors {
+            survivors: s,
+            valid: c,
+        });
     }
     if 2 * surv.len() <= v.len() {
-        return Err(Abstain::NoMajority { survivors: s, valid: c });
+        return Err(Abstain::NoMajority {
+            survivors: s,
+            valid: c,
+        });
     }
     Ok((surv[surv.len() / 2], s))
 }
 
 /// F6: the observation entry `(price in the market scale, rounded half up; sources)`.
-pub fn observe(prices: &[u128], min_sources: u8, max_source_deviation_bps: u32, price_decimals: u8) -> Result<(u64, u8), Abstain> {
+pub fn observe(
+    prices: &[u128],
+    min_sources: u8,
+    max_source_deviation_bps: u32,
+    price_decimals: u8,
+) -> Result<(u64, u8), Abstain> {
     let (p, s) = aggregate(prices, min_sources, max_source_deviation_bps)?;
     let scaled = to_scale_half_up(p, price_decimals).ok_or(Abstain::Scale)?;
     Ok((scaled, s))
@@ -168,13 +187,23 @@ pub struct FrozenTracker {
 
 impl FrozenTracker {
     /// `own_observation`: this feeder's latest observation of the market (1e-18), if any.
-    pub fn check(&mut self, price: u128, now_ms: u64, own_observation: Option<u128>, frozen_after_ms: u64, frozen_move_bps: u32) -> bool {
+    pub fn check(
+        &mut self,
+        price: u128,
+        now_ms: u64,
+        own_observation: Option<u128>,
+        frozen_after_ms: u64,
+        frozen_move_bps: u32,
+    ) -> bool {
         match self.state {
             Some((last, since, ref_obs)) if last == price => {
                 let ref_obs = ref_obs.or(own_observation);
                 self.state = Some((last, since, ref_obs));
                 match (ref_obs, own_observation) {
-                    (Some(a), Some(b)) => now_ms.saturating_sub(since) >= frozen_after_ms && a.abs_diff(b) * 10_000 >= u128::from(frozen_move_bps) * a,
+                    (Some(a), Some(b)) => {
+                        now_ms.saturating_sub(since) >= frozen_after_ms
+                            && a.abs_diff(b) * 10_000 >= u128::from(frozen_move_bps) * a
+                    }
                     _ => false,
                 }
             }
@@ -195,27 +224,61 @@ mod tests {
         parse_d18(s).unwrap()
     }
 
-    const FP: FeederParams = FeederParams { max_spread_bps: 100, max_snapshot_age_ms: 5000, max_trade_age_ms: 300_000, max_future_skew_ms: 2000 };
+    const FP: FeederParams = FeederParams {
+        max_spread_bps: 100,
+        max_snapshot_age_ms: 5000,
+        max_trade_age_ms: 300_000,
+        max_future_skew_ms: 2000,
+    };
 
     fn r(bid: &str, ask: &str, last: Option<&str>) -> Reading {
-        Reading { bid: d(bid), ask: d(ask), last: last.map(d), venue_time: None, received_ms: 1_000_000, quote: Quote::Usd }
+        Reading {
+            bid: d(bid),
+            ask: d(ask),
+            last: last.map(d),
+            venue_time: None,
+            received_ms: 1_000_000,
+            quote: Quote::Usd,
+        }
     }
 
     #[test]
     fn price_is_last_clamped_into_the_book() {
-        assert_eq!(reading_price(&r("100", "101", Some("100.5")), &FP), Ok(d("100.5")));
-        assert_eq!(reading_price(&r("100", "101", Some("90")), &FP), Ok(d("100")), "a stale low last is clamped to the bid");
-        assert_eq!(reading_price(&r("100", "101", Some("150")), &FP), Ok(d("101")));
+        assert_eq!(
+            reading_price(&r("100", "101", Some("100.5")), &FP),
+            Ok(d("100.5"))
+        );
+        assert_eq!(
+            reading_price(&r("100", "101", Some("90")), &FP),
+            Ok(d("100")),
+            "a stale low last is clamped to the bid"
+        );
+        assert_eq!(
+            reading_price(&r("100", "101", Some("150")), &FP),
+            Ok(d("101"))
+        );
         assert_eq!(reading_price(&r("100", "101", None), &FP), Ok(d("100.5")));
     }
 
     #[test]
     fn invalid_readings() {
-        assert_eq!(reading_price(&r("0", "1", None), &FP), Err(Invalid::ZeroOrHuge));
-        assert_eq!(reading_price(&r("101", "100", None), &FP), Err(Invalid::Crossed));
+        assert_eq!(
+            reading_price(&r("0", "1", None), &FP),
+            Err(Invalid::ZeroOrHuge)
+        );
+        assert_eq!(
+            reading_price(&r("101", "100", None), &FP),
+            Err(Invalid::Crossed)
+        );
         // 1.1% spread with a 1% bound.
-        assert_eq!(reading_price(&r("100", "101.1", None), &FP), Err(Invalid::Spread));
-        assert_eq!(reading_price(&r("100", "100.1", Some("0")), &FP), Err(Invalid::ZeroLast));
+        assert_eq!(
+            reading_price(&r("100", "101.1", None), &FP),
+            Err(Invalid::Spread)
+        );
+        assert_eq!(
+            reading_price(&r("100", "100.1", Some("0")), &FP),
+            Err(Invalid::ZeroLast)
+        );
         let mut x = r("100", "100.1", None);
         x.venue_time = Some(VenueTime::Snapshot(1_000_000 - 5001));
         assert_eq!(reading_price(&x, &FP), Err(Invalid::VenueTimeOld));
@@ -230,12 +293,22 @@ mod tests {
     #[test]
     fn usdt_conversion_and_depeg() {
         assert_eq!(usdt_rate(Some(d("0.999")), 500), Some(d("0.999")));
-        assert_eq!(usdt_rate(Some(d("0.95")), 500), Some(d("0.95")), "exactly at the bound");
+        assert_eq!(
+            usdt_rate(Some(d("0.95")), 500),
+            Some(d("0.95")),
+            "exactly at the bound"
+        );
         assert_eq!(usdt_rate(Some(d("0.9499")), 500), None);
         assert_eq!(usdt_rate(Some(d("1.0501")), 500), None);
         assert_eq!(usdt_rate(None, 500), None);
-        assert_eq!(to_usd(d("64939.07"), Quote::Usdt, Some(d("0.99903"))), Ok(d("64876.0791021")));
-        assert_eq!(to_usd(d("64939.07"), Quote::Usdt, None), Err(Invalid::NoUsdtRate));
+        assert_eq!(
+            to_usd(d("64939.07"), Quote::Usdt, Some(d("0.99903"))),
+            Ok(d("64876.0791021"))
+        );
+        assert_eq!(
+            to_usd(d("64939.07"), Quote::Usdt, None),
+            Err(Invalid::NoUsdtRate)
+        );
         assert_eq!(to_usd(d("64939.07"), Quote::Usd, None), Ok(d("64939.07")));
     }
 
@@ -251,17 +324,35 @@ mod tests {
     fn a_lying_majority_or_a_split_abstains() {
         // 2 honest at 100, 2 liars at 150: the reference median is a liar; survivors 2 of 4: no strict majority.
         let v = [d("100"), d("100"), d("150"), d("150")];
-        assert_eq!(aggregate(&v, 2, 200), Err(Abstain::NoMajority { survivors: 2, valid: 4 }));
+        assert_eq!(
+            aggregate(&v, 2, 200),
+            Err(Abstain::NoMajority {
+                survivors: 2,
+                valid: 4
+            })
+        );
         // Three venues, all different by 5%: each alone.
         let v = [d("100"), d("105"), d("110.25")];
-        assert_eq!(aggregate(&v, 3, 200), Err(Abstain::TooFewSurvivors { survivors: 1, valid: 3 }));
+        assert_eq!(
+            aggregate(&v, 3, 200),
+            Err(Abstain::TooFewSurvivors {
+                survivors: 1,
+                valid: 3
+            })
+        );
         assert_eq!(aggregate(&[], 1, 200), Err(Abstain::NoReadings));
     }
 
     #[test]
     fn rounding_to_scale_is_half_up() {
-        assert_eq!(observe(&[d("64870.25"), d("64870.25"), d("64870.25")], 3, 200, 1), Ok((648_703, 3)));
-        assert_eq!(observe(&[d("0.0000001"), d("0.0000001"), d("0.0000001")], 3, 200, 1), Err(Abstain::Scale));
+        assert_eq!(
+            observe(&[d("64870.25"), d("64870.25"), d("64870.25")], 3, 200, 1),
+            Ok((648_703, 3))
+        );
+        assert_eq!(
+            observe(&[d("0.0000001"), d("0.0000001"), d("0.0000001")], 3, 200, 1),
+            Err(Abstain::Scale)
+        );
     }
 
     #[test]

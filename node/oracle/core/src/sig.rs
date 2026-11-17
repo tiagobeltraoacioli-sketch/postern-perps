@@ -33,13 +33,16 @@ pub fn recover(digest: &[u8; 32], sig: &[u8; 65]) -> Result<[u8; 20], SigError> 
         return Err(SigError::HighS);
     }
     let rid = RecoveryId::from_byte(v - 27).ok_or(SigError::BadV)?;
-    let vk = VerifyingKey::recover_from_prehash(digest, &s, rid).map_err(|_| SigError::Unrecoverable)?;
+    let vk =
+        VerifyingKey::recover_from_prehash(digest, &s, rid).map_err(|_| SigError::Unrecoverable)?;
     Ok(address_of(&vk))
 }
 
 /// Signs a digest (RFC 6979 deterministic nonce), returning the low-s form with `v` in `{27, 28}`.
 pub fn sign(sk: &SigningKey, digest: &[u8; 32]) -> [u8; 65] {
-    let (s, rid) = sk.sign_prehash_recoverable(digest).expect("signing a 32-byte prehash cannot fail");
+    let (s, rid) = sk
+        .sign_prehash_recoverable(digest)
+        .expect("signing a 32-byte prehash cannot fail");
     let (s, rid) = match s.normalize_s() {
         Some(low) => (low, RecoveryId::new(!rid.is_y_odd(), rid.is_x_reduced())),
         None => (s, rid),
@@ -52,8 +55,8 @@ pub fn sign(sk: &SigningKey, digest: &[u8; 32]) -> [u8; 65] {
 
 /// The secp256k1 group order n, big-endian.
 pub const N: [u8; 32] = [
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xBA, 0xAE, 0xDC,
-    0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
+    0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
 ];
 
 /// `n - s` (big-endian 256-bit subtraction), used by tests to build the high-s twin of a signature.

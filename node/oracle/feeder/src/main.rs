@@ -72,12 +72,29 @@ pub fn load_round(dir: &Path) -> Result<(u64, Vec<Response>), String> {
         let g = |k: &str| v.get(k).ok_or(format!("{}: missing {k}", f.display()));
         let sent = g("sentMs")?.as_u64().ok_or("sentMs")?;
         t0 = t0.min(sent);
-        let failed = v.get("curlExit").and_then(Value::as_i64).is_some_and(|c| c != 0) || v.get("error").is_some_and(|e| !e.is_null());
+        let failed = v
+            .get("curlExit")
+            .and_then(Value::as_i64)
+            .is_some_and(|c| c != 0)
+            || v.get("error").is_some_and(|e| !e.is_null());
         out.push(Response {
             source: g("venue")?.as_str().ok_or("venue")?.to_string(),
-            body: if failed { None } else { Some(g("body")?.as_str().ok_or("body")?.to_string()) },
+            body: if failed {
+                None
+            } else {
+                Some(g("body")?.as_str().ok_or("body")?.to_string())
+            },
             received_ms: g("receivedMs")?.as_u64().ok_or("receivedMs")?,
-            error: if failed { Some(v.get("error").and_then(Value::as_str).unwrap_or("fetch failed").to_string()) } else { None },
+            error: if failed {
+                Some(
+                    v.get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("fetch failed")
+                        .to_string(),
+                )
+            } else {
+                None
+            },
         });
     }
     if out.is_empty() {
@@ -94,9 +111,19 @@ pub fn vault_arg(v: &str) -> Result<[u8; 20], String> {
     Ok(a)
 }
 
-fn sign_observation(signer: u8, key: &k256::ecdsa::SigningKey, vault: &[u8; 20], o: &perps_oracle::types::Observation) -> SignedObservation {
+fn sign_observation(
+    signer: u8,
+    key: &k256::ecdsa::SigningKey,
+    vault: &[u8; 20],
+    o: &perps_oracle::types::Observation,
+) -> SignedObservation {
     let sigb = sig::sign(key, &eip712::digest(&eip712::domain_separator(vault), o));
-    SignedObservation { signer, time_ms: o.time_ms, prices: o.prices.clone(), signature: sigb }
+    SignedObservation {
+        signer,
+        time_ms: o.time_ms,
+        prices: o.prices.clone(),
+        signature: sigb,
+    }
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
@@ -109,7 +136,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         "dev-key" => {
             let k = keyfile::write_dev_key(one(&m, "label")?, Path::new(one(&m, "out")?))?;
-            eprintln!("THROWAWAY development key (derived from a public label; never for real use)");
+            eprintln!(
+                "THROWAWAY development key (derived from a public label; never for real use)"
+            );
             println!("0x{}", hex::encode(sig::address_of(k.verifying_key())));
         }
         "observe" => {
@@ -119,8 +148,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let vault = vault_arg(one(&m, "vault")?)?;
             let mut f = Feeder::new(default_config()).map_err(|e| format!("{e:?}"))?;
             let (obs, rep) = f.observe(round_of(t0), t0, &resp);
-            let signed = obs.as_ref().map(|o| json::signed_to_json(&sign_observation(signer, &key, &vault, o), o.round));
-            println!("{}", serde_json::to_string_pretty(&json!({"observation": signed, "report": json::round_report_to_json(&rep)})).unwrap());
+            let signed = obs
+                .as_ref()
+                .map(|o| json::signed_to_json(&sign_observation(signer, &key, &vault, o), o.round));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"observation": signed, "report": json::round_report_to_json(&rep)})
+                )
+                .unwrap()
+            );
         }
         "replay" => {
             let root = PathBuf::from(one(&m, "rounds")?);
@@ -155,13 +192,23 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 obs.push(o);
             }
             obs.sort_by_key(|o| o.signer);
-            let u = OracleUpdate { round: round.ok_or("no observations")?, observations: obs };
-            println!("{}", serde_json::to_string(&json::update_to_json(&u)).unwrap());
+            let u = OracleUpdate {
+                round: round.ok_or("no observations")?,
+                observations: obs,
+            };
+            println!(
+                "{}",
+                serde_json::to_string(&json::update_to_json(&u)).unwrap()
+            );
         }
         "apply" | "exit" => {
             let exit_at = if cmd == "exit" {
-                let mk: u32 = one(&m, "market")?.parse().map_err(|_| "--market: a market id")?;
-                let at: u64 = one(&m, "at")?.parse().map_err(|_| "--at: block time in ms")?;
+                let mk: u32 = one(&m, "market")?
+                    .parse()
+                    .map_err(|_| "--market: a market id")?;
+                let at: u64 = one(&m, "at")?
+                    .parse()
+                    .map_err(|_| "--at: block time in ms")?;
                 Some((mk, at))
             } else {
                 None
@@ -169,18 +216,40 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let prm = json::committee_from_json(&read_json(Path::new(one(&m, "committee")?))?)?;
             let mut st = OracleState::genesis(&prm).map_err(|e| format!("{e:?}"))?;
             let text = fs::read_to_string(one(&m, "updates")?).map_err(|e| e.to_string())?;
-            for (i, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
-                let v: Value = serde_json::from_str(line).map_err(|e| format!("line {}: {e}", i + 1))?;
-                let t = v.get("blockTime").and_then(Value::as_u64).ok_or(format!("line {}: blockTime", i + 1))?;
+            for (i, line) in text
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| !l.trim().is_empty())
+            {
+                let v: Value =
+                    serde_json::from_str(line).map_err(|e| format!("line {}: {e}", i + 1))?;
+                let t = v
+                    .get("blockTime")
+                    .and_then(Value::as_u64)
+                    .ok_or(format!("line {}: blockTime", i + 1))?;
                 let stale = begin_block(&prm, &mut st, t);
-                let u = json::update_from_json(v.get("update").ok_or(format!("line {}: update", i + 1))?)?;
+                let u = json::update_from_json(
+                    v.get("update").ok_or(format!("line {}: update", i + 1))?,
+                )?;
                 let res = match apply_update(&prm, &mut st, &u, t) {
                     Ok(r) => json::report_to_json(&r),
                     Err(e) => json::error_to_json(&e),
                 };
-                println!("{}", serde_json::to_string(&json!({"blockTime": t, "haltedStale": stale, "result": res})).unwrap());
+                println!(
+                    "{}",
+                    serde_json::to_string(
+                        &json!({"blockTime": t, "haltedStale": stale, "result": res})
+                    )
+                    .unwrap()
+                );
             }
-            println!("{}", serde_json::to_string(&json!({"stateBytes": format!("0x{}", hex::encode(st.encode()))})).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &json!({"stateBytes": format!("0x{}", hex::encode(st.encode()))})
+                )
+                .unwrap()
+            );
             if let Some((mk, at)) = exit_at {
                 let x = perps_oracle::committee::exit_price(&prm, &st, mk, at);
                 println!("{}", serde_json::to_string(&json!({"exit": x.map(|x| json!({
@@ -192,7 +261,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "record" => perps_oracle_feeder::net::record(&m)?,
         #[cfg(feature = "net")]
         "run" => perps_oracle_feeder::net::run_live(&m)?,
-        _ => return Err(format!("unknown command {cmd:?}; see the header of feeder/src/main.rs")),
+        _ => {
+            return Err(format!(
+                "unknown command {cmd:?}; see the header of feeder/src/main.rs"
+            ))
+        }
     }
     Ok(())
 }

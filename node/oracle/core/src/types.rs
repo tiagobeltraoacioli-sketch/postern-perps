@@ -31,7 +31,11 @@ pub struct SignedObservation {
 impl SignedObservation {
     /// The message this entry claims to be signed: `OracleObservation{round, timeMs, prices}`.
     pub fn message(&self, round: u64) -> Observation {
-        Observation { round, time_ms: self.time_ms, prices: self.prices.clone() }
+        Observation {
+            round,
+            time_ms: self.time_ms,
+            prices: self.prices.clone(),
+        }
     }
 }
 

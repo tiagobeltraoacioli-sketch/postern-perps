@@ -61,7 +61,10 @@ fn check_sources(name: &str, s: &[Source], min: u8) -> Result<(), ConfigError> {
     }
     for (i, a) in s.iter().enumerate() {
         if s[..i].iter().any(|b| b.operator == a.operator) {
-            return Err(ConfigError::DuplicateOperator(format!("{name}: {}", a.operator)));
+            return Err(ConfigError::DuplicateOperator(format!(
+                "{name}: {}",
+                a.operator
+            )));
         }
     }
     if min == 0 || usize::from(min) > s.len() {
@@ -82,12 +85,21 @@ pub fn default_config() -> FeederConfig {
         sources: default_sources(base),
     };
     FeederConfig {
-        markets: vec![m(1, "BTC-USD", "BTC", 1), m(2, "ETH-USD", "ETH", 2), m(3, "SOL-USD", "SOL", 3)],
+        markets: vec![
+            m(1, "BTC-USD", "BTC", 1),
+            m(2, "ETH-USD", "ETH", 2),
+            m(3, "SOL-USD", "SOL", 3),
+        ],
         usdt_sources: default_sources("USDT"),
         usdt_min_sources: 3,
         usdt_max_source_deviation_bps: 200,
         max_depeg_bps: 500,
-        params: FeederParams { max_spread_bps: 100, max_snapshot_age_ms: 5000, max_trade_age_ms: 300_000, max_future_skew_ms: 2000 },
+        params: FeederParams {
+            max_spread_bps: 100,
+            max_snapshot_age_ms: 5000,
+            max_trade_age_ms: 300_000,
+            max_future_skew_ms: 2000,
+        },
         frozen_after_ms: 60_000,
         frozen_move_bps: 20,
     }
@@ -140,8 +152,12 @@ pub struct Feeder {
 fn abstain_text(a: Abstain) -> String {
     match a {
         Abstain::NoReadings => "no valid readings".into(),
-        Abstain::TooFewSurvivors { survivors, valid } => format!("too few sources: {survivors} agreeing of {valid} valid"),
-        Abstain::NoMajority { survivors, valid } => format!("no majority: {survivors} agreeing of {valid} valid"),
+        Abstain::TooFewSurvivors { survivors, valid } => {
+            format!("too few sources: {survivors} agreeing of {valid} valid")
+        }
+        Abstain::NoMajority { survivors, valid } => {
+            format!("no majority: {survivors} agreeing of {valid} valid")
+        }
         Abstain::Scale => "price does not fit the market scale".into(),
     }
 }
@@ -149,18 +165,38 @@ fn abstain_text(a: Abstain) -> String {
 impl Feeder {
     pub fn new(config: FeederConfig) -> Result<Self, ConfigError> {
         config.validate()?;
-        Ok(Feeder { config, frozen: BTreeMap::new(), last_obs: BTreeMap::new(), last_usdt: None })
+        Ok(Feeder {
+            config,
+            frozen: BTreeMap::new(),
+            last_obs: BTreeMap::new(),
+            last_usdt: None,
+        })
     }
 
     /// F2 and F3 for one source: the reading's USD price, or the reason it is not valid.
-    fn read(&mut self, s: &Source, resp: Option<&Response>, usdt_rate: Option<u128>, own: Option<u128>) -> SourceReport {
-        let mut rep = SourceReport { name: s.name.clone(), price18: None, time: None, used: false, reason: None };
+    fn read(
+        &mut self,
+        s: &Source,
+        resp: Option<&Response>,
+        usdt_rate: Option<u128>,
+        own: Option<u128>,
+    ) -> SourceReport {
+        let mut rep = SourceReport {
+            name: s.name.clone(),
+            price18: None,
+            time: None,
+            used: false,
+            reason: None,
+        };
         let Some(resp) = resp else {
             rep.reason = Some("no-response".into());
             return rep;
         };
         let Some(body) = resp.body.as_deref() else {
-            rep.reason = Some(format!("fetch-failed: {}", resp.error.as_deref().unwrap_or("unknown")));
+            rep.reason = Some(format!(
+                "fetch-failed: {}",
+                resp.error.as_deref().unwrap_or("unknown")
+            ));
             return rep;
         };
         let reading = match s.parse(body, resp.received_ms) {
@@ -173,7 +209,9 @@ impl Feeder {
         rep.time = reading.venue_time.map(|t| match t {
             VenueTime::Snapshot(t) | VenueTime::LastTrade(t) => t,
         });
-        let p = match feeder_rule::reading_price(&reading, &self.config.params).and_then(|p| feeder_rule::to_usd(p, s.quote, usdt_rate)) {
+        let p = match feeder_rule::reading_price(&reading, &self.config.params)
+            .and_then(|p| feeder_rule::to_usd(p, s.quote, usdt_rate))
+        {
             Ok(p) => p,
             Err(e) => {
                 rep.reason = Some(e.code().into());
@@ -184,7 +222,13 @@ impl Feeder {
         // The frozen check compares the venue's own quote (before conversion), so a moving USDT rate cannot hide
         // a stuck USDT-quoted venue.
         let raw = feeder_rule::reading_price(&reading, &self.config.params).expect("checked above");
-        if self.frozen.entry(s.name.clone()).or_default().check(raw, resp.received_ms, own, after, mv) {
+        if self.frozen.entry(s.name.clone()).or_default().check(
+            raw,
+            resp.received_ms,
+            own,
+            after,
+            mv,
+        ) {
             rep.reason = Some("frozen".into());
             return rep;
         }
@@ -193,7 +237,11 @@ impl Feeder {
     }
 
     /// F4 to F6 over valid reports; marks `used` and the outlier reason; returns the 1e-18 result.
-    fn aggregate(reps: &mut [SourceReport], min_sources: u8, dev_bps: u32) -> Result<(u128, u8), Abstain> {
+    fn aggregate(
+        reps: &mut [SourceReport],
+        min_sources: u8,
+        dev_bps: u32,
+    ) -> Result<(u128, u8), Abstain> {
         let prices: Vec<u128> = reps.iter().filter_map(|r| r.price18).collect();
         let res = feeder_rule::aggregate(&prices, min_sources, dev_bps);
         if !prices.is_empty() {
@@ -216,16 +264,34 @@ impl Feeder {
     /// The observation of `round` sampled at `time_ms` from `responses`. A market without a safe price is absent
     /// from the observation (the signer abstains for it). Returns `None` for the observation when no market has
     /// a price (nothing to sign).
-    pub fn observe(&mut self, round: u64, time_ms: u64, responses: &[Response]) -> (Option<Observation>, RoundReport) {
-        assert_eq!(round_of(time_ms), round, "the sampling time must be inside the round");
-        let by_name: BTreeMap<&str, &Response> = responses.iter().map(|r| (r.source.as_str(), r)).collect();
+    pub fn observe(
+        &mut self,
+        round: u64,
+        time_ms: u64,
+        responses: &[Response],
+    ) -> (Option<Observation>, RoundReport) {
+        assert_eq!(
+            round_of(time_ms),
+            round,
+            "the sampling time must be inside the round"
+        );
+        let by_name: BTreeMap<&str, &Response> =
+            responses.iter().map(|r| (r.source.as_str(), r)).collect();
 
         // USDT/USD rate of the round (F3).
         let usdt_sources = self.config.usdt_sources.clone();
         let own_usdt = self.last_usdt;
-        let mut usdt_reps: Vec<SourceReport> =
-            usdt_sources.iter().map(|s| self.read(s, by_name.get(s.name.as_str()).copied(), None, own_usdt)).collect();
-        let agg = Self::aggregate(&mut usdt_reps, self.config.usdt_min_sources, self.config.usdt_max_source_deviation_bps).ok().map(|(p, _)| p);
+        let mut usdt_reps: Vec<SourceReport> = usdt_sources
+            .iter()
+            .map(|s| self.read(s, by_name.get(s.name.as_str()).copied(), None, own_usdt))
+            .collect();
+        let agg = Self::aggregate(
+            &mut usdt_reps,
+            self.config.usdt_min_sources,
+            self.config.usdt_max_source_deviation_bps,
+        )
+        .ok()
+        .map(|(p, _)| p);
         if let Some(p) = agg {
             self.last_usdt = Some(p);
         }
@@ -240,22 +306,48 @@ impl Feeder {
                 .iter()
                 .map(|s| self.read(s, by_name.get(s.name.as_str()).copied(), rate, own))
                 .collect();
-            let result = match Self::aggregate(&mut reps, m.min_sources, m.max_source_deviation_bps) {
-                Ok((p18, sources)) => match perps_oracle::decimal::to_scale_half_up(p18, m.price_decimals) {
-                    Some(price) => {
-                        self.last_obs.insert(m.market_id, p18);
-                        let e = OraclePrice { market_id: m.market_id, price, sources };
-                        prices.push(e);
-                        Ok(e)
+            let result = match Self::aggregate(&mut reps, m.min_sources, m.max_source_deviation_bps)
+            {
+                Ok((p18, sources)) => {
+                    match perps_oracle::decimal::to_scale_half_up(p18, m.price_decimals) {
+                        Some(price) => {
+                            self.last_obs.insert(m.market_id, p18);
+                            let e = OraclePrice {
+                                market_id: m.market_id,
+                                price,
+                                sources,
+                            };
+                            prices.push(e);
+                            Ok(e)
+                        }
+                        None => Err(abstain_text(Abstain::Scale)),
                     }
-                    None => Err(abstain_text(Abstain::Scale)),
-                },
+                }
                 Err(a) => Err(abstain_text(a)),
             };
-            markets.push(MarketReport { market_id: m.market_id, symbol: m.symbol.clone(), result, sources: reps });
+            markets.push(MarketReport {
+                market_id: m.market_id,
+                symbol: m.symbol.clone(),
+                result,
+                sources: reps,
+            });
         }
-        let report = RoundReport { round, time_ms, usdt_rate18: rate, usdt_sources: usdt_reps, markets };
-        let obs = if prices.is_empty() { None } else { Some(Observation { round, time_ms, prices }) };
+        let report = RoundReport {
+            round,
+            time_ms,
+            usdt_rate18: rate,
+            usdt_sources: usdt_reps,
+            markets,
+        };
+        let obs = if prices.is_empty() {
+            None
+        } else {
+            Some(Observation {
+                round,
+                time_ms,
+                prices,
+            })
+        };
         (obs, report)
     }
 }

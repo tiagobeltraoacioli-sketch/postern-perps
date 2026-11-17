@@ -32,7 +32,9 @@ pub fn parse_d18(s: &str) -> Result<u128, DecimalError> {
     if int_part.is_empty() || (s.contains('.') && frac_part.is_empty()) {
         return Err(DecimalError::BadChar);
     }
-    if !int_part.bytes().all(|b| b.is_ascii_digit()) || !frac_part.bytes().all(|b| b.is_ascii_digit()) {
+    if !int_part.bytes().all(|b| b.is_ascii_digit())
+        || !frac_part.bytes().all(|b| b.is_ascii_digit())
+    {
         return Err(DecimalError::BadChar);
     }
     if frac_part.len() > 18 {
@@ -107,7 +109,10 @@ mod tests {
 
     #[test]
     fn parses_exactly() {
-        assert_eq!(parse_d18("64870.25").unwrap(), 64_870_250_000_000_000_000_000);
+        assert_eq!(
+            parse_d18("64870.25").unwrap(),
+            64_870_250_000_000_000_000_000
+        );
         assert_eq!(parse_d18("0.99904").unwrap(), 999_040_000_000_000_000);
         assert_eq!(parse_d18("72").unwrap(), 72 * D18);
         assert_eq!(parse_d18("000072.5").unwrap(), 72_500_000_000_000_000_000);
@@ -117,12 +122,24 @@ mod tests {
 
     #[test]
     fn refuses_everything_else() {
-        for s in ["", ".5", "5.", "-1", "+1", "1e5", "1E-5", " 1", "1 ", "1,5", "0x10", "1.2.3", "NaN", "inf"] {
+        for s in [
+            "", ".5", "5.", "-1", "+1", "1e5", "1E-5", " 1", "1 ", "1,5", "0x10", "1.2.3", "NaN",
+            "inf",
+        ] {
             assert!(parse_d18(s).is_err(), "{s:?} must be refused");
         }
-        assert_eq!(parse_d18("0.0000000000000000001"), Err(DecimalError::TooPrecise));
-        assert_eq!(parse_d18("1000000000000.000000000000000001"), Err(DecimalError::TooLarge));
-        assert_eq!(parse_d18("99999999999999999999"), Err(DecimalError::TooLarge));
+        assert_eq!(
+            parse_d18("0.0000000000000000001"),
+            Err(DecimalError::TooPrecise)
+        );
+        assert_eq!(
+            parse_d18("1000000000000.000000000000000001"),
+            Err(DecimalError::TooLarge)
+        );
+        assert_eq!(
+            parse_d18("99999999999999999999"),
+            Err(DecimalError::TooLarge)
+        );
     }
 
     #[test]
@@ -131,12 +148,22 @@ mod tests {
         let v = parse_d18("64870.25").unwrap();
         assert_eq!(to_scale_half_up(v, 1), Some(648_703));
         assert_eq!(to_scale_half_up(v, 0), Some(64_870));
-        assert_eq!(to_scale_half_up(parse_d18("64870.24999").unwrap(), 1), Some(648_702));
-        assert_eq!(to_scale_half_up(parse_d18("0.4").unwrap(), 0), None, "0 is never a price");
+        assert_eq!(
+            to_scale_half_up(parse_d18("64870.24999").unwrap(), 1),
+            Some(648_702)
+        );
+        assert_eq!(
+            to_scale_half_up(parse_d18("0.4").unwrap(), 0),
+            None,
+            "0 is never a price"
+        );
         assert_eq!(to_scale_half_up(parse_d18("0.5").unwrap(), 0), Some(1));
         assert_eq!(to_scale_half_up(v, 19), None);
         assert_eq!(to_scale_half_up(MAX_D18, 18), None, "does not fit u64");
-        assert_eq!(to_scale_half_up(MAX_D18, 6), Some(1_000_000_000_000_000_000));
+        assert_eq!(
+            to_scale_half_up(MAX_D18, 6),
+            Some(1_000_000_000_000_000_000)
+        );
     }
 
     #[test]
@@ -144,7 +171,10 @@ mod tests {
         let a = parse_d18("64939.07").unwrap();
         let rate = parse_d18("0.99903").unwrap();
         // 64939.07 * 0.99903 = 64876.0791021 exactly.
-        assert_eq!(mul_div_floor_d18(a, rate), Some(parse_d18("64876.0791021").unwrap()));
+        assert_eq!(
+            mul_div_floor_d18(a, rate),
+            Some(parse_d18("64876.0791021").unwrap())
+        );
         assert_eq!(mul_div_floor_d18(MAX_D18, 2 * D18), Some(2 * MAX_D18));
         assert_eq!(mul_div_floor_d18(MAX_D18 + 1, D18), None);
         assert_eq!(mul_div_floor_d18(D18, 2 * D18 + 1), None);

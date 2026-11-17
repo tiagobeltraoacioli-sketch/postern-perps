@@ -207,7 +207,9 @@ impl OracleState {
 
     /// The price the engine may use for `market_id`: `Some(index)` only while the market is active.
     pub fn safe_index(&self, market_id: u32) -> Option<u64> {
-        self.market(market_id).filter(|m| m.status == Status::Active).map(|m| m.index)
+        self.market(market_id)
+            .filter(|m| m.status == Status::Active)
+            .map(|m| m.index)
     }
 
     /// Canonical bytes of the oracle state, for the engine's state commitment:
@@ -246,10 +248,16 @@ impl OracleState {
 
 /// H1, at the start of every block before its inputs: an active market whose index is older than its staleness
 /// bound halts with `STALE`. Returns the markets halted by this call.
-pub fn begin_block(params: &CommitteeParams, state: &mut OracleState, block_time_ms: u64) -> Vec<u32> {
+pub fn begin_block(
+    params: &CommitteeParams,
+    state: &mut OracleState,
+    block_time_ms: u64,
+) -> Vec<u32> {
     let mut halted = Vec::new();
     for (m, p) in state.markets.iter_mut().zip(&params.markets) {
-        if m.status == Status::Active && block_time_ms.saturating_sub(m.index_time_ms) > p.max_staleness_ms {
+        if m.status == Status::Active
+            && block_time_ms.saturating_sub(m.index_time_ms) > p.max_staleness_ms
+        {
             m.status = Status::Halted(HaltReason::Stale);
             m.run = None;
             halted.push(m.market_id);
@@ -277,7 +285,10 @@ pub enum OracleError {
     /// C2c `ORACLE_TIME`, with the index of the observation in the input.
     Time { observation: usize },
     /// C2b `ORACLE_BAD_SIGNATURE`, with the index of the observation in the input.
-    BadSignature { observation: usize, reason: Option<SigError> },
+    BadSignature {
+        observation: usize,
+        reason: Option<SigError>,
+    },
 }
 
 impl OracleError {
@@ -315,7 +326,12 @@ pub struct UpdateReport {
     pub outcomes: Vec<(u32, MarketOutcome)>,
 }
 
-fn validate(params: &CommitteeParams, last_round: u64, u: &OracleUpdate, t: u64) -> Result<(), OracleError> {
+fn validate(
+    params: &CommitteeParams,
+    last_round: u64,
+    u: &OracleUpdate,
+    t: u64,
+) -> Result<(), OracleError> {
     // C1
     if u.round <= last_round {
         return Err(OracleError::RoundNotNew);
@@ -342,27 +358,51 @@ fn validate(params: &CommitteeParams, last_round: u64, u: &OracleUpdate, t: u64)
             }
         }
     }
-    let start = u.round.checked_mul(ROUND_MS).ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
-    let end = start.checked_add(ROUND_MS).ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
+    let start = u
+        .round
+        .checked_mul(ROUND_MS)
+        .ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
+    let end = start
+        .checked_add(ROUND_MS)
+        .ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
     let domain = eip712::domain_separator(&params.verifying_contract);
     for (i, o) in u.observations.iter().enumerate() {
         // C2c
-        if o.time_ms < start || o.time_ms >= end || o.time_ms > t.saturating_add(params.max_future_ms) || t.saturating_sub(o.time_ms) > params.max_age_ms {
+        if o.time_ms < start
+            || o.time_ms >= end
+            || o.time_ms > t.saturating_add(params.max_future_ms)
+            || t.saturating_sub(o.time_ms) > params.max_age_ms
+        {
             return Err(OracleError::Time { observation: i });
         }
         // C2b
         let digest = eip712::digest(&domain, &o.message(u.round));
         match sig::recover(&digest, &o.signature) {
             Ok(a) if a == params.signers[usize::from(o.signer)] => {}
-            Ok(_) => return Err(OracleError::BadSignature { observation: i, reason: None }),
-            Err(e) => return Err(OracleError::BadSignature { observation: i, reason: Some(e) }),
+            Ok(_) => {
+                return Err(OracleError::BadSignature {
+                    observation: i,
+                    reason: None,
+                })
+            }
+            Err(e) => {
+                return Err(OracleError::BadSignature {
+                    observation: i,
+                    reason: Some(e),
+                })
+            }
         }
     }
     Ok(())
 }
 
 /// Applies one `oracle` block input at block time `t` (C1 to C5, then H2/H3 per market). On error nothing changes.
-pub fn apply_update(params: &CommitteeParams, state: &mut OracleState, u: &OracleUpdate, t: u64) -> Result<UpdateReport, OracleError> {
+pub fn apply_update(
+    params: &CommitteeParams,
+    state: &mut OracleState,
+    u: &OracleUpdate,
+    t: u64,
+) -> Result<UpdateReport, OracleError> {
     validate(params, state.last_round, u, t)?;
     state.last_round = u.round;
     let tau = u.round * ROUND_MS; // no overflow: checked in validate
@@ -378,25 +418,48 @@ pub fn apply_update(params: &CommitteeParams, state: &mut OracleState, u: &Oracl
             .map(|e| e.price)
             .collect();
         if v.len() < q {
-            outcomes.push((p.market_id, MarketOutcome::NoQuorum { have: v.len() as u8 }));
+            outcomes.push((
+                p.market_id,
+                MarketOutcome::NoQuorum {
+                    have: v.len() as u8,
+                },
+            ));
             continue;
         }
         v.sort_unstable();
         let med = v[v.len() / 2];
         // C4
-        let agree = v.iter().filter(|&&x| within_bps(u128::from(x), u128::from(med), p.agree_bps, u128::from(med))).count();
+        let agree = v
+            .iter()
+            .filter(|&&x| within_bps(u128::from(x), u128::from(med), p.agree_bps, u128::from(med)))
+            .count();
         if agree < q {
-            outcomes.push((p.market_id, MarketOutcome::Disagree { median: med, agree: agree as u8 }));
+            outcomes.push((
+                p.market_id,
+                MarketOutcome::Disagree {
+                    median: med,
+                    agree: agree as u8,
+                },
+            ));
             continue;
         }
         // C5: the halt machine consumes (med, tau).
         outcomes.push((p.market_id, step(p, m, med, tau)));
     }
-    Ok(UpdateReport { round: u.round, outcomes })
+    Ok(UpdateReport {
+        round: u.round,
+        outcomes,
+    })
 }
 
 fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketOutcome {
-    let near_index = m.index > 0 && within_bps(u128::from(price), u128::from(m.index), p.jump_bps, u128::from(m.index));
+    let near_index = m.index > 0
+        && within_bps(
+            u128::from(price),
+            u128::from(m.index),
+            p.jump_bps,
+            u128::from(m.index),
+        );
     match m.status {
         // H2
         Status::Active => {
@@ -406,7 +469,11 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
                 MarketOutcome::Moved { price }
             } else {
                 m.status = Status::Halted(HaltReason::Jump);
-                m.run = Some(Run { last: price, count: 1, last_time_ms: tau });
+                m.run = Some(Run {
+                    last: price,
+                    count: 1,
+                    last_time_ms: tau,
+                });
                 m.halt_low = price;
                 m.halt_high = price;
                 MarketOutcome::HaltedJump { price }
@@ -421,19 +488,39 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
                 m.run = None;
                 m.halt_low = 0;
                 m.halt_high = 0;
-                return MarketOutcome::Resumed { price, confirmed: false };
+                return MarketOutcome::Resumed {
+                    price,
+                    confirmed: false,
+                };
             }
             // X2: every committee price while halted widens the exit band (never narrows it).
-            m.halt_low = if m.halt_low == 0 { price } else { m.halt_low.min(price) };
+            m.halt_low = if m.halt_low == 0 {
+                price
+            } else {
+                m.halt_low.min(price)
+            };
             m.halt_high = m.halt_high.max(price);
             let run = match m.run {
                 Some(r)
                     if tau.saturating_sub(r.last_time_ms) <= p.max_staleness_ms
-                        && within_bps(u128::from(price), u128::from(r.last), p.agree_bps, u128::from(r.last)) =>
+                        && within_bps(
+                            u128::from(price),
+                            u128::from(r.last),
+                            p.agree_bps,
+                            u128::from(r.last),
+                        ) =>
                 {
-                    Run { last: price, count: r.count.saturating_add(1), last_time_ms: tau }
+                    Run {
+                        last: price,
+                        count: r.count.saturating_add(1),
+                        last_time_ms: tau,
+                    }
                 }
-                _ => Run { last: price, count: 1, last_time_ms: tau },
+                _ => Run {
+                    last: price,
+                    count: 1,
+                    last_time_ms: tau,
+                },
             };
             if run.count >= p.confirm_rounds {
                 m.index = price;
@@ -442,10 +529,16 @@ fn step(p: &MarketParams, m: &mut MarketOracle, price: u64, tau: u64) -> MarketO
                 m.run = None;
                 m.halt_low = 0;
                 m.halt_high = 0;
-                MarketOutcome::Resumed { price, confirmed: true }
+                MarketOutcome::Resumed {
+                    price,
+                    confirmed: true,
+                }
             } else {
                 m.run = Some(run);
-                MarketOutcome::Confirming { price, count: run.count }
+                MarketOutcome::Confirming {
+                    price,
+                    count: run.count,
+                }
             }
         }
     }
@@ -471,28 +564,51 @@ pub struct ExitPrice {
     /// The last good index and its age at the block time.
     pub reference: u64,
     pub age_ms: u64,
+    /// X2: the settlement price of a close while halted: the latest committee price since the halt, else the
+    /// last good index; the index itself while active.
+    pub settle: u64,
     /// X3: no good index for `max_halt_ms`: the market is due for settlement of every position at the band.
     pub settle_due: bool,
 }
 
 /// X1 to X3 for `market_id` at block time `t`. `None` only before the first index (genesis `INIT`: no trade can
 /// have happened, so no position exists) or for an unknown market.
-pub fn exit_price(params: &CommitteeParams, state: &OracleState, market_id: u32, t: u64) -> Option<ExitPrice> {
-    let i = params.markets.iter().position(|m| m.market_id == market_id)?;
+pub fn exit_price(
+    params: &CommitteeParams,
+    state: &OracleState,
+    market_id: u32,
+    t: u64,
+) -> Option<ExitPrice> {
+    let i = params
+        .markets
+        .iter()
+        .position(|m| m.market_id == market_id)?;
     let (p, m) = (&params.markets[i], &state.markets[i]);
     if m.index == 0 {
         return None;
     }
     let age_ms = t.saturating_sub(m.index_time_ms);
     if m.status == Status::Active {
-        return Some(ExitPrice { source: ExitSource::Index, low: m.index, high: m.index, reference: m.index, age_ms, settle: m.index, settle_due: false });
+        return Some(ExitPrice {
+            source: ExitSource::Index,
+            low: m.index,
+            high: m.index,
+            reference: m.index,
+            age_ms,
+            settle: m.index,
+            settle_due: false,
+        });
     }
     // X1: half-width h = min(max, base + perMin * whole minutes since the last good index), in bps.
     let minutes = age_ms / 60_000;
     let h = u64::from(p.exit_haircut_bps)
         .saturating_add(u64::from(p.exit_haircut_per_min_bps).saturating_mul(minutes))
         .min(u64::from(p.exit_max_haircut_bps));
-    let (lo_ref, hi_ref) = if m.halt_low == 0 { (m.index, m.index) } else { (m.index.min(m.halt_low), m.index.max(m.halt_high)) };
+    let (lo_ref, hi_ref) = if m.halt_low == 0 {
+        (m.index, m.index)
+    } else {
+        (m.index.min(m.halt_low), m.index.max(m.halt_high))
+    };
     // Outward rounding: low down, high up. u128: 2^64 * 2 * 10^4 < 2^128.
     let low = u128::from(lo_ref) * u128::from(10_000 - h) / 10_000;
     let high = (u128::from(hi_ref) * u128::from(10_000 + h)).div_ceil(10_000);

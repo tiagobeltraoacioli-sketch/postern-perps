@@ -4,6 +4,8 @@
 # Usage: bash check-with-cast.sh [path-to-cast]. Prints one PASS/FAIL line per vector; exit 1 on any FAIL.
 set -u
 CAST=${1:-cast}
+# macOS strips DYLD_* from the environment of /bin/bash; pass the Foundry libusb path as CAST_DYLD_LIBRARY_PATH.
+[ -n "${CAST_DYLD_LIBRARY_PATH:-}" ] && export DYLD_LIBRARY_PATH="$CAST_DYLD_LIBRARY_PATH"
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
