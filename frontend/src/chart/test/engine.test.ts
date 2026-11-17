@@ -152,7 +152,7 @@ describe('it draws the data given and nothing else', () => {
     const { engine, run, base } = setup();
     const cs = walk(100, T0, M15);
     const last = cs[99].c;
-    const levels: ChartLevel[] = Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, kind: 'order', side: 'buy', price: last - 20 - i * 0.5, priceText: `P${i}`, label: `Buy ${i}` }));
+    const levels: ChartLevel[] = Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, kind: 'order', side: 'buy', price: last - 20 - i * 0.5, priceText: `P${i}`, label: `Buy 0.${'5'.repeat(i + 1)}` }));
     engine.setData(data(cs, { levels }));
     run();
     const s = engine.getScene()!;
@@ -160,6 +160,17 @@ describe('it draws the data given and nothing else', () => {
     expect(displaced.length).toBeGreaterThan(0);
     const ends = base.ops('lineTo').map((c) => c.args[1] as number);
     for (const t of displaced) expect(ends.some((y) => Math.abs(y - t.priceY) < 1e-6)).toBe(true);
+    // The leaders turn at one common column (they cannot cross): every segment ending on a displaced level's line
+    // in the left half starts at the same x.
+    const starts = new Set<number>();
+    base.calls.forEach((c, i) => {
+      if (c.op !== 'lineTo') return;
+      const [x, y] = c.args as [number, number];
+      if (x > s.plotW / 2 || !displaced.some((t) => Math.abs(t.priceY - y) < 1e-6)) return;
+      const m = base.calls[i - 1];
+      if (m.op === 'moveTo') starts.add(Math.round((m.args[0] as number) * 1000));
+    });
+    expect(starts.size).toBe(1);
   });
   it('a level with a non-finite price is not drawn', () => {
     const { engine, run } = setup();

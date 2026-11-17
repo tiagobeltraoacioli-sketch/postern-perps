@@ -239,6 +239,12 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   ctx.font = font(s, 500);
   ctx.textBaseline = 'middle';
   const tagById = new Map(s.tags.map((t) => [t.id, t]));
+  let elbowX = 0;
+  for (const level of s.levels) {
+    const tag = tagById.get(level.id);
+    if (tag && Number.isFinite(level.price)) elbowX = Math.max(elbowX, 8 + levelLabelWidth(ctx, s, level, tag) + 10);
+  }
+  elbowX = Math.min(elbowX, s.plotW - 12);
   for (const level of s.levels) {
     if (!range || !Number.isFinite(level.price)) continue;
     const st = levelStyle(level, p);
@@ -251,7 +257,7 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
       line(ctx, 0, st.width === 1 ? crisp(y, dpr) : y, plotW, st.width === 1 ? crisp(y, dpr) : y);
       ctx.setLineDash([]);
     }
-    if (tag) drawLevelLabel(ctx, s, level, st.color, tag);
+    if (tag) drawLevelLabel(ctx, s, level, st.color, tag, elbowX);
     drawn.levels++;
   }
 
@@ -391,7 +397,17 @@ function drawAxisTag(ctx: Ctx, s: Scene, tag: PlacedTag, text: string) {
   fillTabular(ctx, text, tx, tag.y + 0.5, 'left');
 }
 
-function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, tag: PlacedTag) {
+/** Width of a level's left label box (shared by the drawing and the common leader column). */
+function levelLabelWidth(ctx: Ctx, s: Scene, level: ChartLevel, tag: PlacedTag): number {
+  const main = tag.pinned === 'above' ? `\u2191 ${level.label}` : tag.pinned === 'below' ? `\u2193 ${level.label}` : level.label;
+  ctx.font = font(s, 600);
+  const wMain = tabularWidth(ctx, main);
+  ctx.font = font(s, 500);
+  const wDetail = level.detail ? tabularWidth(ctx, level.detail) + 8 : 0;
+  return Math.min(s.plotW - 16, wMain + wDetail + 14);
+}
+
+function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, tag: PlacedTag, elbowX: number) {
   const p = s.palette;
   ctx.font = font(s, 600);
   // A pinned level says on its label too that its price is beyond the edge.
@@ -410,8 +426,9 @@ function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, ta
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
-    line(ctx, x + w, tag.y, x + w + 10, tag.y);
-    line(ctx, x + w + 10, tag.y, x + w + 18, tag.priceY);
+    // All leaders turn at one column, in price order, so they never cross.
+    line(ctx, x + w, tag.y, elbowX, tag.y);
+    line(ctx, elbowX, tag.y, elbowX + 8, tag.priceY);
   }
   ctx.fillStyle = withAlpha(p.bg, 0.92);
   roundRect(ctx, x, y, w, h, 3);
