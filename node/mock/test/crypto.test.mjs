@@ -84,3 +84,13 @@ test('EIP-712 encoding refuses non-canonical and out-of-range values', () => {
   assert.throws(() => typedDataHash(FX.domain, 'CancelOrder', t, missing), /missing field/);
   assert.throws(() => typedDataHash({ ...FX.domain, bogus: 1 }, 'CancelOrder', t, base), /unknown domain field/);
 });
+
+test('arrays of structs: 394 OracleObservation digest matches viem; EIP-712 specification Mail example', () => {
+  const o = V.oracle;
+  assert.equal(hex(typedDataHash(o.domain, 'OracleObservation', o.types.OracleObservation, o.message, o.types)), o.digest);
+  // The example of the EIP-712 specification (nested struct), digest from the specification's reference code.
+  const types = { Person: [{ name: 'name', type: 'string' }, { name: 'wallet', type: 'address' }], Mail: [{ name: 'from', type: 'Person' }, { name: 'to', type: 'Person' }, { name: 'contents', type: 'string' }] };
+  const domain = { name: 'Ether Mail', version: '1', chainId: 1, verifyingContract: '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC' };
+  const msg = { from: { name: 'Cow', wallet: '0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826' }, to: { name: 'Bob', wallet: '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB' }, contents: 'Hello, Bob!' };
+  assert.equal(hex(typedDataHash(domain, 'Mail', types.Mail, msg, types)), '0xbe609aee343fb3c4b28e1df9e632fca64fcfaede20f02e86244efddf30957bd2');
+});

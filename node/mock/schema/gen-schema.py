@@ -51,7 +51,7 @@ D["Committee"]=obj({"threshold":R("Int"),"validators":arr(R("Address"),minItems=
 D["BlockInput"]={"oneOf":[
  obj({"kind":{"const":"action"},"account":R("Address"),"signer":R("Address"),"type":{"type":"string"},"message":{"type":"object"},"signature":R("Sig")},opt=("signer",)),
  obj({"kind":{"enum":["oracle","deposit","forced"]},"payload":{"type":"object"}})]}
-D["Block"]=obj({"height":R("Int"),"time":R("Ms"),"prevLogHash":R("Hash"),"logHash":R("Hash"),"stateRoot":R("Hash"),"inputs":arr(R("BlockInput"),minItems=1),"inputsEncoded":R("Hex"),"sequencerSignature":R("Sig")})
+D["Block"]=obj({"height":R("Int"),"time":R("Ms"),"prevLogHash":R("Hash"),"logHash":R("Hash"),"stateRoot":R("Hash"),"inputs":arr(R("BlockInput")),"inputsEncoded":R("Hex"),"sequencerSignature":R("Sig")})
 D["FeeTier"]=obj({"tier":R("Int"),"makerFeeBps":R("Dec"),"takerFeeBps":R("UDec"),"volume30d":R("UDec")})
 D["Position"]=obj({"symbol":R("Symbol"),"size":R("Dec"),"entryPrice":R("UDec"),"markPrice":R("UDec"),"notional":R("UDec"),"unrealizedPnl":R("Dec"),"realizedPnl":R("Dec"),
  "liquidationPrice":nul(R("UDec")),"marginMode":enum("cross","isolated"),"leverage":R("UDec"),"isolatedMargin":nul(R("UDec")),"initialMargin":R("UDec"),"maintenanceMargin":R("UDec"),"fundingSinceOpen":R("Dec")})
