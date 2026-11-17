@@ -169,6 +169,38 @@ async fn watcher_needs_two_agreeing_endpoints_pinned_to_one_hash() {
     }
     assert!(poll_once(&cfg, &v).await.unwrap_err().contains("chain"));
     assert_eq!(v.lock().unwrap().deposits[&2].head, h3);
+    // R395-30: a VAULT 0.2 ForcedRequest(uint64,address,uint8,uint64,uint64,bytes32) log is decoded and its head
+    // chain checked (i, account, kind, deadline, arg); a wrong head is refused
+    for f in [&fa, &fb] {
+        f.lock().unwrap().logs.pop();
+    }
+    let fh0 = perps_node::vaultfmt::forced_head0(700770, &vault);
+    let forced_log = |head: &H256| {
+        let mut data = word_u128(2).to_vec();
+        data.extend_from_slice(&word_u128(1_800_000_000));
+        data.extend_from_slice(&word_u128(5_000_000));
+        data.extend_from_slice(head);
+        serde_json::json!({"address": to_hex(&vault), "blockNumber": q(19), "blockHash": to_hex(&hashes[&19]), "transactionHash": to_hex(&keccak(b"ftx")),
+            "logIndex": q(0), "removed": false,
+            "topics": [to_hex(&keccak(b"ForcedRequest(uint64,address,uint8,uint64,uint64,bytes32)")), to_hex(&word_u128(0)), to_hex(&word_address(&acct))],
+            "data": to_hex(&data)})
+    };
+    let good_head = perps_node::vaultfmt::forced_head_next(&fh0, 0, &acct, 2, 1_800_000_000, 5_000_000);
+    for f in [&fa, &fb] {
+        f.lock().unwrap().logs.push(forced_log(&keccak(b"wrong")));
+    }
+    assert!(poll_once(&cfg, &v).await.unwrap_err().contains("chain"));
+    for f in [&fa, &fb] {
+        let mut x = f.lock().unwrap();
+        x.logs.pop();
+        x.logs.push(forced_log(&good_head));
+    }
+    assert!(poll_once(&cfg, &v).await.unwrap(), "{:?}", v.lock().unwrap().last_error);
+    {
+        let s = v.lock().unwrap();
+        let fe = &s.forced[&0];
+        assert_eq!((fe.kind, fe.deadline, fe.arg, fe.head), (perps_node::types::ForcedKind::Withdraw, 1_800_000_000, 5_000_000, good_head));
+    }
     // wrong chain id on one endpoint: refused
     fb.lock().unwrap().chain_id = 1;
     assert!(poll_once(&cfg, &v).await.unwrap_err().contains("chain"));

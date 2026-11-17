@@ -416,3 +416,85 @@ fn real_engine_deposit_order_withdraw_certificate_and_recovery() {
     assert_eq!((s.engine.state_root(), s.log.last_height, s.recovered.replayed_blocks), (root, h, h));
     // a stub engine cannot open the real engine's log (different logHash(0))
 }
+
+/// R395-29 (395, Medium): a block timed far behind the validators' clocks must not be certified. Without the
+/// lower bound (node c9bb54b..b170e74) every validator returned `Applied { checkpoint: Some(_) }` here (395's
+/// demonstration `r395_29_lagging_block_time_is_signed` passed on c9bb54b).
+#[test]
+fn r395_29_block_timed_behind_the_validators_clock_is_not_signed() {
+    let mut n = net("r395-29", 1);
+    let ua = key_address(&user(50));
+    n.deposit_everywhere(deposit(0, ua, 1_000_000));
+    // the sequencer runs engine time 60 s late
+    let info = n.seq.produce(now() - 60_000).unwrap().unwrap();
+    let b = info.block.as_ref().clone();
+    for v in n.vals.iter_mut() {
+        match v.process(&b, now()) {
+            VResult::AppliedNotSigned(r) => assert!(r.contains("R395-29"), "{r}"),
+            r => panic!("a late block was certified: {r:?}"),
+        }
+    }
+    assert_eq!(n.seq.latest_final(), None);
+    // the next timely block's checkpoint covers only timely blocks again: signed
+    n.deposit_everywhere(deposit(1, ua, 1_000_000));
+    let rs = n.step();
+    assert!(rs.iter().all(|r| matches!(r, VResult::Applied { checkpoint: Some(_) })), "{rs:?}");
+    // a late block inside an interval taints that interval's checkpoint even if the checkpoint block is timely
+    let mut m = net("r395-29b", 3);
+    m.deposit_everywhere(deposit(0, ua, 1));
+    let late = m.seq.produce(now() - 10_000).unwrap().unwrap().block.as_ref().clone();
+    for v in m.vals.iter_mut() {
+        assert!(matches!(v.process(&late, now()), VResult::Applied { checkpoint: None }));
+    }
+    m.deposit_everywhere(deposit(1, ua, 1));
+    assert!(m.step().iter().all(|r| matches!(r, VResult::Applied { checkpoint: None })));
+    m.deposit_everywhere(deposit(2, ua, 1));
+    assert!(m.step().iter().all(|r| matches!(r, VResult::AppliedNotSigned(s) if s.contains("block 1"))));
+}
+
+/// R395-30: the pre-SPEC user-action domain (chain 7007701, no verifyingContract) is refused at genesis.
+#[test]
+fn r395_30_old_7007701_domain_refused() {
+    let mut td: serde_json::Value = serde_json::from_slice(&perps_node::dev::fixture("eip712.json")).unwrap();
+    td["domain"]["chainId"] = 7007701.into();
+    let r = perps_node::genesis::Genesis::new(
+        td.to_string().as_bytes(),
+        &perps_node::dev::fixture("markets.json"),
+        vec![[1u8; 20]],
+        1,
+        vec![[1u8; 20]],
+        1,
+        [2u8; 20],
+        [3u8; 20],
+        [4u8; 20],
+        0,
+        1,
+    );
+    assert!(r.unwrap_err().contains("700770"));
+}
+
+/// R395-30: forced deadlines are L2 SECONDS (VAULT 0.2) and are compared with L2 time in seconds, never with the
+/// engine's millisecond block time (with ms vs s every pending request looked "past its deadline" at once).
+#[test]
+fn r395_30_forced_deadline_is_judged_in_l2_seconds() {
+    let mut n = net("r395-30", 1);
+    let ua = key_address(&user(51));
+    n.deposit_everywhere(deposit(0, ua, 10_000_000));
+    assert!(all_applied(&n.step()));
+    let now_s = now() / 1000;
+    let f = ForcedEvent { index: 0, account: ua, kind: ForcedKind::CancelAll, deadline: now_s + 3600, arg: 0, head: keccak(b"fh"), l2_block: 9, l2_block_hash: keccak(b"b9"), l2_tx_hash: keccak(b"t9"), log_index: 0 };
+    for v in &n.val_views {
+        let mut x = v.lock().unwrap();
+        x.forced.insert(0, f.clone());
+        x.l2_time_s = now_s;
+    }
+    // pending, deadline an hour ahead in L2 seconds: validators keep signing (block time in ms is ~1000x larger)
+    n.deposit_everywhere(deposit(1, ua, 1));
+    assert!(n.step().iter().all(|r| matches!(r, VResult::Applied { checkpoint: Some(_) })));
+    // L2 time reaches the deadline minus the 120 s margin: not signing until the sequencer includes it
+    for v in &n.val_views {
+        v.lock().unwrap().l2_time_s = now_s + 3600 - 120;
+    }
+    n.deposit_everywhere(deposit(2, ua, 1));
+    assert!(n.step().iter().all(|r| matches!(r, VResult::AppliedNotSigned(s) if s.contains("deadline"))));
+}

@@ -4,7 +4,9 @@
 //! Per block, in order (any refusal is reported with the reason; the ones marked LATCH stop all further signing
 //! until an operator investigates, because they prove the sequencer published something invalid):
 //! 1. chain link: height, prevLogHash, strictly increasing time, logHash recomputed, sequencer signature (LATCH);
-//! 2. block time not more than `max_future_ms` ahead of the validator's clock (wait, not latch: clocks drift);
+//! 2. block time not more than `max_future_ms` ahead of the validator's clock (wait, not latch: clocks drift),
+//!    and not more than `MAX_LAG_MS` behind it when first seen (else the checkpoint covering it is not signed:
+//!    R395-29, a sequencer running engine time late would trade with oracle foresight);
 //! 3. inputs decode canonically (LATCH);
 //! 4. every deposit and forced input equals the event at that index in the validator's own finalized L2 view
 //!    (two endpoints, one block hash). Not seen yet: WAIT. Seen with different content: LATCH (the sequencer
@@ -92,6 +94,11 @@ pub fn checkpoint_body(g: &Genesis, e: &dyn Engine, b: &Block, view: &L2View) ->
     Ok(body)
 }
 
+/// R395-29: a block first seen by this validator more than this after its own `time` taints the checkpoint that
+/// covers it (the sequencer ran engine time behind real time). Honest lag is milliseconds (block time = the
+/// sequencer's clock at production); residual foresight bound = MAX_LAG_MS + the oracle's maxFutureMs.
+pub const MAX_LAG_MS: u64 = 2_000;
+
 /// Margin between "now on the L2" and the time a signed checkpoint reaches the vault (seconds).
 pub const FORCED_SUBMIT_MARGIN_S: u64 = 120;
 
@@ -109,6 +116,8 @@ pub struct Validator {
     signed: BTreeMap<u64, H256>,
     signed_file: Option<PathBuf>,
     pub signed_count: u64,
+    /// first height since the last checkpoint height whose block was first seen more than MAX_LAG_MS after its time
+    pub late_since_checkpoint: Option<u64>,
 }
 
 impl Validator {
@@ -146,6 +155,7 @@ impl Validator {
             signed,
             signed_file,
             signed_count: 0,
+            late_since_checkpoint: None,
         })
     }
 
@@ -170,6 +180,8 @@ impl Validator {
         if b.header.time > now_ms.saturating_add(self.max_future_ms) {
             return VResult::Wait("block time too far ahead of this validator's clock".into());
         }
+        // R395-29: lower bound, judged at the first time this validator sees the block (now)
+        let late = now_ms.saturating_sub(b.header.time) > MAX_LAG_MS;
         let inputs = match decode_inputs(&self.g.types, &b.inputs_encoded) {
             Ok(i) => i,
             Err(e) => return self.latch(format!("block {}: inputs do not decode: {e}", b.header.height)),
@@ -216,8 +228,16 @@ impl Validator {
         self.height = b.header.height;
         self.log_hash = b.header.log_hash;
         self.time = b.header.time;
+        if late && self.late_since_checkpoint.is_none() {
+            self.late_since_checkpoint = Some(b.header.height);
+        }
         if !is_checkpoint_height(&self.g, b.header.height, &inputs, !out.withdrawals.is_empty()) {
             return VResult::Applied { checkpoint: None };
+        }
+        if let Some(h) = self.late_since_checkpoint.take() {
+            return VResult::AppliedNotSigned(format!(
+                "block {h} (covered by this checkpoint) was first seen more than {MAX_LAG_MS} ms after its time: not signing (R395-29; also after a restart or pause of this validator)"
+            ));
         }
         // forced-inclusion rule = the vault's acceptance rule 4, in L2 block SECONDS: the newest L2 block time
         // this validator's endpoints report, plus a submission margin
