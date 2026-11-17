@@ -1,0 +1,20 @@
+[package]
+name = "postern-geoblock"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+description = "PosternDEX Perpetuals geoblocking and sanctions decision, Rust port of compliance/geoblock/src (UNAUDITED PROTOTYPE, not legal advice)"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+name = "postern_geoblock"
+path = "src/lib.rs"
+
+[dependencies]
+# Versions already cached on the build host and used by the node (389): Cargo.lock committed.
+serde_json = "=1.0.149"
+sha2 = "=0.10.9"
+hmac = "=0.12.1"
+sha3 = "=0.10.9"
+k256 = { version = "=0.13.4", default-features = false, features = ["ecdsa", "std"] }
