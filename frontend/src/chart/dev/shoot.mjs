@@ -111,6 +111,10 @@ async function page(w, h, dpr, mobile, reduced) {
         results.failures.push(`${name}: ${e.message}`);
       }
     },
+    // Pointer and wheel input dispatched in the page (CDP Input.dispatchMouseEvent wheel stalled under load).
+    async js(kind, x, y, extra = {}) {
+      await s('Runtime.evaluate', { expression: `(() => { const el = document.querySelector('.pc-overlay'); const r = el.getBoundingClientRect(); const o = { bubbles: true, cancelable: true, clientX: r.left + ${x}, clientY: r.top + ${y}, pointerId: 1, pointerType: 'mouse', button: 0, buttons: ${extra.buttons ?? 0}, deltaX: ${extra.deltaX ?? 0}, deltaY: ${extra.deltaY ?? 0} }; el.dispatchEvent('${kind}' === 'wheel' ? new WheelEvent('wheel', o) : new PointerEvent('${kind}', o)); })()` });
+    },
     async mouse(type, x, y, extra = {}) {
       await s('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons: extra.buttons ?? (type === 'mouseMoved' ? 0 : 1), clickCount: 1, ...extra });
     },
@@ -139,12 +143,12 @@ try {
       // Zoomed in, then panned away from the newest candle (shows the Latest button).
       await desk.go(`theme=${theme}&scenario=levels`);
       for (let i = 0; i < 8; i++) {
-        await desk.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 1000, y: 300, deltaX: 0, deltaY: -120 });
+        await desk.js('wheel', 1000, 300, { deltaY: -120 });
         await delay(30);
       }
-      await desk.mouse('mousePressed', 700, 300);
-      await desk.mouse('mouseMoved', 1100, 320, { buttons: 1 });
-      await desk.mouse('mouseReleased', 1100, 320);
+      await desk.js('pointerdown', 700, 300, { buttons: 1 });
+      await desk.js('pointermove', 1100, 320, { buttons: 1 });
+      await desk.js('pointerup', 1100, 320);
       await delay(150);
       await desk.shot(`desktop-${theme}-zoomed-panned`);
       results.screens.push(`desktop-${theme}-zoomed-panned`);
@@ -164,11 +168,11 @@ try {
       const p = await page(1440, 820, 2, false, false);
       await p.s('Emulation.setCPUThrottlingRate', { rate: throttle });
       await p.go(`theme=dark&scenario=levels&n=${n}`);
-      await p.mouse('mouseMoved', 800, 300);
+      await p.js('pointermove', 800, 300);
       await p.eval(`(() => { window.__chart.resetChartStats(); window.__raf = []; let last = performance.now(); const f = (t) => { window.__raf.push(t - last); last = t; if (window.__raf.length < 100000) requestAnimationFrame(f); }; requestAnimationFrame(f); window.__chart.startBusy(${rate}, 10); })()`);
       // Move the crosshair during the run as a user would.
       for (let i = 0; i < 50; i++) {
-        await p.mouse('mouseMoved', 300 + i * 18, 200 + (i % 10) * 20);
+        await p.js('pointermove', 300 + i * 18, 200 + (i % 10) * 20);
         await delay(200);
       }
       const r = await p.eval(`(() => { const s = window.__chart.chartStats; const f = [...s.frameMs].sort((a, b) => a - b); const q = (k) => f[Math.min(f.length - 1, Math.floor(k * f.length))]; const raf = window.__raf.slice(5); const long = raf.filter((d) => d > 1000 / 60 * 1.5).length; return { messages: window.__chart.messages(), updates: s.updates, baseFrames: s.baseFrames, overlayFrames: s.overlayFrames, frames: f.length, p50: q(0.5), p95: q(0.95), p99: q(0.99), max: f[f.length - 1], rafFrames: raf.length, rafOver25ms: long, rafMaxMs: Math.max(...raf) }; })()`);
@@ -181,15 +185,15 @@ try {
     await p.go('theme=dark&scenario=levels&n=1500');
     await p.eval('window.__chart.resetChartStats()');
     for (let i = 0; i < 30; i++) {
-      await p.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 900, y: 300, deltaX: 0, deltaY: 100 });
+      await p.js('wheel', 900, 300, { deltaY: 100 });
       await delay(20);
     }
-    await p.mouse('mousePressed', 1200, 300);
+    await p.js('pointerdown', 1200, 300, { buttons: 1 });
     for (let i = 0; i < 60; i++) {
-      await p.mouse('mouseMoved', 1200 - i * 15, 300, { buttons: 1 });
+      await p.js('pointermove', 1200 - i * 15, 300, { buttons: 1 });
       await delay(16);
     }
-    await p.mouse('mouseReleased', 300, 300);
+    await p.js('pointerup', 300, 300);
     const r = await p.eval(`(() => { const f = [...window.__chart.chartStats.frameMs].sort((a, b) => a - b); const q = (k) => f[Math.min(f.length - 1, Math.floor(k * f.length))]; return { frames: f.length, p50: q(0.5), p95: q(0.95), max: f[f.length - 1] }; })()`);
     results.measure.push({ scenario: 'zoom out 30 wheel steps + drag pan 60 moves, 1500 candles, CPU 4x', ...r });
     await p.close();

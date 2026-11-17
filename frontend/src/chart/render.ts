@@ -405,6 +405,14 @@ function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, ta
   const h = s.tagH;
   const x = 8;
   const y = tag.y - h / 2;
+  // A label pushed off its line (crowded levels) is tied to it by a leader, so it never names another line.
+  if (!tag.pinned && Math.abs(tag.y - tag.priceY) > 1) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    line(ctx, x + w, tag.y, x + w + 10, tag.y);
+    line(ctx, x + w + 10, tag.y, x + w + 18, tag.priceY);
+  }
   ctx.fillStyle = withAlpha(p.bg, 0.92);
   roundRect(ctx, x, y, w, h, 3);
   ctx.fill();

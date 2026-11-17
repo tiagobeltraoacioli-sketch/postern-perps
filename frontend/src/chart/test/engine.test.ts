@@ -148,6 +148,19 @@ describe('it draws the data given and nothing else', () => {
     expect(tickYs.length).toBeGreaterThan(0);
     for (const y of tickYs) for (const t of s.tags) expect(Math.abs(t.y - y)).toBeGreaterThanOrEqual(s.tagH / 2 + s.fontPx / 2);
   });
+  it('crowded levels: a label pushed off its line is tied to the line by a leader ending at the line', () => {
+    const { engine, run, base } = setup();
+    const cs = walk(100, T0, M15);
+    const last = cs[99].c;
+    const levels: ChartLevel[] = Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, kind: 'order', side: 'buy', price: last - 20 - i * 0.5, priceText: `P${i}`, label: `Buy ${i}` }));
+    engine.setData(data(cs, { levels }));
+    run();
+    const s = engine.getScene()!;
+    const displaced = s.tags.filter((t) => t.id.startsWith('o') && Math.abs(t.y - t.priceY) > 1);
+    expect(displaced.length).toBeGreaterThan(0);
+    const ends = base.ops('lineTo').map((c) => c.args[1] as number);
+    for (const t of displaced) expect(ends.some((y) => Math.abs(y - t.priceY) < 1e-6)).toBe(true);
+  });
   it('a level with a non-finite price is not drawn', () => {
     const { engine, run } = setup();
     engine.setData(data(walk(50, T0, M15), { levels: [{ id: 'x', kind: 'order', side: 'buy', price: NaN, priceText: '?', label: 'Buy' }] }));
