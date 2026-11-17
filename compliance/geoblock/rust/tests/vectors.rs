@@ -96,7 +96,8 @@ fn list_vectors() {
 #[test]
 fn real_list_guards() {
     let l = load("../geoblock.json");
-    assert_eq!(l.version, "0.1.1");
+    assert_eq!(l.version, "0.2.1"); // 392 0.2.1: every ISO 3166-1 code listed, no allowed entry
+    assert!(l.countries.len() >= 249);
     assert!(l.countries.values().all(|e| e.effect == list::Effect::Deny));
     assert_eq!(l.exit_actions, vec!["CancelOrder", "CancelAll", "PlaceOrder(reduceOnly=true)", "Withdraw"]);
     assert!(l.restricted_subdivision_countries.contains("UA"));
