@@ -155,8 +155,19 @@ contract Handler is Base {
         if (!vault.inEscape() || vault.checkpointCount() == 0 || colluded) return;
         // the tree of the latest accepted honest checkpoint is rebuilt from the model at that checkpoint; the model
         // only changes through `trade`/`requestWithdraw` between checkpoints, so use the snapshot taken at submission
+        if (!vault.systemSharesProven()) {
+            try vault.proveSystemShares(
+                _acct(snapA, snapBal, 1),
+                Tree.proof(_eLeaves(snapA, snapBal), 1),
+                _acct(snapA, snapBal, 2),
+                Tree.proof(_eLeaves(snapA, snapBal), 2)
+            ) {
+                (, uint64 t,,) = vault.payouts(vault.escapeKey(address(2)));
+                if (t != 0) _track(vault.escapeKey(address(2)));
+            } catch {}
+        }
         uint256 at = i % (snapA.length + 1);
-        if (at == snapA.length) return;
+        if (at == snapA.length || at == 1 || at == 2) return;
         address a = snapA[at];
         address r = uint160(a) <= 0xffff ? FEE : a;
         uint256 before = usdc.balanceOf(r);
@@ -208,13 +219,20 @@ contract Handler is Base {
         cp.withdrawalCount = uint64(records.length);
         delete snapA;
         delete snapBal;
-        for (uint256 i; i < accts.length; ++i) {
+        // SPEC 8 order: PROTOCOL_FEE, INSURANCE, BACKSTOP at 0, 1, 2 (always present), then the users
+        snapA.push(PROTOCOL_FEE);
+        snapBal.push(bal[PROTOCOL_FEE]);
+        snapA.push(address(2));
+        snapBal.push(bal[address(2)]);
+        snapA.push(address(3));
+        snapBal.push(0);
+        for (uint256 i; i < 3; ++i) {
             address a = accts[i];
             if (bal[a] == 0) continue;
             snapA.push(a);
             snapBal.push(bal[a]);
-            cp.totalEscape += bal[a];
         }
+        for (uint256 i; i < snapBal.length; ++i) cp.totalEscape += snapBal[i];
         cp.accountsRoot = Tree.root(_eLeaves(snapA, snapBal));
     }
 
@@ -323,7 +341,7 @@ contract PerpsVaultEscapeEndToEnd is Base {
         assertTrue(late >= 10 * USDC, "late deposit made");
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        for (uint256 i; i < 6; ++i) h.claim(i);
+        for (uint256 i; i < 8; ++i) h.claim(i);
         uint64 n = vault.depositCount();
         for (uint64 i; i < n; ++i) h.refund(i);
         uint64 wc = vault.withdrawalCountAt(vault.checkpointCount());
@@ -338,8 +356,10 @@ contract PerpsVaultEscapeEndToEnd is Base {
         for (uint256 k; k < h.keyCount(); ++k) h.release(k);
         assertEq(vault.reserved(), 0, "all registered payouts paid");
         (,,,,, uint64 wTotal, uint128 eTotal,,) = vault.latest();
-        assertEq(vault.escapePayable(), eTotal, "honest engine: the pool covers every escape value");
-        assertEq(vault.escapeClaimedTotal(), eTotal, "every escape balance claimed");
+        assertEq(
+            vault.escapePayable(), eTotal - vault.subordinatedTotal(), "honest engine: the pool covers every user value"
+        );
+        assertEq(vault.escapeClaimedTotal(), vault.escapePayable(), "every user escape value claimed");
         assertEq(vault.withdrawnTotal(), wTotal, "every certified record paid");
         assertEq(vault.refundedTotal(), late, "the uncredited deposit refunded");
         assertTrue(eTotal + wTotal > 0 || before == 0, "non-vacuous: something was claimable");

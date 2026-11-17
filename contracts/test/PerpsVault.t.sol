@@ -386,6 +386,7 @@ contract PerpsVaultTest is Base {
         _submit(_cp(1, w, a, b));
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
+        _proveSys(a, b);
         assertEq(vault.escapePayable(), 2000 * USDC, "pool");
         vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
         vault.claimEscape(_acct(a, b, 1), _eProof(a, b, 1), type(uint64).max);
@@ -790,6 +791,7 @@ contract PerpsVaultTest is Base {
         _deposit(carol, carol, 50 * USDC); // after the checkpoint: uncredited
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
+        _proveSys(a, b);
         assertEq(vault.escapePayable(), 1500 * USDC, "pool = custody - record - uncredited, equal to the total");
         // credited deposits are not refundable; a tampered refund is refused
         vm.expectRevert(PerpsVault.InvalidRefund.selector);
@@ -848,6 +850,7 @@ contract PerpsVaultTest is Base {
         _submit(_cp(1, w, a, b));
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
+        _proveSys(a, b);
         bytes32 key = vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), 0);
         vm.warp(block.timestamp + 1 days); // large delay
         vault.release(key, 1_000_000 * USDC);
@@ -858,62 +861,54 @@ contract PerpsVaultTest is Base {
         assertEq(usdc.balanceOf(alice), 2_500_000 * USDC, "paid in parts");
     }
 
-    /// Keyless INSURANCE (0x..02) and BACKSTOP (0x..03) shares pay the fee address, only after the surplus delay;
-    /// the surplus sweep takes donations and rounding; every user claim stays payable after it.
-    function test_surplus_and_keyless_shares() public {
+    /// The surplus sweep takes donations and rounding only, never before the system shares are proven, and every
+    /// user claim stays payable after it; nothing is ever sent to a keyless address.
+    function test_surplus_sweep_after_system_shares() public {
         _deposit(alice, alice, 1000 * USDC);
         _deposit(bob, bob, 1000 * USDC);
         (PerpsVault.Withdrawal[] memory w,,) = _empty();
-        address[] memory a = new address[](3);
-        uint64[] memory b = new uint64[](3);
+        address[] memory a = new address[](2);
+        uint64[] memory b = new uint64[](2);
         a[0] = alice;
         a[1] = bob;
-        a[2] = address(2); // INSURANCE
         b[0] = 1500 * USDC;
         b[1] = 400 * USDC;
-        b[2] = 100 * USDC;
         _submit(_cp(1, w, a, b));
         usdc.mint(address(vault), 3 * USDC); // a donation
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
-        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
-        bytes32 ins = vault.claimEscape(_acct(a, b, 2), _eProof(a, b, 2), type(uint64).max);
-        assertEq(usdc.balanceOf(FEE), 0, "insurance share not paid before the surplus delay");
-        vm.expectRevert(PerpsVault.NotReady.selector);
-        vault.release(ins, 1);
-        vm.expectRevert(PerpsVault.InvalidSurplus.selector);
-        vault.sweepEscapeSurplus();
         vm.warp(block.timestamp + 90 days);
-        vault.release(ins, type(uint64).max);
+        vm.expectRevert(PerpsVault.InvalidSurplus.selector); // system shares not proven: the user pool is not fixed
+        vault.sweepEscapeSurplus();
+        _proveSys(a, b);
+        vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
         uint64 swept = vault.sweepEscapeSurplus();
-        assertEq(swept, 3 * USDC, "the donation");
-        assertEq(usdc.balanceOf(FEE), 103 * USDC, "insurance share and donation to the fee address");
+        assertEq(swept, 103 * USDC, "100 the tree never assigned, plus the donation");
+        assertEq(usdc.balanceOf(FEE), 103 * USDC, "to the fee address");
         vm.expectRevert(PerpsVault.InvalidSurplus.selector);
         vault.sweepEscapeSurplus();
         vault.claimEscape(_acct(a, b, 1), _eProof(a, b, 1), type(uint64).max);
         assertEq(usdc.balanceOf(bob), 400 * USDC, "bob still paid after the sweep");
         assertEq(usdc.balanceOf(address(vault)), 0, "empty");
-        assertEq(usdc.balanceOf(address(2)), 0, "nothing burned at 0x..02");
+        assertEq(usdc.balanceOf(address(2)) + usdc.balanceOf(address(3)), 0, "nothing burned at keyless addresses");
     }
 
-    function test_unproven_shares_fall_to_the_surplus() public {
+    function test_unclaimed_user_shares_never_swept() public {
         _deposit(alice, alice, 1000 * USDC);
         (PerpsVault.Withdrawal[] memory w,,) = _empty();
-        address[] memory a = new address[](2);
-        uint64[] memory b = new uint64[](2);
+        address[] memory a = new address[](1);
+        uint64[] memory b = new uint64[](1);
         a[0] = alice;
-        a[1] = address(3); // BACKSTOP
-        b[0] = 900 * USDC;
-        b[1] = 100 * USDC;
+        b[0] = 1000 * USDC;
         _submit(_cp(1, w, a, b));
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
+        _proveSys(a, b);
         vm.warp(block.timestamp + 90 days);
-        // nobody proved anything: the sweep keeps every unclaimed escape value (1000) and sweeps nothing
-        vm.expectRevert(PerpsVault.InvalidSurplus.selector);
+        vm.expectRevert(PerpsVault.InvalidSurplus.selector); // everything is still alice's
         vault.sweepEscapeSurplus();
         vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
-        assertEq(usdc.balanceOf(alice), 900 * USDC, "alice paid in full after 90 days");
+        assertEq(usdc.balanceOf(alice), 1000 * USDC, "alice paid in full after 90 days");
     }
 
     function test_escape_with_zero_total_or_value_refused() public {
@@ -926,6 +921,7 @@ contract PerpsVaultTest is Base {
         _submit(_cp(1, w, a, b));
         vm.warp(block.timestamp + 7 days);
         vault.triggerEscape();
+        _proveSys(a, b);
         bytes32[] memory p = _eProof(a, b, 0);
         PerpsVault.Account memory acc = _acct(a, b, 0);
         vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
@@ -1080,6 +1076,7 @@ contract PerpsVaultSilenceTest is Base {
         vm.warp(block.timestamp + 1);
         assertEq(vault.escapeReason(), 1, "silence");
         vault.triggerEscape();
+        _proveSys(a, b);
         vault.claimEscape(_acct(a, b, 0), _eProof(a, b, 0), type(uint64).max);
         assertEq(usdc.balanceOf(u), 100 * USDC, "paid");
     }
@@ -1098,5 +1095,91 @@ contract PerpsVaultSilenceTest is Base {
         vault.deposit(10 * USDC, address(0xffff));
         vault.deposit(10 * USDC, address(0x10000));
         vm.stopPrank();
+    }
+}
+
+/// R395-33 (coordinator decision): in escape, INSURANCE and BACKSTOP shares cover user shortfalls first; only the
+/// remainder goes to the fee address, and only after the 90-day window.
+contract PerpsVaultSubordinationTest is Base {
+    function setUp() public {
+        _setUpVault();
+    }
+
+    function _scenario() internal returns (address[] memory a, uint64[] memory b) {
+        address alice = address(uint160(uint256(keccak256("alice"))));
+        address bob = address(uint160(uint256(keccak256("bob"))));
+        _deposit(alice, alice, 1000 * USDC);
+        _deposit(bob, bob, 1000 * USDC);
+        // SPEC 8 order: PROTOCOL_FEE index 0, INSURANCE 1, BACKSTOP 2, users after
+        a = new address[](5);
+        b = new uint64[](5);
+        a[0] = address(1);
+        a[1] = address(2);
+        a[2] = address(3);
+        a[3] = alice;
+        a[4] = bob;
+        b[0] = 0;
+        b[1] = 250 * USDC; // insurance
+        b[2] = 50 * USDC; // backstop
+        b[3] = 1500 * USDC;
+        b[4] = 400 * USDC; // users 1900 <= pool 2000 < total 2200
+        (PerpsVault.Withdrawal[] memory w,,) = _empty();
+        _submit(_cp(1, w, a, b));
+        vm.warp(block.timestamp + 7 days);
+        vault.triggerEscape();
+    }
+
+    function test_R395_33_insurance_covers_users_first() public {
+        (address[] memory a, uint64[] memory b) = _scenario();
+        vault.proveSystemShares(_acct(a, b, 1), _eProof(a, b, 1), _acct(a, b, 2), _eProof(a, b, 2));
+        vault.claimEscape(_acct(a, b, 3), _eProof(a, b, 3), type(uint64).max);
+        vault.claimEscape(_acct(a, b, 4), _eProof(a, b, 4), type(uint64).max);
+        assertEq(usdc.balanceOf(a[3]), 1500 * USDC, "alice paid in full");
+        assertEq(usdc.balanceOf(a[4]), 400 * USDC, "bob paid in full");
+        bytes32 sub = vault.escapeKey(address(2));
+        vm.expectRevert(PerpsVault.NotReady.selector);
+        vault.release(sub, type(uint64).max);
+        vm.warp(block.timestamp + 90 days);
+        vault.release(sub, type(uint64).max);
+        assertEq(usdc.balanceOf(FEE), 100 * USDC, "only the remainder, after 90 days");
+        assertEq(usdc.balanceOf(address(vault)), 0, "empty");
+    }
+
+    function test_R395_33_user_claims_wait_for_system_shares() public {
+        (address[] memory a, uint64[] memory b) = _scenario();
+        PerpsVault.Account memory u = _acct(a, b, 3);
+        bytes32[] memory p = _eProof(a, b, 3);
+        vm.expectRevert(PerpsVault.NotReady.selector);
+        vault.claimEscape(u, p, 1);
+        // keyless subordinated accounts cannot claim directly
+        PerpsVault.Account memory ins = _acct(a, b, 1);
+        bytes32[] memory pi = _eProof(a, b, 1);
+        vault.proveSystemShares(ins, pi, _acct(a, b, 2), _eProof(a, b, 2));
+        vm.expectRevert(PerpsVault.InvalidWithdrawal.selector);
+        vault.claimEscape(ins, pi, 1);
+        vm.expectRevert(PerpsVault.AlreadyRegistered.selector);
+        vault.proveSystemShares(ins, pi, _acct(a, b, 2), _eProof(a, b, 2));
+    }
+
+    function test_R395_33_shortfall_beyond_insurance_is_pro_rata_and_fee_gets_nothing() public {
+        address alice = address(uint160(uint256(keccak256("alice"))));
+        _deposit(alice, alice, 1000 * USDC);
+        address[] memory a = new address[](4);
+        uint64[] memory b = new uint64[](4);
+        a[0] = address(1);
+        a[1] = address(2);
+        a[2] = address(3);
+        a[3] = alice;
+        b[1] = 100 * USDC;
+        b[3] = 1250 * USDC; // users alone exceed the pool of 1000
+        (PerpsVault.Withdrawal[] memory w,,) = _empty();
+        _submit(_cp(1, w, a, b));
+        vm.warp(block.timestamp + 7 days);
+        vault.triggerEscape();
+        vault.proveSystemShares(_acct(a, b, 1), _eProof(a, b, 1), _acct(a, b, 2), _eProof(a, b, 2));
+        vault.claimEscape(_acct(a, b, 3), _eProof(a, b, 3), type(uint64).max);
+        assertEq(usdc.balanceOf(alice), 1000 * USDC, "the whole pool to the user");
+        (, uint64 total,,) = vault.payouts(vault.escapeKey(address(2)));
+        assertEq(total, 0, "no subordinated payout registered");
     }
 }
