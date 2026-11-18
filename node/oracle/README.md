@@ -251,11 +251,23 @@ price. `exit_price(params, state, market, T)` (`core/src/committee.rs`) defines 
   of the canonical state bytes. `settle` = the latest committee price since the halt, else the last good index.
 - X3 `settleDue` when `age >= maxHaltMs`.
 
-Proposed use by the engine (388 decides and writes it into SPEC): a withdrawal of free collateral values every
-position in a halted market at the side of the band worse for its holder (long at `low`, short at `high`); a forced
-close of a position in a halted market settles at `settle` and is checked against the band (a forced close is
-never refused for a halt); after `settleDue` every position of the market is settled at `settle`, and a forced
-request that still cannot be served is not consumed (the vault's deadline then fires escape).
+Use by the engine (430 owns SPEC 14; restated in round 2 after R436-10, High, reviewer 436):
+
+- ONE account leaving during a halt is priced at the side of the band worse for it, whatever the path: a
+  withdrawal of free collateral values every position in a halted market at that side (long at `low`, short at
+  `high`), and a FORCED CLOSE of a position in a halted market executes at that side too
+  (`ExitPrice::close_price`); a forced close is never refused for a halt. Version 0.2 of this document said a
+  forced close "settles at `settle`": that was wrong. With nothing signed since the halt `settle` is the frozen
+  index, so whoever controls the halt (the sequencer, by withholding oracle inputs) could stop the oracle when the
+  market turned against its own position and leave at the pre-move price against the other side. Tests
+  `core/tests/exit.rs::r436_10_*`.
+- `settle` is for X3 ONLY: after `settleDue` every position of the market is settled at `settle`, all at once.
+  `settle_committee_time_ms` says whether `settle` is a price the committee signed since the halt (and when) or
+  only the pre-halt index. Proposed to 430 (cross-area 2026-11-18): X3 fires only when it is a committee price;
+  with none the market stays halted, single-account exits keep working at the band, and a sequencer that withholds
+  for good ends in the vault's escape. Otherwise withholding oracle inputs for `maxHaltMs` settles the whole
+  market at the pre-move index (the same option, for every position at once).
+- A forced request that still cannot be served is not consumed (the vault's deadline then fires escape).
 
 Why this is safe for the other users: the band covers the last good index and every price the committee has
 signed since, widened by at least one permitted step (`exitHaircutBps >= jumpBps`) and by a further amount per

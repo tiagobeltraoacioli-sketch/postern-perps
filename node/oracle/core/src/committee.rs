@@ -555,7 +555,8 @@ pub enum ExitSource {
 
 /// The defined price path for exits (withdrawal of free collateral, forced closes) in every oracle state except
 /// genesis (R395-5). The engine values a position at the side of the band that is worse for its holder: a long at
-/// `low`, a short at `high`; a close while halted settles at that side.
+/// `low`, a short at `high`; a close of ONE account while halted settles at that side ([`ExitPrice::close_price`],
+/// R436-10). `settle` is only for X3, the settlement of every position of the market at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExitPrice {
     pub source: ExitSource,
@@ -564,11 +565,29 @@ pub struct ExitPrice {
     /// The last good index and its age at the block time.
     pub reference: u64,
     pub age_ms: u64,
-    /// X2: the settlement price of a close while halted: the latest committee price since the halt, else the
-    /// last good index; the index itself while active.
+    /// X2: the settlement price of X3 (every position of the market at once): the latest committee price since
+    /// the halt, else the last good index; the index itself while active. NEVER the price of one account's exit
+    /// (R436-10): whoever controls the halt would hold a free option at the frozen index.
     pub settle: u64,
+    /// The time of the committee price that `settle` is, when it is one (halted, and the committee has signed a
+    /// price since the halt). `None` while active and when `settle` is only the pre-halt index (nothing signed
+    /// since the halt: the state a sequencer reaches alone by withholding oracle inputs).
+    pub settle_committee_time_ms: Option<u64>,
     /// X3: no good index for `max_halt_ms`: the market is due for settlement of every position at the band.
     pub settle_due: bool,
+}
+
+impl ExitPrice {
+    /// The price at which ONE account leaves a position of this market (valuation for a withdrawal, a forced
+    /// close): the side of the band worse for it, a long at `low`, a short at `high`. Equal to the index while
+    /// the market is active.
+    pub fn close_price(&self, long: bool) -> u64 {
+        if long {
+            self.low
+        } else {
+            self.high
+        }
+    }
 }
 
 /// X1 to X3 for `market_id` at block time `t`. `None` only before the first index (genesis `INIT`: no trade can
@@ -596,6 +615,7 @@ pub fn exit_price(
             reference: m.index,
             age_ms,
             settle: m.index,
+            settle_committee_time_ms: None,
             settle_due: false,
         });
     }
@@ -622,6 +642,7 @@ pub fn exit_price(
         age_ms,
         // X2: settlement at the latest committee price since the halt, else the last good index.
         settle: m.run.map(|r| r.last).unwrap_or(m.index),
+        settle_committee_time_ms: m.run.map(|r| r.last_time_ms),
         // X3
         settle_due: age_ms >= p.max_halt_ms,
     })
