@@ -70,6 +70,12 @@ Deploy (from `contracts/`):
 python3 script/local_deploy.py --rpc http://127.0.0.1:49700 --out deploy/local --validators 0xV1,0xV2,0xV3,0xV4,0xV5,0xV6,0xV7 --fund 0xUSER
 ```
 
+One-command form for the stack (435): `deploy/local.sh <rpc-url> <committee.json> <out.json>` with
+`committee.json = {"validators": [7], "threshold": 5, "guardians": [3] (optional)}`; `out.json` holds `chainId`,
+`token`, `vault`, `deployBlock`, `committee`, `threshold`, `forcedDelay`, `escapeDelay`, `largeDelay` and
+`abi: {vault: [...], token: [...]}` (the ABI arrays themselves). Foundry is taken from `$FOUNDRY_DIR`,
+`~/.local/share/dex-tools/foundry`, `~/.foundry/bin` or `PATH`.
+
 Output in `--out`: `deployment.json` (schema `postern-perps/local-deployment/1`: `token`, `vault`,
 `vaultDeployBlock`, `chainId`, `validators`, `guardians`, `limits`, `eip712Domain`, `domainSeparator`,
 `depositHead0`, `forcedHead0`, `gasUsed`), `PerpsVault.abi.json`, `MockBUSDC.abi.json`; the same JSON on stdout,

@@ -15,7 +15,10 @@ Usage (from `contracts/`; python3 standard library only; needs forge and cast):
 
   python3 script/local_deploy.py --rpc http://127.0.0.1:49700 --out deploy/local \
       [--validators 0xA,0xB,...(7)] [--guardians 0xG1,0xG2,0xG3] [--chain-id 700770] \
-      [--fund 0xUSER1,0xUSER2] [--fund-amount 1000000000000] [--set KEY=VALUE ...] [--foundry-dir DIR]
+      [--fund 0xUSER1,0xUSER2] [--fund-amount 1000000000000] [--set KEY=VALUE ...] [--foundry-dir DIR] \
+      [--committee-file committee.json] [--out-json out.json]
+
+or the one-command form `deploy/local.sh <rpc-url> <committee.json> <out.json>`.
 
 Writes to `--out`: `deployment.json` (addresses, chain id, committee, limits, domain separator, chain heads, deploy
 block), `PerpsVault.abi.json`, `MockBUSDC.abi.json`, and, only if it generated keys, `throwaway-keys.json` (0600).
@@ -113,7 +116,21 @@ def main():
     p.add_argument("--foundry-dir", default=os.environ.get(
         "FOUNDRY_DIR", os.path.expanduser("~/.local/share/dex-tools/foundry")))
     p.add_argument("--skip-build", action="store_true")
+    p.add_argument("--committee-file", default="", help="JSON {validators:[7], threshold?, unpauseThreshold?, "
+                   "guardians?:[3]} (the node's throwaway committee; addresses only)")
+    p.add_argument("--out-json", default="", help="also write one self-contained JSON (deployment + both ABIs)")
     a = p.parse_args()
+    if a.committee_file:
+        with open(a.committee_file) as f:
+            committee = json.load(f)
+        if a.validators or not isinstance(committee.get("validators"), list):
+            die("--committee-file needs a validators array and excludes --validators")
+        a.validators = ",".join(str(x) for x in committee["validators"])
+        if isinstance(committee.get("guardians"), list) and not a.guardians:
+            a.guardians = ",".join(str(x) for x in committee["guardians"])
+        for key in ("threshold", "unpauseThreshold"):
+            if key in committee:
+                a.set.insert(0, "%s=%d" % (key, int(committee[key])))
 
     url = urllib.parse.urlparse(a.rpc)
     if url.scheme != "http" or url.hostname not in ("127.0.0.1", "localhost", "::1"):
@@ -265,6 +282,22 @@ def main():
     with open(os.path.join(out, "deployment.json"), "w") as f:
         json.dump(deployment, f, indent=1)
         f.write("\n")
+    if a.out_json:
+        # One file for the stack (435's form): flat names plus the ABIs themselves.
+        flat = dict(deployment)
+        flat.update({
+            "deployBlock": vault_block,
+            "committee": {"validators": validators, "threshold": limits["threshold"],
+                          "unpauseThreshold": limits["unpauseThreshold"]},
+            "threshold": limits["threshold"],
+            "forcedDelay": limits["forcedDelay"],
+            "escapeDelay": limits["escapeDelay"],
+            "largeDelay": limits["largeDelay"],
+            "abi": {"vault": vault_abi, "token": token_abi},
+        })
+        with open(a.out_json, "w") as f:
+            json.dump(flat, f, indent=1)
+            f.write("\n")
     print(json.dumps(deployment, indent=1))
     print("LOCAL-DEPLOY OK %s %s" % (vault, token))
 
