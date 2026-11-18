@@ -616,7 +616,7 @@ contract PerpsVault {
         // The sum of all records ever registered never exceeds what the committee certified.
         if (uint256(withdrawnTotal) + w.amount > latest.withdrawalsTotal) revert Insolvent();
         withdrawnTotal += w.amount;
-        _register(key, w.recipient, w.amount);
+        _register(key, w.recipient, w.amount, 0);
         _payNow(key, want);
     }
 
@@ -625,9 +625,11 @@ contract PerpsVault {
         _release(key, want);
     }
 
-    function _register(bytes32 key, address recipient, uint64 total) private {
+    /// @dev `notBefore`: an earliest ready time on top of the usual rule (0: none).
+    function _register(bytes32 key, address recipient, uint64 total, uint64 notBefore) private {
         uint64 readyAt = uint64(block.timestamp);
         if (total >= largeThreshold) readyAt += largeDelay;
+        if (readyAt < notBefore) readyAt = notBefore;
         payouts[key] = Payout({recipient: recipient, total: total, paid: 0, readyAt: readyAt});
         committedOut += total;
         reserved += total;
@@ -739,11 +741,9 @@ contract PerpsVault {
         systemSharesProven = true;
         uint64 rest = pool - escapePayable;
         uint64 subPaid = sub < rest ? uint64(sub) : rest;
-        if (subPaid != 0) {
-            bytes32 key = escapeKey(address(2));
-            _register(key, feeRecipient, subPaid);
-            payouts[key].readyAt = escapeAt + SURPLUS_DELAY;
-        }
+        // R433-1: the 90 days are a floor passed INTO the registration, so the event states the stored time and
+        // the large-amount delay still applies to a proof made late.
+        if (subPaid != 0) _register(escapeKey(address(2)), feeRecipient, subPaid, escapeAt + SURPLUS_DELAY);
     }
 
     /// @notice In escape: registers the account's pro-rata escape value from the latest checkpoint's account tree and
@@ -769,7 +769,7 @@ contract PerpsVault {
         if (amount == 0) revert InvalidWithdrawal();
         if (uint256(escapeClaimedTotal) + amount > escapePayable) revert Insolvent();
         escapeClaimedTotal += amount;
-        _register(key, recipient, amount);
+        _register(key, recipient, amount, 0);
         _payNow(key, want);
     }
 

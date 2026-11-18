@@ -822,6 +822,7 @@
     "withdrawnTotal": "6004035000",
     "escapeClaimedTotal": "45995964999",
     "refundedTotal": "500000000",
+    "receivedCount": 5,
     "received": [
       {
         "account": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",

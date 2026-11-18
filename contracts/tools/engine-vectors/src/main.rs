@@ -390,18 +390,21 @@ impl Gen {
         self.step("releaseSystem", json!({"expectPaid": amount.to_string(), "expectRecipient": h(&fr)}));
     }
 
-    /// 90 days after escape: what no claim can reach (rounding) goes to the fee address, once. The story has by then
-    /// claimed, refunded and paid everything else, so the sweep is the whole remaining balance.
+    /// 90 days after escape the surplus (balance beyond everything still claimable) goes to the fee address, once.
+    /// The vault counts `escapePayable - escapeClaimedTotal` as still claimable, so the rounding residue of pro-rata
+    /// claims (less than one base unit per claimant) is NOT surplus: it stays in the vault for good. The stories make
+    /// no donation, so there is nothing to sweep and the call is refused.
     fn sweep(&mut self) {
         self.l2_tick();
-        let amount = self.m.vault_balance;
+        let unclaimed = self.m.payable - self.m.claimed;
+        let amount = self.m.vault_balance - unclaimed;
         if amount == 0 {
             self.step("sweep", json!({"expect": "InvalidSurplus", "expectAmount": "0"}));
             return;
         }
         let fr = self.fee_recipient;
         *self.m.balances.entry(fr).or_insert(0) += amount;
-        self.m.vault_balance = 0;
+        self.m.vault_balance -= amount;
         self.m.committed_out += amount;
         self.step("sweep", json!({"expect": "swept", "expectAmount": amount.to_string(), "expectRecipient": h(&fr)}));
     }
@@ -425,7 +428,7 @@ impl Gen {
             "stepCount": self.steps.len(),
             "steps": self.steps,
             "expect": {"vaultBalance": self.m.vault_balance.to_string(), "depositedTotal": self.m.deposited_total.to_string(), "withdrawnTotal": self.m.withdrawn_total.to_string(),
-                       "escapeClaimedTotal": self.m.claimed.to_string(), "refundedTotal": self.m.refunded_total.to_string(), "received": balances},
+                       "escapeClaimedTotal": self.m.claimed.to_string(), "refundedTotal": self.m.refunded_total.to_string(), "receivedCount": balances.len(), "received": balances},
         })
     }
 

@@ -501,20 +501,20 @@
       "n": 16
     },
     {
-      "expect": "swept",
-      "expectAmount": "2",
-      "expectRecipient": "0x775a993f09bd80aecf8f8c2ade0c84158e3a0544",
+      "expect": "InvalidSurplus",
+      "expectAmount": "0",
       "kind": "sweep",
       "l2Time": "1808380838",
       "n": 17
     }
   ],
   "expect": {
-    "vaultBalance": "0",
+    "vaultBalance": "2",
     "depositedTotal": "57000000000",
     "withdrawnTotal": "0",
     "escapeClaimedTotal": "56999999998",
     "refundedTotal": "0",
+    "receivedCount": 3,
     "received": [
       {
         "account": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",
@@ -526,7 +526,7 @@
       },
       {
         "account": "0x775a993f09bd80aecf8f8c2ade0c84158e3a0544",
-        "received": "39922573"
+        "received": "39922571"
       }
     ]
   }
