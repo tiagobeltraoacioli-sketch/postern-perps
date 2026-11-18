@@ -4,7 +4,10 @@
 // UNAUDITED prototype. Copyright (c) 2026 Bloch Inc. All rights reserved.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-const run = promisify(execFile);
+const exec = promisify(execFile);
+// the Mac's Foundry build links libusb from the tools directory (BRIEF-ROUND10)
+const ENV = { ...process.env, DYLD_LIBRARY_PATH: `${process.env.HOME}/.local/share/dex-tools/libusb/lib` };
+const run = (file, args) => exec(file, args, { env: ENV, maxBuffer: 16 << 20 });
 
 export class Chain {
   constructor(rpc, foundryDir) {

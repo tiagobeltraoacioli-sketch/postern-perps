@@ -5,7 +5,7 @@
 #   svc.sh stop <name> [SIGNAL]          default TERM; waits 15 s, then KILL
 #   svc.sh alive <name>                  exit 0 if running
 #   svc.sh status                        one line per known service
-#   svc.sh stop-all                      stops every service with a pid file (INT first for a clean log tail)
+#   svc.sh stop-all                      stops every service with a pid file (the node by INT: its clean shutdown; the others by TERM)
 # UNAUDITED prototype. Copyright (c) 2026 Bloch Inc. All rights reserved.
 D=$HOME/l2dexbridge-20261030/perps-r2-e2e
 R=$D/run
@@ -34,6 +34,6 @@ case $1 in
   stop) stop $2 $3 ;;
   alive) alive $2 ;;
   status) for f in $R/*.pid; do [ -e "$f" ] || continue; n=$(basename $f .pid); if alive $n; then echo "$n: running pid $(cat $f)"; else echo "$n: dead (stale pid file)"; fi; done ;;
-  stop-all) for f in $R/*.pid; do [ -e "$f" ] || continue; n=$(basename $f .pid); case $n in build-*) continue ;; esac; stop $n INT; done ;;
+  stop-all) for f in $R/*.pid; do [ -e "$f" ] || continue; n=$(basename $f .pid); case $n in build-*|test-*) continue ;; node) stop $n INT ;; *) stop $n TERM ;; esac; done ;;
   *) echo "usage: svc.sh start|stop|alive|status|stop-all" >&2; exit 2 ;;
 esac

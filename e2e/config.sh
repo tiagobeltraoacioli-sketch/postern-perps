@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Bloch Inc. All rights reserved.
 # The build host and the ssh identity file are operator facts, never committed: e2e/local.env (git-ignored; see
 # local.env.example) or the environment sets E2E_HOST (user@address) and E2E_SSH_KEY (path of the identity file).
-_cfg_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+_cfg_dir=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 [ -f "$_cfg_dir/local.env" ] && . "$_cfg_dir/local.env"
 : "${E2E_HOST:?set E2E_HOST in e2e/local.env (see local.env.example)}"
 : "${E2E_SSH_KEY:?set E2E_SSH_KEY in e2e/local.env (see local.env.example)}"
