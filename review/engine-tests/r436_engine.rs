@@ -242,3 +242,43 @@ fn r436_2_one_same_block_order_at_the_top_hides_older_liquidity_from_liquidation
     assert!(b_plain - b_grief > usdc(100) as i128, "B loses more than 100 USDC more on 1 BTC");
     assert!(a_grief - a_plain > usdc(300) as i128, "the griefing account, as ADL counterparty, gains it");
 }
+
+/// R436-8 (Low), part 1. `Genesis::check` accepts `impactNotional = 0`; the first premium sample taken with an
+/// order on the book divides by zero in `impact_price` (engine.rs:540-563): the engine panics on a system step,
+/// at the same height on every node (S-0.2: "never panics").
+#[test]
+fn r436_8_impact_notional_zero_is_accepted_by_genesis_and_panics_at_the_first_sample() {
+    let mut m = market(BTC, "BTC-USD");
+    m.impact_notional = 0;
+    let g = genesis_raw(7, vec![m]).check();
+    assert!(g.is_ok(), "genesis check accepts impactNotional 0");
+    let mut r = Rig::new();
+    r.e = Engine::new(g.unwrap());
+    let k = key(4381);
+    let a = addr(&k);
+    let d = r.dep(a, usdc(10_000));
+    all_ok(&r.block(P, vec![d]));
+    let bid = r.order(&k, true, ORDER_LIMIT, TIF_GTC, P - 10 * TICK, ONE / 10);
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.block(P, vec![bid])));
+    assert!(res.is_err(), "apply_block panicked (division by zero) with one resting order and an accepted oracle round");
+}
+
+/// R436-8, part 2. The compliance converter narrows JSON integers with `as`: out-of-range values wrap into range
+/// and are accepted (S-0.4: out-of-range values are rejected, never coerced).
+#[test]
+fn r436_8_converter_wraps_out_of_range_integers_instead_of_refusing() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../compliance/");
+    let mut markets: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}markets.json")).unwrap()).unwrap();
+    let risk: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}risk.json")).unwrap()).unwrap();
+    let signers: Vec<String> = oracle_keys(7).iter().map(|k| postern_perps_engine::hash::hex0x(&addr(k))).collect();
+    let conv = |m: &serde_json::Value| postern_perps_engine::genesis::from_compliance(m, &risk, DEV_VAULT, signers.clone(), 5, "25000", 250_000);
+    let honest = conv(&markets).expect("the committed files convert");
+    let imf = honest.markets[0].tiers[0].imf_ppm as u64;
+    let src = honest.markets[0].oracle.min_sources as u64;
+    markets["markets"][0]["tiers"][0]["imfPpm"] = serde_json::json!(imf + (1u64 << 32));
+    markets["markets"][0]["oracle"]["minSources"] = serde_json::json!(src + 256);
+    let wrapped = conv(&markets).expect("accepted: this is the defect");
+    println!("imfPpm {} read as {}; minSources {} read as {}", imf + (1u64 << 32), wrapped.markets[0].tiers[0].imf_ppm, src + 256, wrapped.markets[0].oracle.min_sources);
+    assert_eq!(wrapped.markets[0].tiers[0].imf_ppm as u64, imf);
+    assert_eq!(wrapped.markets[0].oracle.min_sources as u64, src);
+}
