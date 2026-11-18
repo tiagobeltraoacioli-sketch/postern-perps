@@ -423,7 +423,12 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
     await expectError('agent ApproveAgent', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: String(an++), agent: addressOf(keyOf(`agent2/${runId}`)), name: 'x', expiresAt: String(T0 + 1000n) }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
     const ags = await get(`/v1/accounts/${mainAddr}/agents`);
     ok('approved agent listed', ags.body?.agents?.some((g) => g.agent === agentAddr));
-    const rv = await post('/v1/actions?wait=included', signed('RevokeAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr }, main), hdr);
+    // R436-7 (geoblock.json 0.2.2): RevokeAgent is an exit action. A user in a denied country must be able to end
+    // an agent key (it only removes authority); approving one stays refused there. Mock and dev: X-Mock-Country.
+    const br = { 'x-mock-country': 'BR' };
+    await expectError('ApproveAgent from a geo-denied country', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: nextNonce(), agent: addressOf(keyOf(`agent3/${runId}`)), name: 'x', expiresAt: String(T0 + 600_000n) }, main), br), 451, 'GEO_RESTRICTED');
+    const rv = await post('/v1/actions?wait=included', signed('RevokeAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr }, main), br);
+    ok('RevokeAgent from a geo-denied country is admitted (exit action, R436-7)', rv.status === 200, `${rv.status} ${JSON.stringify(rv.body)}`);
     ok('RevokeAgent included and applied', rv.body?.status === 'included' && rv.body?.result?.ok === true, JSON.stringify(rv.body));
     const ags2 = await get(`/v1/accounts/${mainAddr}/agents`);
     ok('revoked agent no longer listed', !ags2.body?.agents?.some((g) => g.agent === agentAddr));

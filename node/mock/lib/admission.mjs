@@ -97,11 +97,14 @@ export function geoDecision(geo, mockGeo, country) {
   if (!c) reason = 'COUNTRY_UNKNOWN';
   else if (entry) allowed = geo.tiers?.[entry.tier] === 'allow' || entry.tier === 'allowed';
   else allowed = mockGeo.mock_allowed_countries.includes(c); // never overrides a listed entry (deny wins)
-  return { country: c, allowed, reason: allowed ? null : reason, policy: allowed ? 'open' : geo.denied_policy?.policy ?? 'actions_refused', listVersion: geo.version };
+  return { country: c, allowed, reason: allowed ? null : reason, policy: allowed ? 'open' : geo.denied_policy?.policy ?? 'actions_refused', exitActions: geo.denied_policy?.exit_only_actions ?? [], listVersion: geo.version };
 }
-export function isExitOnly(type, msg) {
-  if (type === 'CancelOrder' || type === 'CancelAll' || type === 'Withdraw') return true;
-  return type === 'PlaceOrder' && msg.reduceOnly === true;
+/** The exit actions are the LIST's (`denied_policy.exit_only_actions`, compliance/geoblock.json), never a copy here:
+ *  0.2.2 added RevokeAgent (R436-7). An action the list does not name is not an exit. */
+export function isExitOnly(type, msg, exitActions) {
+  if (!Array.isArray(exitActions)) return false;
+  if (type === 'PlaceOrder') return msg.reduceOnly === true && exitActions.includes('PlaceOrder(reduceOnly=true)');
+  return exitActions.includes(type);
 }
 
 /**
@@ -134,7 +137,7 @@ export function admit(x, req, ctx) {
   const sanctioned = [account, signer, type === 'Withdraw' ? msg.recipient : null, type === 'ApproveAgent' ? msg.agent : null].filter(Boolean).find((a) => ctx.sanctioned.has(a));
   if (sanctioned) throw new ApiError(451, 'SANCTIONED', 'address on the operator sanctions list', { address: sanctioned });
   const g = ctx.geo;
-  if (!g.allowed && !(g.policy === 'exit_only' && isExitOnly(type, msg))) {
+  if (!g.allowed && !(g.policy === 'exit_only' && isExitOnly(type, msg, g.exitActions))) {
     throw new ApiError(451, 'GEO_RESTRICTED', 'PosternDEX Perpetuals is not available in your jurisdiction.', { country: g.country, listVersion: g.listVersion, policy: g.policy });
   }
   if (type === 'PlaceOrder' || type === 'UpdateLeverage' || type === 'UpdateMargin') {

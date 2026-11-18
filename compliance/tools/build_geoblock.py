@@ -8,7 +8,10 @@ stdlib only; deterministic output (sorted keys, fixed formatting).
 Inputs: compliance/research/jurisdictions.json (curated, every entry with source ids),
 compliance/research/sources.json, compliance/research/iso3166.tab (tz database 2026f, public domain) and the
 previous list compliance/research/geoblock-0.1.1.json (354), whose rule, tiers, anonymizers and denied_policy are
-carried over unchanged and whose entries may only stay as strict or become stricter (tests).
+carried over unchanged and whose entries may only stay as strict or become stricter (tests). One stated exception
+(0.2.2, reviewer finding R436-7): the exit-only actions gain EXIT_ONLY_ADDED, which may hold only actions that
+REMOVE authority or exposure and move no value (RevokeAgent: a geo-denied user must be able to end a leaked agent
+key); the tests refuse any other addition.
 """
 import json
 import os
@@ -20,6 +23,10 @@ RES = os.path.join(ROOT, "research")
 OUT = os.path.join(ROOT, "geoblock.json")
 OUT_MD = os.path.join(ROOT, "jurisdictions.md")
 STRICTNESS = {"allowed": 0, "restricted-review": 1, "blocked": 2}
+# Exit actions added after 0.1.1. Only actions that remove authority or exposure and move no value belong here
+# (tools/test_geoblock.py G-1b refuses anything else): RevokeAgent since 0.2.2 (R436-7).
+EXIT_ONLY_ADDED = ["RevokeAgent"]
+EXIT_ONLY_ADDABLE = ("RevokeAgent",)
 REASONS_ADDED = ["sanctions-crypto-services-prohibition", "residual-sanctions", "fatf-call-for-action",
                  "retail-leverage-limit"]
 
@@ -48,6 +55,12 @@ def entry(name, src):
     if src.get("note"):
         e["note"] = src["note"]
     return e
+
+
+def denied_policy(base):
+    dp = dict(base["denied_policy"])
+    dp["exit_only_actions"] = list(dp["exit_only_actions"]) + [a for a in EXIT_ONLY_ADDED if a not in dp["exit_only_actions"]]
+    return dp
 
 
 def build():
@@ -90,7 +103,7 @@ def build():
         "countries": dict(sorted(countries.items())),
         "subdivisions": dict(sorted(subs.items())),
         "anonymizers": base["anonymizers"],
-        "denied_policy": base["denied_policy"],
+        "denied_policy": denied_policy(base),
     }
     return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
 

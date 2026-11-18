@@ -31,7 +31,7 @@ fn decision_vectors() {
     let s = sanctions::load_sanctions(&json("fixtures/sanctions-fixture.json"), sanctions::DEFAULT_MAX_AGE_MS).unwrap();
     assert_eq!(s.built_ms, v["sanctionsBuiltMs"].as_i64().unwrap());
     let cases = v["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 88);
+    assert_eq!(cases.len(), 90); // 88 + 2 on the real list 0.2.2 (R436-7)
     let mut n = 0;
     for c in cases {
         let name = c["name"].as_str().unwrap();
@@ -49,7 +49,7 @@ fn decision_vectors() {
         }
         n += 1;
     }
-    assert_eq!(n, 88);
+    assert_eq!(n, 90);
 }
 
 fn apply(base: &Value, ops: &Value) -> Value {
@@ -96,10 +96,10 @@ fn list_vectors() {
 #[test]
 fn real_list_guards() {
     let l = load("../geoblock.json");
-    assert_eq!(l.version, "0.2.1"); // 392 0.2.1: every ISO 3166-1 code listed, no allowed entry
+    assert_eq!(l.version, "0.2.2"); // 392 0.2.1 (every ISO 3166-1 code listed, no allowed entry) + R436-7 RevokeAgent exit action
     assert!(l.countries.len() >= 249);
     assert!(l.countries.values().all(|e| e.effect == list::Effect::Deny));
-    assert_eq!(l.exit_actions, vec!["CancelOrder", "CancelAll", "PlaceOrder(reduceOnly=true)", "Withdraw"]);
+    assert_eq!(l.exit_actions, vec!["CancelOrder", "CancelAll", "PlaceOrder(reduceOnly=true)", "Withdraw", "RevokeAgent"]);
     assert!(l.restricted_subdivision_countries.contains("UA"));
 }
 
@@ -188,4 +188,33 @@ fn sanctions_loader() {
     let full = json("data/sanctions-evm.json");
     let f = sanctions::load_sanctions(&full, sanctions::DEFAULT_MAX_AGE_MS).unwrap();
     assert_eq!(f.len() as u64, full["counts"]["evmAddresses"].as_u64().unwrap());
+}
+
+/// R436-7 (list 0.2.2): the list-driven refusal that the vector "blocked country BR, revoke agent refused" pinned
+/// until 0.2.2, kept against a list WITHOUT the RevokeAgent exit entry; with the entry the action is an exit.
+#[test]
+fn action_the_list_does_not_name_as_exit_is_refused() {
+    let s = sanctions::load_sanctions(&json("fixtures/sanctions-fixture.json"), sanctions::DEFAULT_MAX_AGE_MS).unwrap();
+    let with = json("fixtures/geoblock.fixture.json");
+    let mut without = with.clone();
+    let exits: Vec<Value> = with["denied_policy"]["exit_only_actions"].as_array().unwrap().iter().filter(|a| a.as_str() != Some("RevokeAgent")).cloned().collect();
+    assert_eq!(exits.len() + 1, with["denied_policy"]["exit_only_actions"].as_array().unwrap().len());
+    without["denied_policy"]["exit_only_actions"] = Value::Array(exits);
+    let lw = list::load_list(&with, None).unwrap();
+    let lo = list::load_list(&without, None).unwrap();
+    let req = |ty: &str| {
+        serde_json::json!({"mode": "live", "surface": "api", "kind": "action", "action": {"type": ty},
+            "geo": {"country": "BR", "subdivision": null, "trusted": true}, "signals": {"tor": false, "vpnProxy": false, "hosting": false},
+            "addresses": [{"role": "account", "address": "0x00000000000000000000000000000000000000a1"}], "nowMs": 1794877200000i64})
+    };
+    let d0 = decide::decide(Some(&lo), &req("RevokeAgent"), Some(&s));
+    assert!(!d0.allow && d0.code == "GEO_RESTRICTED" && d0.http_status == 451 && !d0.exit_only, "{d0:?}");
+    let d1 = decide::decide(Some(&lw), &req("RevokeAgent"), Some(&s));
+    assert!(d1.allow && d1.code == "OK_EXIT_ONLY" && d1.http_status == 200 && d1.exit_only, "{d1:?}");
+    for l in [&lo, &lw] {
+        assert_eq!(decide::decide(Some(l), &req("ApproveAgent"), Some(&s)).code, "GEO_RESTRICTED");
+    }
+    let mut bad = with.clone();
+    bad["denied_policy"]["exit_only_actions"].as_array_mut().unwrap().push(Value::String("ApproveAgent".into()));
+    assert!(list::load_list(&bad, None).is_err());
 }
