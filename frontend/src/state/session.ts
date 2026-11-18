@@ -78,9 +78,10 @@ export function startSession() {
 }
 
 /** The guard of lib/sign.ts from the current stores. Also usable outside React (`currentGuard`). */
-export function currentGuard(account: string | null): Guard {
+export function currentGuard(account: string | null, walletChainId?: string | null): Guard {
   const markets = feed.markets.get();
   return {
+    walletChainId,
     domain: signingDomain.get(),
     account: account?.toLowerCase() ?? null,
     eip712Problem: eip712Problem.get(),
@@ -106,19 +107,69 @@ export function useGuard(account: string | null): Guard {
 }
 
 /* ---------- Route (hash based: works from any static host and from file://) ---------- */
-export type Route = { page: 'trade'; symbol: string } | { page: 'portfolio' | 'transfers' | 'agents' | 'system' | 'legal' };
-export const PAGES = ['trade', 'portfolio', 'transfers', 'agents', 'system', 'legal'] as const;
+export type FundsTab = 'deposit' | 'withdraw' | 'exit';
+export type HistoryTab = 'orders' | 'fills' | 'funding' | 'transfers';
+export type Route =
+  | { page: 'trade'; symbol: string }
+  | { page: 'transfers'; tab: FundsTab }
+  | { page: 'history'; tab: HistoryTab }
+  | { page: 'funding'; symbol: string }
+  | { page: 'markets' | 'portfolio' | 'agents' | 'system' | 'legal' }
+  /** An address this application does not have: the page says so (it never silently shows another page). */
+  | { page: 'notfound'; path: string };
+export const PAGES = ['trade', 'markets', 'portfolio', 'transfers', 'history', 'funding', 'agents', 'system', 'legal'] as const;
+const SYMBOL = /^[A-Z0-9]{2,10}-USD$/;
+const FUNDS_TABS: readonly string[] = ['deposit', 'withdraw', 'exit'];
+const HISTORY_TABS: readonly string[] = ['orders', 'fills', 'funding', 'transfers'];
 export function parseRoute(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/');
+  const path = hash.replace(/^#\/?/, '');
+  const parts = path.split('/');
   const page = parts[0] || 'trade';
-  if (page === 'trade') return { page: 'trade', symbol: /^[A-Z0-9]{2,10}-USD$/.test(parts[1] ?? '') ? parts[1] : 'BTC-USD' };
-  if ((PAGES as readonly string[]).includes(page)) return { page: page as Exclude<Route['page'], 'trade'> };
-  return { page: 'trade', symbol: 'BTC-USD' };
+  const notfound: Route = { page: 'notfound', path: path.slice(0, 80) };
+  if (page === 'trade') {
+    if (parts.length > 2) return notfound;
+    if (parts[1] === undefined || parts[1] === '') return { page: 'trade', symbol: 'BTC-USD' };
+    return SYMBOL.test(parts[1]) ? { page: 'trade', symbol: parts[1] } : notfound;
+  }
+  // "funds" is the page's name on screen; "transfers" is its first address and stays valid.
+  if (page === 'transfers' || page === 'funds') {
+    if (parts.length > 2) return notfound;
+    if (parts[1] === undefined || parts[1] === '') return { page: 'transfers', tab: 'deposit' };
+    return FUNDS_TABS.includes(parts[1]) ? { page: 'transfers', tab: parts[1] as FundsTab } : notfound;
+  }
+  if (page === 'history') {
+    if (parts.length > 2) return notfound;
+    if (parts[1] === undefined || parts[1] === '') return { page: 'history', tab: 'orders' };
+    return HISTORY_TABS.includes(parts[1]) ? { page: 'history', tab: parts[1] as HistoryTab } : notfound;
+  }
+  if (page === 'funding') {
+    if (parts.length > 2) return notfound;
+    if (parts[1] === undefined || parts[1] === '') return { page: 'funding', symbol: 'BTC-USD' };
+    return SYMBOL.test(parts[1]) ? { page: 'funding', symbol: parts[1] } : notfound;
+  }
+  if (parts.length === 1 && (['markets', 'portfolio', 'agents', 'system', 'legal'] as string[]).includes(page)) return { page } as Route;
+  return notfound;
+}
+export function routeHash(r: Route): string {
+  switch (r.page) {
+    case 'trade':
+      return `#/trade/${r.symbol}`;
+    case 'transfers':
+      return `#/transfers/${r.tab}`;
+    case 'history':
+      return `#/history/${r.tab}`;
+    case 'funding':
+      return `#/funding/${r.symbol}`;
+    case 'notfound':
+      return `#/${r.path}`;
+    default:
+      return `#/${r.page}`;
+  }
 }
 export const route = new Store<Route>(typeof location !== 'undefined' ? parseRoute(location.hash) : { page: 'trade', symbol: 'BTC-USD' });
 if (typeof window !== 'undefined') window.addEventListener('hashchange', () => route.set(parseRoute(location.hash)));
 export function go(r: Route) {
-  const hash = r.page === 'trade' ? `#/trade/${r.symbol}` : `#/${r.page}`;
+  const hash = routeHash(r);
   if (location.hash !== hash) location.hash = hash;
   else route.set(r);
 }

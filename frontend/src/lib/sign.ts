@@ -18,6 +18,7 @@
  *    CancelOrder, CancelAll, Withdraw, reduce-only PlaceOrder; docs/API.md section 6);
  *  - the market is halted (only cancels) or close-only (only cancels and reduce-only orders);
  *  - the sequencer reports it is not running;
+ *  - a wallet signature while the wallet is on another network than the one the domain names (round 2);
  *  - a value the engine would read differently from the review: a PlaceOrder without a positive price (a market
  *    order always carries its worst price), a price off the tick, a size off the step or outside the market's
  *    bounds, a uint64 out of range, a withdrawal to the zero address, an agent approval for the account itself, in
@@ -58,6 +59,12 @@ export type Guard = {
   now: number;
   /** Exchange clock minus this device's clock (from /v1/status), or undefined when not measured. */
   clockSkewMs?: number | null;
+  /**
+   * The chain id the connected wallet reports (hex), or undefined when there is no wallet-side network to check
+   * (tests, an agent key). A wallet signs EIP-712 data only for its active network, and the domain names the Bloch
+   * L2: a wallet signature is refused while the wallet is elsewhere, with the way out (switch network).
+   */
+  walletChainId?: string | null;
 };
 
 /** SPEC 2.5 nonce window around the block time T: T - 120 s <= nonce <= T + 30 s. Nonces are this device's clock. */
@@ -78,6 +85,8 @@ export function isExitAction(type: ActionType, message: Message): boolean {
   // compromised agent key. The node decides; the interface does not stop the attempt.
   return type === 'CancelOrder' || type === 'CancelAll' || type === 'Withdraw' || type === 'RevokeAgent' || (type === 'PlaceOrder' && message.reduceOnly === true);
 }
+
+const onChain = (reported: string | null, chainId: number) => typeof reported === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(reported) && BigInt(reported) === BigInt(chainId);
 
 const uint = (v: unknown) => {
   try {
@@ -170,6 +179,8 @@ export function refusals(type: ActionType, message: Message, signer: Signer | nu
   if (account && String(message.account).toLowerCase() !== account) out.push('The request names another account than the connected wallet.');
   if (signer && account) {
     if (signer.kind === 'wallet' && signer.address !== account) out.push('The wallet account changed. Review again.');
+    if (signer.kind === 'wallet' && guard.walletChainId !== undefined && guard.domain && !onChain(guard.walletChainId, guard.domain.chainId))
+      out.push(`Your wallet is on another network. Switch it to the Bloch L2 (chain ${guard.domain.chainId}): a wallet signs this request only on the network it names.`);
     if (signer.kind === 'agent') {
       if (!AGENT_ALLOWED.includes(type)) out.push('This action needs your main wallet. An agent key can never sign it.');
       if (signer.expiresAt !== undefined && signer.expiresAt <= guard.now) out.push('The agent key on this device has expired. Approve a new one or sign with your wallet.');

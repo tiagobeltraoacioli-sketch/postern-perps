@@ -307,4 +307,6 @@ export type Withdrawal = {
   txHash: string | null;
   availableAt: number | null;
   time: number;
+  /** The exchange's certificate as it arrived (unparsed, untrusted): vault/wire.ts reads it, vault/vault.ts checks it. */
+  certificate: unknown | null;
 };

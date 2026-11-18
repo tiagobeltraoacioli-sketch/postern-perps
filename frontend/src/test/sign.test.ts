@@ -42,6 +42,24 @@ describe('refusals', () => {
   it('refuses a wallet signer that is not the connected account', () => {
     expect(refusals('PlaceOrder', order(), localSigner(generatePrivateKey()), guard(account))).toContain('The wallet account changed. Review again.');
   });
+  // Round 2 (real wallets): a wallet signs typed data only for its active network; the domain names chain 700770.
+  it('refuses a wallet signature while the wallet is on another network; an agent key (no wallet) is not affected', () => {
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: '0x1' })).join()).toMatch(/wallet is on another network.*Bloch L2 \(chain 700770\)/);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: 'garbage' })).join()).toMatch(/wallet is on another network/);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: '0xab162' }))).toEqual([]);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: undefined }))).toEqual([]);
+    const agentKey = generatePrivateKey();
+    const agent = localSigner(agentKey, 'agent', NOW + 3_600_000);
+    expect(refusals('PlaceOrder', order(), agent, guard(account, { walletChainId: '0x1' }))).toEqual([]);
+  });
+  it('the network is re-checked at signing time: a switch away while the review is open stops the signature', async () => {
+    const signer = localSigner();
+    const sign = vi.spyOn(signer, 'sign');
+    const prepared = prepare('PlaceOrder', order(), signer, guard(account, { walletChainId: '0xab162' }));
+    expect(prepared.refusals).toEqual([]);
+    await expect(signAndSubmit(prepared, signer, () => guard(account, { walletChainId: '0x89' }), async () => 'sent')).rejects.toThrow(/another network/);
+    expect(sign).not.toHaveBeenCalled();
+  });
   it('refuses before the typed-data check and when it differs', () => {
     expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { eip712Problem: undefined })).join()).toMatch(/not been checked/);
     expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { eip712Problem: 'type PlaceOrder differs' })).join()).toMatch(/out of date/);

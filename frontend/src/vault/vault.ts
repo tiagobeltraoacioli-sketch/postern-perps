@@ -486,6 +486,16 @@ export async function forcedRequestsOf(l2: L2, d: Deployment, account: Hex, from
   return logs.map((l) => forcedOf(d, l)).filter((x): x is VaultForced => x !== null && x.account === account.toLowerCase());
 }
 
+/** Whether each deposit index was already refunded (escape mode), read at one block. */
+export async function readRefunded(l2: L2, d: Deployment, indexes: readonly bigint[], at: bigint | 'latest' = 'latest'): Promise<boolean[]> {
+  if (indexes.length === 0) return [];
+  const out = await l2.calls(
+    indexes.map((i) => ({ to: d.vault, data: vaultCall('refunded', [i]) })),
+    at,
+  );
+  return out.map((data) => vaultResult('refunded', data) as boolean);
+}
+
 /* ---------------------------------------------------------------- claims */
 
 export class ClaimRefused extends Error {}

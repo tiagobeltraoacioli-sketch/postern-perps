@@ -151,7 +151,7 @@ export function deposit(w: T.WireDeposit): T.Deposit {
   return { id: w.depositId, amount: usd(w.amount), txHash: w.l2TxHash, l2Block: w.l2Block, status: w.status, time: w.time };
 }
 export function withdrawal(w: T.WireWithdrawal): T.Withdrawal {
-  return { id: w.withdrawalId, recipient: w.recipient, amount: usd(w.amount), fee: usd(w.fee), status: w.status, txHash: w.l2TxHash, availableAt: w.availableAt, time: w.time };
+  return { id: w.withdrawalId, recipient: w.recipient, amount: usd(w.amount), fee: usd(w.fee), status: w.status, txHash: w.l2TxHash, availableAt: w.availableAt, time: w.time, certificate: w.certificate ?? null };
 }
 
 export const pxNumber = (v: bigint) => toNumber(v, PX_DECIMALS);

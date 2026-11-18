@@ -2,7 +2,7 @@
 // Starts the frontend dev server against a LOCAL stack (loopback only). UNAUDITED prototype; never a deployment.
 //
 //   node scripts/dev-local.mjs --api http://127.0.0.1:49900 --l2 http://127.0.0.1:49901 \
-//        --vault 0x… --token 0x… [--chain 700770] [--port 49920] [--config-out FILE]
+//        --vault 0x… --token 0x… [--deploy-block N] [--chain 700770] [--port 49920] [--config-out FILE]
 //
 // Writes a build configuration shaped like config/production.json (default: .local/stack.json, git-ignored) and runs
 // `vite --host 127.0.0.1 --port P --strictPort` with POSTERN_PERPS_CONFIG pointing at it. Such a build is a "local
@@ -54,6 +54,7 @@ const config = {
   vault: address('vault', opt('vault')),
   collateral: address('token', opt('token')),
   explorerTx: null,
+  ...(opt('deploy-block') !== undefined ? { vaultDeployBlock: Number(opt('deploy-block')) } : {}),
 };
 const out = resolve(opt('config-out', resolve(frontend, '.local/stack.json')));
 mkdirSync(dirname(out), { recursive: true });

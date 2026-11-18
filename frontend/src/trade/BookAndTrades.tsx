@@ -12,7 +12,9 @@ import type { Level } from '../lib/calc';
 import type { Market } from '../lib/types';
 import { pricePick } from './hooks';
 
-const ROWS = 11;
+/** Levels rendered per side. On the fitted desktop layout the panel shows as many as its height allows (asks are
+ *  anchored to the spread and cut from the far end); elsewhere all of them. */
+const ROWS = 14;
 
 export function aggregate(levels: Level[], group: bigint, bids: boolean): Level[] {
   if (group <= 0n) return levels;
