@@ -198,6 +198,16 @@ impl Engine for RealEngine {
     fn real(&self) -> Option<&pe::Engine> {
         Some(&self.e)
     }
+    fn block_limits(&self) -> (usize, usize) {
+        (pe::engine::MAX_INPUTS, pe::engine::MAX_BLOCK_BYTES)
+    }
+    fn oracle_time_bounds(&self) -> (u64, u64) {
+        (self.e.g.g.oracle_max_future_ms, self.e.g.g.oracle_max_age_ms)
+    }
+    fn precheck_input(&self, input: &Input) -> Result<(), String> {
+        let bytes = encode_inputs(&self.g.types, std::slice::from_ref(input))?;
+        pe::codec::decode_inputs(&bytes).map(|_| ()).map_err(|e| e.0.to_string())
+    }
     fn market_table(&self, g: &Genesis) -> Option<Vec<serde_json::Value>> {
         use crate::util::scaled_to_decimal as d;
         let frac = |ppm: u32| d(ppm as u128, 6);

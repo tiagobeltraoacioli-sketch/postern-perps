@@ -33,6 +33,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const MAX_ACTIONS_PER_BLOCK: usize = 5_000;
+/// R436-3: a block takes at most this many pending L2 inputs (each a consecutive prefix in vault index order); the
+/// rest follow in the next blocks. 1 + 2,000 + 1,000 + 5,000 stays below the engine's MAX_INPUTS (10,000), and
+/// `produce` also keeps the block inside the engine's own input and byte bounds (`Engine::block_limits`).
+pub const MAX_DEPOSITS_PER_BLOCK: usize = 2_000;
+pub const MAX_FORCED_PER_BLOCK: usize = 1_000;
 pub const MAX_MEMPOOL: usize = 100_000;
 pub const ACK_RETENTION: usize = 500_000;
 
@@ -392,6 +397,9 @@ impl Sequencer {
         if self.acks.contains_key(&v.action_hash) {
             return Err(adm(400, "NONCE_USED", "action already received"));
         }
+        // R436-4: the ENGINE's own decoder must accept this action on its own. An action it refuses would make it
+        // refuse the whole block that carries it; it never enters the mempool.
+        self.engine.precheck_input(&Input::Action(a.clone())).map_err(|e| adm(400, "MALFORMED", format!("the engine's decoder refuses this action: {e}")))?;
         let t = self.engine.time().max(now_ms);
         self.engine.authority(&v.account, &v.signer, &v.primary, t).map_err(|e| match e {
             AuthorityError::UnknownSigner => adm(403, "UNKNOWN_SIGNER", "signer is neither the account nor an approved, unexpired agent"),
@@ -423,6 +431,17 @@ impl Sequencer {
         Ok(ack)
     }
 
+    /// DEV / TEST ONLY (behind the dev-oracle feature, which a release build refuses to compile): puts an action
+    /// into the mempool WITHOUT admission, to test what `produce` does with an input that should never get there.
+    #[cfg(feature = "dev-oracle")]
+    pub fn dev_inject_unchecked(&mut self, a: SignedAction, now_ms: u64) -> H256 {
+        let v = verify_signed_action(&self.g, &a).expect("a signed action");
+        self.mempool.push_back((a, v.action_hash));
+        self.acks.insert(v.action_hash, Ack { action_hash: v.action_hash, received_at: now_ms, status: "accepted", height: None, index: None, result: None, signer: v.signer, account: v.account });
+        self.ack_order.push_back(v.action_hash);
+        v.action_hash
+    }
+
     /// Queues an oracle update (signatures are checked by the engine; the sequencer only keeps the newest rounds).
     pub fn submit_oracle(&mut self, u: OracleUpdate) -> Result<(), String> {
         if u.round <= self.engine.last_oracle_round() {
@@ -436,57 +455,186 @@ impl Sequencer {
         Ok(())
     }
 
+    /// Marks an action that left the mempool without entering a block.
+    fn reject_ack(&mut self, hash: &H256, a: &SignedAction, error: String) {
+        if let Some(k) = self.acks.get_mut(hash) {
+            k.status = "rejected";
+            k.result = Some(serde_json::json!({"ok": false, "error": error}));
+        }
+        if let Ok(v) = verify_signed_action(&self.g, a) {
+            if let Some(set) = self.pending_nonce.get_mut(&v.signer) {
+                set.remove(&v.nonce);
+                if set.is_empty() {
+                    self.pending_nonce.remove(&v.signer);
+                }
+            }
+        }
+    }
+
     /// Builds, applies, logs (fsync) and signs the next block; `None` when there is nothing to include.
+    ///
+    /// Bounds (R436-3): at most one oracle update, `MAX_DEPOSITS_PER_BLOCK` deposits, `MAX_FORCED_PER_BLOCK` forced
+    /// requests and `MAX_ACTIONS_PER_BLOCK` actions, and never more inputs or encoded bytes than the engine accepts
+    /// in a block; what does not fit waits for the next block (L2 inputs as a consecutive prefix, actions in
+    /// arrival order).
+    ///
+    /// A refusal of the built block by the engine (R436-4): each input is asked of the engine's decoder on its
+    /// own; actions (and an oracle update) it refuses are dropped and acknowledged as rejected, and the block is
+    /// rebuilt once from the rest. Only if nothing explains the refusal, or an L2 input (whose order is the
+    /// vault's and cannot be skipped) is the cause, the sequencer halts (fail closed).
     pub fn produce(&mut self, now_ms: u64) -> Result<Option<Arc<BlockInfo>>, String> {
         if let Some(h) = &self.halted {
             return Err(format!("halted: {h}"));
         }
+        let (max_inputs, max_bytes) = self.engine.block_limits();
+        let max_inputs = max_inputs.min(crate::types::MAX_INPUTS_PER_BLOCK);
+        let size_of = |types: &crate::types::ActionTypes, i: &Input| -> Result<usize, String> { Ok(5 + crate::types::encode_payload(types, i)?.len()) };
+        let mut size = 4usize;
         let mut inputs = Vec::new();
         let last_round = self.engine.last_oracle_round();
         self.pending_oracle.retain(|r, _| *r > last_round);
         // the newest round on offer: a whole update queued by `submit_oracle` (dev oracle, tests) or the newest
         // READY round of the ingest pool (every observation held for it)
-        let pooled = self.oracle_pool.take_ready(&self.g, last_round, now_ms);
+        let height = self.log.last_height + 1;
+        let time = now_ms.max(self.log.last_time + 1);
+        let (max_future, max_age) = self.engine.oracle_time_bounds();
+        let pooled = self.oracle_pool.take_ready_at(&self.g, last_round, now_ms, time, max_future, max_age);
         let queued = self.pending_oracle.iter().next_back().map(|(_, u)| u.clone());
-        match (pooled, queued) {
-            (Some(p), Some(q)) => inputs.push(Input::Oracle(if p.round >= q.round { p } else { q })),
-            (Some(u), None) | (None, Some(u)) => inputs.push(Input::Oracle(u)),
-            (None, None) => {}
+        let oracle = match (pooled, queued) {
+            (Some(p), Some(q)) => Some(if p.round >= q.round { p } else { q }),
+            (Some(u), None) | (None, Some(u)) => Some(u),
+            (None, None) => None,
+        };
+        if let Some(u) = oracle {
+            let i = Input::Oracle(u);
+            match size_of(&self.g.types, &i) {
+                Ok(sz) if size + sz <= max_bytes => {
+                    size += sz;
+                    inputs.push(i);
+                }
+                // an update that cannot be encoded or does not fit a block is not an input (the round is skipped)
+                _ => {
+                    if let Input::Oracle(u) = &i {
+                        self.pending_oracle.remove(&u.round);
+                    }
+                }
+            }
         }
         {
             let v = self.view.lock().unwrap();
             let mut nd = self.engine.next_deposit_index();
+            let mut taken = 0;
             while let Some(d) = v.deposits.get(&nd) {
-                inputs.push(Input::Deposit(d.clone()));
+                let i = Input::Deposit(d.clone());
+                let sz = size_of(&self.g.types, &i)?;
+                if taken >= MAX_DEPOSITS_PER_BLOCK || inputs.len() >= max_inputs || size + sz > max_bytes {
+                    break;
+                }
+                size += sz;
+                inputs.push(i);
                 nd += 1;
+                taken += 1;
             }
             let mut nf = self.engine.next_forced_index();
+            let mut taken = 0;
             while let Some(f) = v.forced.get(&nf) {
-                inputs.push(Input::Forced(f.clone()));
+                let i = Input::Forced(f.clone());
+                let sz = size_of(&self.g.types, &i)?;
+                if taken >= MAX_FORCED_PER_BLOCK || inputs.len() >= max_inputs || size + sz > max_bytes {
+                    break;
+                }
+                size += sz;
+                inputs.push(i);
                 nf += 1;
+                taken += 1;
             }
         }
-        let n_actions = self.mempool.len().min(MAX_ACTIONS_PER_BLOCK);
-        let actions: Vec<(SignedAction, H256)> = self.mempool.drain(..n_actions).collect();
+        let fixed = inputs.len();
+        let mut actions: Vec<(SignedAction, H256)> = Vec::new();
+        while actions.len() < MAX_ACTIONS_PER_BLOCK && fixed + actions.len() < max_inputs {
+            let Some((a, _)) = self.mempool.front() else { break };
+            let sz = match size_of(&self.g.types, &Input::Action(a.clone())) {
+                Ok(sz) => sz,
+                Err(e) => {
+                    // cannot even be encoded: never an input
+                    let (a, h) = self.mempool.pop_front().unwrap();
+                    self.reject_ack(&h, &a, format!("MALFORMED: {e}"));
+                    continue;
+                }
+            };
+            if size + sz > max_bytes {
+                break;
+            }
+            size += sz;
+            actions.push(self.mempool.pop_front().unwrap());
+        }
         for (a, _) in &actions {
             inputs.push(Input::Action(a.clone()));
         }
         if inputs.is_empty() {
             return Ok(None);
         }
-        let height = self.log.last_height + 1;
-        let time = now_ms.max(self.log.last_time + 1);
-        let enc = encode_inputs(&self.g.types, &inputs)?;
         // apply on a copy first: the live engine moves only once the block is durable
         let mut next = self.engine.clone_box();
-        let out = match next.apply_block(height, time, &inputs) {
-            Ok(o) => o,
-            Err(e) => {
-                // a structurally invalid block built by this sequencer is a bug: stop producing (fail closed)
-                self.halted = Some(format!("own block {height} refused by the engine: {e}"));
+        let mut out = next.apply_block(height, time, &inputs);
+        if let Err(first) = &out {
+            let first = first.clone();
+            // R436-4: find the inputs the engine's decoder refuses on their own
+            let mut l2_cause: Option<String> = None;
+            let mut dropped = 0usize;
+            let mut kept_fixed = Vec::new();
+            for i in inputs.drain(..fixed) {
+                match self.engine.precheck_input(&i) {
+                    Ok(()) => kept_fixed.push(i),
+                    Err(why) => match &i {
+                        Input::Oracle(u) => {
+                            eprintln!("produce: oracle round {} dropped, the engine's decoder refuses it: {why}", u.round);
+                            self.pending_oracle.remove(&u.round);
+                            dropped += 1;
+                        }
+                        _ => {
+                            l2_cause.get_or_insert(why);
+                            kept_fixed.push(i);
+                        }
+                    },
+                }
+            }
+            let mut kept_actions = Vec::new();
+            for (a, h) in actions.drain(..) {
+                match self.engine.precheck_input(&Input::Action(a.clone())) {
+                    Ok(()) => kept_actions.push((a, h)),
+                    Err(why) => {
+                        eprintln!("produce: action {} dropped, the engine's decoder refuses it: {why}", to_hex(&h));
+                        self.reject_ack(&h, &a, format!("MALFORMED: the engine's decoder refuses this action: {why}"));
+                        dropped += 1;
+                    }
+                }
+            }
+            if dropped == 0 || l2_cause.is_some() {
+                // nothing droppable explains it (a bug), or an L2 input is refused (its order cannot be skipped)
+                self.halted = Some(match l2_cause {
+                    Some(why) => format!("own block {height} refused by the engine: {first}; an L2 input is refused by the engine's decoder: {why}"),
+                    None => format!("own block {height} refused by the engine: {first}"),
+                });
                 return Err(self.halted.clone().unwrap());
             }
-        };
+            actions = kept_actions;
+            inputs = kept_fixed;
+            for (a, _) in &actions {
+                inputs.push(Input::Action(a.clone()));
+            }
+            if inputs.is_empty() {
+                return Ok(None);
+            }
+            next = self.engine.clone_box();
+            out = next.apply_block(height, time, &inputs);
+            if let Err(e) = &out {
+                self.halted = Some(format!("own block {height} refused by the engine after dropping {dropped} refused input(s): {e}"));
+                return Err(self.halted.clone().unwrap());
+            }
+        }
+        let out = out.expect("checked above");
+        let enc = encode_inputs(&self.g.types, &inputs)?;
         let lh = log_hash(&self.log.last_log_hash, height, time, &enc);
         let mut b = Block {
             header: BlockHeader { height, time, prev_log_hash: self.log.last_log_hash, log_hash: lh, state_root: next.state_root() },

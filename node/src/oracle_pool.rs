@@ -17,6 +17,10 @@
 //!   sequencer does not cut the round at the first quorum it likes). The residual bias is the sequencer's choice
 //!   of WHEN inside that window to build the block, bounded by `gather_ms`; an observation the sequencer claims
 //!   it never received cannot be told from a late one by this node (432's round digest is the stronger answer);
+//! - time (R436-12): the engine refuses a whole update when ONE observation is outside its time bound at the
+//!   block's time, so the pool hands over only observations the engine accepts at that time, defers a round
+//!   while a held observation is still in the engine's future, and leaves out what can never be accepted
+//!   (`take_ready_at`). One late or fast-clock signer delays a round by at most `3000 - maxFutureMs` ms;
 //! - rounds at or below the engine's last accepted round are refused (`ORACLE_ROUND_NOT_NEW`), rounds further
 //!   than one ahead of the wall clock are refused, and at most `MAX_ROUNDS` rounds are held.
 //!
@@ -58,13 +62,16 @@ pub struct OraclePool {
     pub accepted: u64,
     pub refused: u64,
     pub rounds_built: u64,
+    /// observations held for a built round and not handed over, because the engine refuses them at the block's
+    /// time (too old, or in its future with no time left to wait)
+    pub left_out: u64,
     /// signers seen in the last round handed to the sequencer
     pub last_built: Option<(u64, Vec<u8>)>,
 }
 
 impl Default for OraclePool {
     fn default() -> Self {
-        OraclePool { rounds: BTreeMap::new(), gather_ms: DEFAULT_GATHER_MS, conflicts: 0, accepted: 0, refused: 0, rounds_built: 0, last_built: None }
+        OraclePool { rounds: BTreeMap::new(), gather_ms: DEFAULT_GATHER_MS, conflicts: 0, accepted: 0, refused: 0, rounds_built: 0, left_out: 0, last_built: None }
     }
 }
 
@@ -217,6 +224,58 @@ impl OraclePool {
         Some(OracleUpdate { round, observations: r.obs.into_values().collect() })
     }
 
+    /// As `take_ready`, for a block whose engine time will be `block_time`, under the engine's time bounds
+    /// (oracle/README C2c, the engine's own test: an observation is refused when `timeMs > T + maxFutureMs` or
+    /// `T - timeMs > maxAgeMs`, and ONE refused observation refuses the whole update). R436-12:
+    ///
+    /// - only observations the engine accepts at `block_time` are handed over. This is not selection: the rule is
+    ///   the engine's, a function of the observation's own signed time and the block time;
+    /// - an observation still in the engine's future DEFERS the round until it is acceptable (at most until the
+    ///   round's last `maxFutureMs`), so a late signer costs a delay, never the round;
+    /// - unless waiting would let an acceptable one expire first: then the round is built now without the future
+    ///   ones; observations already too old are left out. Both are counted in `left_out`.
+    pub fn take_ready_at(&mut self, g: &Genesis, last_round: u64, now_ms: u64, block_time: u64, max_future_ms: u64, max_age_ms: u64) -> Option<OracleUpdate> {
+        self.rounds.retain(|r, _| *r > last_round);
+        let gather = self.gather_ms;
+        let (n, q) = (g.oracle_committee.len(), g.oracle_quorum);
+        let t = block_time;
+        let in_future = |o: &SignedObservation| o.time_ms > t.saturating_add(max_future_ms);
+        let too_old = |o: &SignedObservation| o.time_ms <= t && t - o.time_ms > max_age_ms;
+        let mut chosen: Option<(u64, Vec<u8>)> = None;
+        for (round, r) in self.rounds.iter().rev() {
+            let gathered = r.obs.len() >= n || r.quorum_at.is_some_and(|x| now_ms >= x.saturating_add(gather));
+            if !gathered {
+                continue;
+            }
+            let valid: Vec<&SignedObservation> = r.obs.values().filter(|o| !in_future(o) && !too_old(o)).collect();
+            if valid.len() < q {
+                continue;
+            }
+            let latest_future = r.obs.values().filter(|o| in_future(o)).map(|o| o.time_ms).max();
+            if let Some(lf) = latest_future {
+                // every held observation is acceptable from T' = lf - maxFuture on; the first acceptable one to
+                // expire does so after min(timeMs) + maxAge
+                let all_acceptable_from = lf.saturating_sub(max_future_ms);
+                let first_expiry = valid.iter().map(|o| o.time_ms).min().unwrap_or(0).saturating_add(max_age_ms);
+                if all_acceptable_from <= first_expiry {
+                    continue; // wait: nothing is lost by waiting
+                }
+            }
+            chosen = Some((*round, valid.iter().map(|o| o.signer).collect()));
+            break;
+        }
+        let (round, signers) = chosen?;
+        let r = self.rounds.remove(&round)?;
+        self.rounds.retain(|k, _| *k > round);
+        self.rounds_built += 1;
+        self.left_out += (r.obs.len() - signers.len()) as u64;
+        if r.obs.len() != signers.len() {
+            eprintln!("oracle ingest: round {round}: {} of {} held observations left out (outside the engine's time bound at block time {t})", r.obs.len() - signers.len(), r.obs.len());
+        }
+        self.last_built = Some((round, signers.clone()));
+        Some(OracleUpdate { round, observations: r.obs.into_iter().filter(|(s, _)| signers.contains(s)).map(|(_, o)| o).collect() })
+    }
+
     /// Signers held for the newest round (for `OracleStatus.signers`).
     pub fn newest_held(&self) -> usize {
         self.rounds.values().next_back().map(|r| r.obs.len()).unwrap_or(0)
@@ -226,7 +285,7 @@ impl OraclePool {
         serde_json::json!({
             "quorum": g.oracle_quorum, "signers": g.oracle_committee.iter().map(|a| to_hex(a)).collect::<Vec<_>>(),
             "gatherMs": self.gather_ms, "accepted": self.accepted, "refused": self.refused, "conflicts": self.conflicts,
-            "roundsBuilt": self.rounds_built,
+            "roundsBuilt": self.rounds_built, "leftOut": self.left_out,
             "lastBuilt": self.last_built.as_ref().map(|(r, s)| serde_json::json!({"round": r.to_string(), "signers": s})),
             "held": self.rounds.iter().rev().map(|(r, x)| serde_json::json!({"round": r.to_string(), "signers": x.obs.keys().collect::<Vec<_>>(),
                 "quorumAtMs": x.quorum_at})).collect::<Vec<_>>(),

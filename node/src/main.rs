@@ -239,7 +239,7 @@ async fn dev(a: HashMap<String, String>) {
         None => serde_json::json!({"version": "dev-fixture", "unknown_country_effect": "deny",
             "tiers": {"allowed": {"effect": "allow"}, "blocked": {"effect": "deny"}},
             "countries": {"PA": {"tier": "allowed"}, "ZZ": {"tier": "allowed"}, "BR": {"tier": "blocked"}, "US": {"tier": "blocked"}},
-            "denied_policy": {"policy": "exit_only"}}),
+            "denied_policy": {"policy": "exit_only", "exit_only_actions": ["CancelOrder", "CancelAll", "PlaceOrder(reduceOnly=true)", "Withdraw", "RevokeAgent"]}}),
     };
     let mut geo = GeoPolicy::from_json(&geo_json, true).expect("geoblock policy");
     geo.add_sanctioned(&["0x000000000000000000000000000000000000dead".into()]).unwrap();

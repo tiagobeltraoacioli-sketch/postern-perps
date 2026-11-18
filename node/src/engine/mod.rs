@@ -214,6 +214,19 @@ pub trait Engine: Send + Sync {
     fn agents_json(&self, a: &Address) -> serde_json::Value;
     fn name(&self) -> &'static str;
     fn clone_box(&self) -> Box<dyn Engine>;
+    /// (maximum inputs, maximum encoded bytes) of a block this engine accepts.
+    fn block_limits(&self) -> (usize, usize) {
+        (crate::types::MAX_INPUTS_PER_BLOCK, usize::MAX)
+    }
+    /// Would this engine's own decoder accept the input on its own? Admission asks this for every action, and
+    /// `Sequencer::produce` for every input of a block the engine refused (R436-4).
+    fn precheck_input(&self, _input: &Input) -> Result<(), String> {
+        Ok(())
+    }
+    /// (maxFutureMs, maxAgeMs) of the engine's oracle time rule C2c; no bound for the stub.
+    fn oracle_time_bounds(&self) -> (u64, u64) {
+        (u64::MAX, u64::MAX)
+    }
     /// The real engine behind this adapter (`None` for the stub): read-only access for the API views and the index.
     fn real(&self) -> Option<&postern_perps_engine::Engine> {
         None
