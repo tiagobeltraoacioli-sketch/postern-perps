@@ -790,3 +790,105 @@ fn replay_schedule_one_step_per_round() {
         [0, 1, 2, 3, 4, 3, 2, 1, 0, 1]
     );
 }
+
+/// The node's dev oracle committee for seed `dev` (`node/src/dev.rs`), re-derived here from the same public label.
+/// Expected addresses computed independently with Foundry: `cast wallet address --private-key
+/// $(cast keccak "postern-perps THROWAWAY dev key | dev/oracle | <i> | 0")`, sorted.
+#[test]
+fn node_dev_seed_committee_matches_the_independent_derivation() {
+    let c = DevCommittee::node_dev("dev", 7, 5).unwrap();
+    let got: Vec<String> = c
+        .addresses()
+        .iter()
+        .map(|a| format!("0x{}", hex::encode(a)))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "0x008b32d0d6800a94384dfcea267474534303cea4",
+            "0x3e0acedd937c6f4c0cb776c5bb1296144cc0a793",
+            "0x50693116acb0e3b9572f1df8145b77d39afe4a5f",
+            "0x70d215ae79a6a72106f21d2ebcf3fe1f514fad45",
+            "0xc04208e60e4fb1afc65177f4ceaa855a8b414da1",
+            "0xcc023509057ad5f2d6bb12144c5cbea0b13af90f",
+            "0xebc1490fff441f0ca483b10c59ae051fd81f9440",
+        ]
+    );
+    assert_ne!(
+        DevCommittee::node_dev("other", 7, 5).unwrap().addresses(),
+        c.addresses()
+    );
+}
+
+/// Per-round view of one market after a tape is played through the engine rule with 3 s rounds and a block
+/// 100 ms after each sampling time.
+fn play(text: &str, market: u32) -> Vec<(Status, u64)> {
+    let steps = tape::parse(text).unwrap();
+    let ks = keys(7);
+    let prm = committee(&ks, 5);
+    let mut st = OracleState::genesis(&prm).unwrap();
+    let mut t = 1_800_000_000_150u64;
+    let mut out = Vec::new();
+    for s in &steps {
+        t += ROUND_MS;
+        begin_block(&prm, &mut st, t + 100);
+        if let Some(u) = build_update(s, &ks, &VAULT, t) {
+            apply_update(&prm, &mut st, &u, t + 100).unwrap();
+        }
+        let m = st.market(market).unwrap();
+        out.push((m.status, m.index));
+    }
+    out
+}
+
+/// Every committed tape parses and does what its notes say under the engine rule.
+#[test]
+fn committed_tapes_do_what_their_notes_say() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tapes");
+    let read = |n: &str| fs::read_to_string(dir.join(n)).unwrap();
+    let u = PRICE_SCALE;
+
+    let flat = play(&read("flat-dev-prices.jsonl"), 1);
+    assert_eq!(flat.len(), 1200);
+    assert!(flat[2..].iter().all(|x| *x == (Status::Active, 67_250 * u)));
+
+    let text = read("rehearsal-example.jsonl");
+    let (btc, eth) = (play(&text, 1), play(&text, 2));
+    assert_eq!(btc.len(), 10 + 40 + 10 + 4 + 3 + 3 + 5 + 10);
+    // BTC: active from round 2 through the whole 12% ramp, at the target afterwards.
+    assert!(btc[2..50].iter().all(|x| x.0 == Status::Active));
+    assert_eq!(btc[9].1, 67_250 * u);
+    assert_eq!(btc[49].1, 59_180 * u);
+    assert!(
+        btc[10..50].windows(2).all(|w| w[1].1 < w[0].1),
+        "strictly down during the ramp"
+    );
+    // ETH gap at round 60: JUMP halt, the index unchanged for two rounds, resumed at 3100 on the third.
+    assert_eq!(eth[59], (Status::Active, 3_480 * u));
+    assert_eq!(eth[60], (Status::Halted(HaltReason::Jump), 3_480 * u));
+    assert_eq!(eth[61], (Status::Halted(HaltReason::Jump), 3_480 * u));
+    assert_eq!(eth[62], (Status::Active, 3_100 * u));
+    // Liars (rounds 64..66) and quorum-only rounds (67..69): BTC follows the honest price.
+    assert!(btc[64..67]
+        .iter()
+        .all(|x| *x == (Status::Active, 59_200 * u)));
+    assert!(btc[67..70]
+        .iter()
+        .all(|x| *x == (Status::Active, 59_210 * u)));
+    // Silent rounds 70..74: STALE by the fourth (12 s without an update), for every market.
+    assert_eq!(btc[74], (Status::Halted(HaltReason::Stale), 59_210 * u));
+    assert_eq!(eth[74].0, Status::Halted(HaltReason::Stale));
+    // Back on the third round after the silence.
+    assert_eq!(btc[76].0, Status::Halted(HaltReason::Stale));
+    assert_eq!(btc[77], (Status::Active, 59_220 * u));
+    assert_eq!(btc[84], (Status::Active, 59_220 * u));
+
+    // Every tape in the directory parses.
+    for e in fs::read_dir(&dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "jsonl") {
+            tape::parse(&fs::read_to_string(&p).unwrap())
+                .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        }
+    }
+}
