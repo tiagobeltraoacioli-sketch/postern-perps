@@ -337,3 +337,52 @@ fn r436_10_forced_close_in_a_halt_is_a_free_exit_at_the_stale_index_paid_by_the_
     assert!(s_forced - s_plain > usdc(2_600) as i128, "S avoided the 4% loss on 1 BTC (2,690 USDC) except for a fee");
     assert!(a_plain - a_forced > usdc(2_600) as i128, "A lost exactly that gain: it was closed at the stale price without asking");
 }
+
+/// CHECK (passes = the engine agrees with a hand computation; not a defect). Funding numerics of SPEC 7 with the
+/// compliance clamp (62,500 = 0.00625% per hour), computed here independently:
+///   quotes rest at index + 6.7 / + 6.9 USD for the whole interval, so every premium sample is
+///   floor((67,256.7 - 67,250.0) * 1e9 / 67,250.0) = 99,628 (1e-9); P = median = 99,628;
+///   rate = P + clamp(interest - P, -c, +c) = 99,628 + max(12,500 - 99,628, -62,500) = 37,128;
+///   mark at the boundary = index + clamp(median(bid, ask, index) - index, +/-0.5%) = 67,256.7;
+///   long 1 BTC pays ceil(1e8 * 6,725,670,000,000 * 37,128 / 1e19), the short receives the floor.
+#[test]
+fn check_r436_funding_rate_and_payments_equal_a_hand_computation() {
+    let mut m = market(BTC, "BTC-USD");
+    m.funding_clamp = 62_500;
+    let mut r = Rig::new();
+    r.e = Engine::new(genesis(7, vec![m]));
+    let (ka, kb, km) = (key(4401), key(4402), key(4403));
+    let (a, b, mm) = (addr(&ka), addr(&kb), addr(&km));
+    let deps = vec![r.dep(a, usdc(50_000)), r.dep(b, usdc(50_000)), r.dep(mm, usdc(500_000))];
+    all_ok(&r.block(P, deps));
+    let i1 = r.order(&ka, true, ORDER_LIMIT, TIF_GTC, P, ONE);
+    let i2 = r.order(&kb, false, ORDER_MARKET, TIF_IOC, P - 100 * TICK, ONE);
+    all_ok(&r.block(P, vec![i1, i2]));
+    let (bid, ask) = (P + 67 * TICK, P + 69 * TICK);
+    let q1 = r.order(&km, true, ORDER_LIMIT, TIF_GTC, bid, ONE);
+    let q2 = r.order(&km, false, ORDER_LIMIT, TIF_GTC, ask, ONE);
+    all_ok(&r.block(P, vec![q1, q2]));
+    let (bal_a, bal_b, dust0, ins0) = (r.bal(&a), r.bal(&b), r.e.dust, r.ins());
+    let mut rate_seen = None;
+    for _ in 0..400 {
+        let out = r.block(P, vec![]);
+        if let Some(rate) = out.events.iter().find_map(|e| if let Event::Funding { rate, .. } = e { Some(*rate) } else { None }) {
+            rate_seen = Some(rate);
+            break;
+        }
+    }
+    let premium = ((bid - P) as i128) * 1_000_000_000 / (P as i128);
+    assert_eq!(premium, 99_628);
+    let want_rate = premium + (12_500 - premium).clamp(-62_500, 62_500);
+    assert_eq!(want_rate, 37_128);
+    assert_eq!(rate_seen, Some(want_rate), "funding rate");
+    let x: i128 = (ONE as i128) * (bid as i128) * want_rate; // size * mark * rate
+    let d: i128 = 10_000_000_000_000_000_000; // RATE_SCALE * 1e10
+    let pays = (x + d - 1) / d; // the long pays, rounded up
+    let gets = x / d; // the short receives, rounded down
+    println!("rate {want_rate} (1e-9 per interval); long pays {pays} units, short receives {gets} units, insurance +{} unit", r.ins() - ins0);
+    assert_eq!(bal_a - r.bal(&a), pays, "long's payment");
+    assert_eq!(r.bal(&b) - bal_b, gets, "short's receipt");
+    // the residual goes to dust, and whole units of dust are swept into INSURANCE in the same block (SPEC 8)
+    assert_eq!(r.e.dust - dust0 + (r.ins() - ins0) * 10_000_000_000, (pays - gets) * 10_000_000_000, "the residual went to dust / insurance (I-2)");
+}
