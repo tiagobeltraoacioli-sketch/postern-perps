@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<Sanctions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="3" xsi:schemaLocation="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ADVANCED_XML https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ADVANCED_XML.xsd" xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ADVANCED_XML">
+  <DateOfIssue CalendarTypeID="1">
+    <Year>2026</Year>
+    <Month>11</Month>
+    <Day>13</Day>
+  </DateOfIssue>
+  <ReferenceValueSets>
+    <FeatureTypeValues>
+      <FeatureType ID="1" FeatureTypeGroupID="1">Vessel Call Sign</FeatureType>
+      <FeatureType ID="2" FeatureTypeGroupID="1">VESSEL TYPE</FeatureType>
+      <FeatureType ID="3" FeatureTypeGroupID="1">Vessel Flag</FeatureType>
+      <FeatureType ID="4" FeatureTypeGroupID="1">Vessel Owner</FeatureType>
+      <FeatureType ID="5" FeatureTypeGroupID="1">Vessel Tonnage</FeatureType>
+      <FeatureType ID="6" FeatureTypeGroupID="1">Vessel Gross Registered Tonnage</FeatureType>
+      <FeatureType ID="8" FeatureTypeGroupID="1">Birthdate</FeatureType>
+      <FeatureType ID="9" FeatureTypeGroupID="1">Place of Birth</FeatureType>
+      <FeatureType ID="10" FeatureTypeGroupID="1">Nationality Country</FeatureType>
+      <FeatureType ID="11" FeatureTypeGroupID="1">Citizenship Country</FeatureType>
+      <FeatureType ID="13" FeatureTypeGroupID="1">SWIFT/BIC</FeatureType>
+      <FeatureType ID="14" FeatureTypeGroupID="1">Website</FeatureType>
+      <FeatureType ID="21" FeatureTypeGroupID="1">Email Address</FeatureType>
+      <FeatureType ID="24" FeatureTypeGroupID="1">Former Vessel Flag</FeatureType>
+      <FeatureType ID="25" FeatureTypeGroupID="1">Location</FeatureType>
+      <FeatureType ID="26" FeatureTypeGroupID="1">Title</FeatureType>
+      <FeatureType ID="44" FeatureTypeGroupID="1">Aircraft Construction Number (also called L/N or S/N or F/N)</FeatureType>
+      <FeatureType ID="45" FeatureTypeGroupID="1">Aircraft Manufacture Date</FeatureType>
+      <FeatureType ID="46" FeatureTypeGroupID="1">Aircraft Mode S Transponder Code</FeatureType>
+      <FeatureType ID="47" FeatureTypeGroupID="1">Aircraft Model</FeatureType>
+      <FeatureType ID="48" FeatureTypeGroupID="1">Aircraft Operator</FeatureType>
+      <FeatureType ID="49" FeatureTypeGroupID="1">Previous Aircraft Tail Number</FeatureType>
+      <FeatureType ID="50" FeatureTypeGroupID="1">Aircraft Manufacturer's Serial Number (MSN)</FeatureType>
+      <FeatureType ID="64" FeatureTypeGroupID="1">Aircraft Tail Number</FeatureType>
+      <FeatureType ID="104" FeatureTypeGroupID="1">IFCA Determination -</FeatureType>
+      <FeatureType ID="125" FeatureTypeGroupID="1">Additional Sanctions Information -</FeatureType>
+      <FeatureType ID="164" FeatureTypeGroupID="1">BIK (RU)</FeatureType>
+      <FeatureType ID="204" FeatureTypeGroupID="1">Executive Order 13662 Directive Determination -</FeatureType>
+      <FeatureType ID="224" FeatureTypeGroupID="1">Gender</FeatureType>
+      <FeatureType ID="264" FeatureTypeGroupID="1">UN/LOCODE</FeatureType>
+      <FeatureType ID="304" FeatureTypeGroupID="1">MICEX Code</FeatureType>
+      <FeatureType ID="344" FeatureTypeGroupID="1">Digital Currency Address - XBT</FeatureType>
+      <FeatureType ID="345" FeatureTypeGroupID="1">Digital Currency Address - ETH</FeatureType>
+      <FeatureType ID="364" FeatureTypeGroupID="1">D-U-N-S Number</FeatureType>
+      <FeatureType ID="365" FeatureTypeGroupID="1">Nationality of Registration</FeatureType>
+      <FeatureType ID="404" FeatureTypeGroupID="1">Registration Country</FeatureType>
+      <FeatureType ID="424" FeatureTypeGroupID="1">Other Vessel Flag</FeatureType>
+      <FeatureType ID="425" FeatureTypeGroupID="1">Other Vessel Call Sign</FeatureType>
+      <FeatureType ID="444" FeatureTypeGroupID="1">Digital Currency Address - XMR</FeatureType>
+      <FeatureType ID="504" FeatureTypeGroupID="1">Secondary sanctions risk:</FeatureType>
+      <FeatureType ID="524" FeatureTypeGroupID="1">Phone Number</FeatureType>
+      <FeatureType ID="525" FeatureTypeGroupID="1">CAATSA Section 235 Information:</FeatureType>
+      <FeatureType ID="526" FeatureTypeGroupID="1">Other Vessel Type</FeatureType>
+      <FeatureType ID="566" FeatureTypeGroupID="1">Digital Currency Address - LTC</FeatureType>
+      <FeatureType ID="586" FeatureTypeGroupID="1">Executive Order 13846 information:</FeatureType>
+      <FeatureType ID="626" FeatureTypeGroupID="1">Transactions Prohibited For Persons Owned or Controlled By U.S. Financial Institutions:</FeatureType>
+      <FeatureType ID="646" FeatureTypeGroupID="1">Organization Established Date</FeatureType>
+      <FeatureType ID="647" FeatureTypeGroupID="1">Organization Type:</FeatureType>
+      <FeatureType ID="686" FeatureTypeGroupID="1">Digital Currency Address - ZEC</FeatureType>
+      <FeatureType ID="687" FeatureTypeGroupID="1">Digital Currency Address - DASH</FeatureType>
+      <FeatureType ID="688" FeatureTypeGroupID="1">Digital Currency Address - BTG</FeatureType>
+      <FeatureType ID="689" FeatureTypeGroupID="1">Digital Currency Address - ETC</FeatureType>
+      <FeatureType ID="706" FeatureTypeGroupID="1">Digital Currency Address - BSV</FeatureType>
+      <FeatureType ID="726" FeatureTypeGroupID="1">Digital Currency Address - BCH</FeatureType>
+      <FeatureType ID="746" FeatureTypeGroupID="1">Digital Currency Address - XVG</FeatureType>
+      <FeatureType ID="766" FeatureTypeGroupID="1">Equity Ticker</FeatureType>
+      <FeatureType ID="806" FeatureTypeGroupID="1">ISIN</FeatureType>
+      <FeatureType ID="826" FeatureTypeGroupID="1">Target Type</FeatureType>
+      <FeatureType ID="827" FeatureTypeGroupID="1">PEESA Information:</FeatureType>
+      <FeatureType ID="887" FeatureTypeGroupID="1">Digital Currency Address - USDT</FeatureType>
+      <FeatureType ID="907" FeatureTypeGroupID="1">Digital Currency Address - XRP</FeatureType>
+      <FeatureType ID="947" FeatureTypeGroupID="1">Executive Order 14024 Directive Information -</FeatureType>
+      <FeatureType ID="948" FeatureTypeGroupID="1">Executive Order 14024 Directive Information</FeatureType>
+      <FeatureType ID="951" FeatureTypeGroupID="1">Listing Date (EO 14024 Directive 2):</FeatureType>
+      <FeatureType ID="952" FeatureTypeGroupID="1">Effective Date (EO 14024 Directive 2):</FeatureType>
+      <FeatureType ID="953" FeatureTypeGroupID="1">Listing Date (EO 14024 Directive 3):</FeatureType>
+      <FeatureType ID="954" FeatureTypeGroupID="1">Effective Date (EO 14024 Directive 3):</FeatureType>
+      <FeatureType ID="967" FeatureTypeGroupID="1">Vessel Year of Build</FeatureType>
+      <FeatureType ID="989" FeatureTypeGroupID="1">Digital Currency Address - BNB</FeatureType>
+      <FeatureType ID="992" FeatureTypeGroupID="1">Digital Currency Address - TRX</FeatureType>
+      <FeatureType ID="996" FeatureTypeGroupID="1">Digital Currency Address - DOGE</FeatureType>
+      <FeatureType ID="998" FeatureTypeGroupID="1">Digital Currency Address - USDC</FeatureType>
+      <FeatureType ID="1007" FeatureTypeGroupID="1">Digital Currency Address - ARB</FeatureType>
+      <FeatureType ID="1008" FeatureTypeGroupID="1">Digital Currency Address - BSC</FeatureType>
+      <FeatureType ID="1167" FeatureTypeGroupID="1">Digital Currency Address - SOL</FeatureType>
+      <FeatureType ID="1187" FeatureTypeGroupID="1">PAIPA Section 2 Information:</FeatureType>
+    </FeatureTypeValues>
+  </ReferenceValueSets>
+  <DistinctParties>
+    <DistinctParty FixedRef="36">
+      <Comment />
+      <Profile ID="36" PartySubTypeID="3">
+        <Identity ID="4375" FixedRef="36" Primary="true" False="false">
+          <Alias FixedRef="36" AliasTypeID="1400" Primary="false" LowQuality="false">
+            <DocumentedName ID="13178" FixedRef="36" DocNameStatusID="2">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="19387" ScriptID="215" ScriptStatusID="1" Acronym="false">AERO-CARIBBEAN</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+          <Alias FixedRef="36" AliasTypeID="1403" Primary="true" LowQuality="false">
+            <DocumentedName ID="4375" FixedRef="36" DocNameStatusID="1">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="6700" ScriptID="215" ScriptStatusID="1" Acronym="false">AEROCARIBBEAN AIRLINES</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+          <NamePartGroups>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="6700" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="19387" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+          </NamePartGroups>
+        </Identity>
+        <Feature ID="150025" FeatureTypeID="25">
+          <FeatureVersion ID="200025" ReliabilityID="1">
+            <Comment />
+            <VersionLocation LocationID="25" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="4375" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+      </Profile>
+    </DistinctParty>
+    <DistinctParty FixedRef="45314">
+      <Comment />
+      <Profile ID="45314" PartySubTypeID="3">
+        <Identity ID="36938" FixedRef="45314" Primary="true" False="false">
+          <Alias FixedRef="45314" AliasTypeID="1403" Primary="true" LowQuality="false">
+            <DocumentedName ID="67882" FixedRef="45314" DocNameStatusID="1">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="119797" ScriptID="215" ScriptStatusID="1" Acronym="false">Valerian Labs, Inc.</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+          <NamePartGroups>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="119797" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+          </NamePartGroups>
+        </Identity>
+        <Feature ID="65750" FeatureTypeID="344">
+          <FeatureVersion ID="63429" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">bc1qardcxz845jw83vgfvcmewhuxa0ag9gchjwmcfd</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="36938" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="65751" FeatureTypeID="345">
+          <FeatureVersion ID="63430" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="36938" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="65752" FeatureTypeID="887">
+          <FeatureVersion ID="63431" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="36938" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="65753" FeatureTypeID="998">
+          <FeatureVersion ID="63432" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">0x983a81ca6FB1e441266D2FbcB7D8E530AC2E05A2</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="36938" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="66051" FeatureTypeID="14">
+          <FeatureVersion ID="63730" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">www.valerianlabs.com</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="36938" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="217420" FeatureTypeID="25">
+          <FeatureVersion ID="267420" ReliabilityID="1">
+            <Comment />
+            <VersionLocation LocationID="67420" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="36938" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+      </Profile>
+    </DistinctParty>
+    <DistinctParty FixedRef="48432">
+      <Comment />
+      <Profile ID="48432" PartySubTypeID="3">
+        <Identity ID="40056" FixedRef="48432" Primary="true" False="false">
+          <Alias FixedRef="48432" AliasTypeID="1403" Primary="true" LowQuality="false">
+            <DocumentedName ID="73975" FixedRef="48432" DocNameStatusID="1">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="128082" ScriptID="215" ScriptStatusID="1" Acronym="false">OKO DESIGN BUREAU</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+            <DocumentedName ID="73976" FixedRef="48432" DocNameStatusID="2">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="128083" ScriptID="220" ScriptStatusID="1" Acronym="false">ОКО Конструкторское Бюро</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+          <NamePartGroups>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="128082" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="128083" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+          </NamePartGroups>
+        </Identity>
+        <Feature ID="70742" FeatureTypeID="646">
+          <FeatureVersion ID="68421" ReliabilityID="1">
+            <Comment />
+            <DatePeriod CalendarTypeID="1" YearFixed="false" MonthFixed="false" DayFixed="false">
+              <Start Approximate="false" YearFixed="false" MonthFixed="false" DayFixed="false">
+                <From>
+                  <Year>2022</Year>
+                  <Month>1</Month>
+                  <Day>1</Day>
+                </From>
+                <To>
+                  <Year>2022</Year>
+                  <Month>1</Month>
+                  <Day>1</Day>
+                </To>
+              </Start>
+              <End Approximate="false" YearFixed="false" MonthFixed="false" DayFixed="false">
+                <From>
+                  <Year>2022</Year>
+                  <Month>12</Month>
+                  <Day>31</Day>
+                </From>
+                <To>
+                  <Year>2022</Year>
+                  <Month>12</Month>
+                  <Day>31</Day>
+                </To>
+              </End>
+            </DatePeriod>
+            <VersionDetail DetailTypeID="1430" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="70743" FeatureTypeID="14">
+          <FeatureVersion ID="68422" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">https://www.oko-kb.ru</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="70744" FeatureTypeID="345">
+          <FeatureVersion ID="68423" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">0x19F8f2B0915Daa12a3f5C9CF01dF9E24D53794F7</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="70745" FeatureTypeID="992">
+          <FeatureVersion ID="68424" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">TFdTr9C3BqQrzKBXqSxJfAZFTh8UwBAfSg</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="70746" FeatureTypeID="344">
+          <FeatureVersion ID="68425" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">13fhnkmpBBWXUQucJd6efWvXdEj78DKavk</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="71287" FeatureTypeID="504">
+          <FeatureVersion ID="68966" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1431" DetailReferenceID="92764" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="71663" FeatureTypeID="647">
+          <FeatureVersion ID="69342" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1431" DetailReferenceID="91957" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="222662" FeatureTypeID="25">
+          <FeatureVersion ID="272662" ReliabilityID="1">
+            <Comment />
+            <VersionLocation LocationID="72662" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="40056" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+      </Profile>
+    </DistinctParty>
+    <DistinctParty FixedRef="50641">
+      <Comment />
+      <Profile ID="50641" PartySubTypeID="3">
+        <Identity ID="42202" FixedRef="50641" Primary="true" False="false">
+          <Alias FixedRef="50641" AliasTypeID="1403" Primary="true" LowQuality="false">
+            <DocumentedName ID="78525" FixedRef="50641" DocNameStatusID="1">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="134115" ScriptID="215" ScriptStatusID="1" Acronym="false">Cryptex</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+          <Alias FixedRef="50641" AliasTypeID="1400" Primary="false" LowQuality="false">
+            <DocumentedName ID="78526" FixedRef="50641" DocNameStatusID="2">
+              <DocumentedNamePart>
+                <NamePartValue NamePartGroupID="134116" ScriptID="215" ScriptStatusID="1" Acronym="false">International Payment Service Provider LLC</NamePartValue>
+              </DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+          <NamePartGroups>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="134115" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+            <MasterNamePartGroup>
+              <NamePartGroup ID="134116" NamePartTypeID="1525" />
+            </MasterNamePartGroup>
+          </NamePartGroups>
+        </Identity>
+        <Feature ID="79077" FeatureTypeID="14">
+          <FeatureVersion ID="76716" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">cryptex.net</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="79078" FeatureTypeID="344">
+          <FeatureVersion ID="76717" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">13JtX4h7G5ZuNK5mFudKGq9DHLvvMFuNuz</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="79079" FeatureTypeID="992">
+          <FeatureVersion ID="76718" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">TTUDyVhhpCC1xJoPmWzdjLAzeoPwbSABdr</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="79080" FeatureTypeID="345">
+          <FeatureVersion ID="76719" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">0x0931cA4D13BB4ba75D9B7132AB690265D749a5E7</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="79081" FeatureTypeID="566">
+          <FeatureVersion ID="76720" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1432">M8yFL6SFC6TreATegTyuSYkDfDRbisdpT3</VersionDetail>
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="79103" FeatureTypeID="646">
+          <FeatureVersion ID="76742" ReliabilityID="1">
+            <Comment />
+            <DatePeriod CalendarTypeID="1" YearFixed="false" MonthFixed="false" DayFixed="false">
+              <Start Approximate="false" YearFixed="false" MonthFixed="false" DayFixed="false">
+                <From>
+                  <Year>2021</Year>
+                  <Month>12</Month>
+                  <Day>1</Day>
+                </From>
+                <To>
+                  <Year>2021</Year>
+                  <Month>12</Month>
+                  <Day>1</Day>
+                </To>
+              </Start>
+              <End Approximate="false" YearFixed="false" MonthFixed="false" DayFixed="false">
+                <From>
+                  <Year>2021</Year>
+                  <Month>12</Month>
+                  <Day>1</Day>
+                </From>
+                <To>
+                  <Year>2021</Year>
+                  <Month>12</Month>
+                  <Day>1</Day>
+                </To>
+              </End>
+            </DatePeriod>
+            <VersionDetail DetailTypeID="1430" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="79172" FeatureTypeID="504">
+          <FeatureVersion ID="76811" ReliabilityID="1">
+            <Comment />
+            <VersionDetail DetailTypeID="1431" DetailReferenceID="92764" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+        <Feature ID="226791" FeatureTypeID="25">
+          <FeatureVersion ID="276791" ReliabilityID="1">
+            <Comment />
+            <VersionLocation LocationID="76791" />
+          </FeatureVersion>
+          <IdentityReference IdentityID="42202" IdentityFeatureLinkTypeID="1" />
+        </Feature>
+      </Profile>
+    </DistinctParty>
+  </DistinctParties>
+</Sanctions>

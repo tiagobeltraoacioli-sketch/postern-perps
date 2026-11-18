@@ -1,0 +1,1 @@
+{"venue": "binance-ETH-USDT", "url": "https://api.binance.com/api/v3/ticker/bookTicker?symbol=ETHUSDT", "sentMs": 1794889938004, "httpDateMs": 1794889938000, "error": null, "body": "{\"symbol\":\"ETHUSDT\",\"bidPrice\":\"1827.61000000\",\"bidQty\":\"0.92580000\",\"askPrice\":\"1827.62000000\",\"askQty\":\"111.78070000\"}", "receivedMs": 1794889938682}

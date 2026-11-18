@@ -1,0 +1,1 @@
+{"venue": "bitfinex-SOL-USD", "url": "https://api-pub.bitfinex.com/v2/ticker/tSOLUSD", "sentMs": 1794889929005, "httpDateMs": 1794889930000, "error": null, "body": "[72.606,1121.25150395,72.622,840.93698163,0.994,0.01387706,72.623,51850.22235271,72.933,69.947,1614246014264]", "receivedMs": 1794889930240}

@@ -1,0 +1,1 @@
+{"venue": "bitfinex-ETH-USD", "url": "https://api-pub.bitfinex.com/v2/ticker/tETHUSD", "sentMs": 1794889938004, "httpDateMs": 1794889938000, "error": null, "body": "[1826.5,384.17647539,1826.8,1183.70958239,6.5,0.00357064,1826.9,9284.35144011,1867.1,1787.5,1457539475000]", "receivedMs": 1794889938395}

@@ -1,0 +1,25 @@
+{
+  "schema": "postern-perps/vault-vectors/0.3",
+  "source": "contracts/test/Vectors.t.sol (forge test --mc PerpsVaultVectors -vv); withdrawalLeaf and root32([]) re-derived independently with cast keccak",
+  "chainId": 700770,
+  "vault": "0xF62849F9A0B5Bf2913b396098F7c7019b51A820a",
+  "inputs": {
+    "withdrawal": {"withdrawalId": "3", "account": "0x1111111111111111111111111111111111111111", "recipient": "0x2222222222222222222222222222222222222222", "amount": "1234567", "height": "99"},
+    "account": {"account": "0x3333333333333333333333333333333333333333", "index": 5, "balance": "-42", "escapeValue": "7000000", "positionsHash": "keccak256('positions')"},
+    "treeLeaves": ["keccak256('a')", "keccak256('b')", "keccak256('c')"],
+    "checkpoint": {"height": "10", "time": "1800000000000", "logHash": "keccak256('log')", "accountsRoot": "keccak256('accounts')", "marketsRoot": "keccak256('markets')", "withdrawalsRoot": "keccak256('withdrawals')", "nextDepositIndex": "2", "nextForcedIndex": "1", "nextOrderId": "77", "totalEscape": "5000000", "dust": "9", "auxHash": "keccak256('aux')", "depositsHead": "keccak256('dh')", "forcedHead": "keccak256('fh')", "withdrawalCount": "4", "withdrawalsTotal": "1000000"}
+  },
+  "outputs": {
+    "withdrawalLeaf": "0xe9166baba646062a6c6d061b7bd43516cf74f9893efb8dc38fe32d02a0b77bd9",
+    "accountLeaf": "0xa2ea3a54aca1e1783d55a91764b89cd23991312c8e5b29ae07641a7b9264c61e",
+    "root32_abc": "0x8fbe559c6533a8a7b143ff5aeb5a68f790da1a04469c65f6b7a3a8895fa97d89",
+    "root32_empty": "0x7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e",
+    "depositHead0": "0x14ac17057b39ed17e5d150480e7c42180a7fa1d604e22282eaa0a49379e5f875",
+    "forcedHead0": "0x76fabf4cf7ebd9898533505e4a5dbcef50ed361022328cd954e05c41f9e95696",
+    "stateRoot": "0xa37422a49ce13023aba96c4eb9989223238fc85e408d8bbf083d645d79dba9ac",
+    "stateRootNote": "SPEC 0.1.5 systemHash (with withdrawalCount, withdrawalsTotal); reproduces 388 5a50d58; the 0.1.1 value was 0xe72601eaf3f450e42a4936525576728e24a4c75301e50dc379caca768cbfec22",
+    "domainSeparator": "0xd8612207db80974d15f1485a3a41ac5d3ea80eecc91cde21caaa2d6287031cd5",
+    "checkpointTypehash": "0xa11fd1f0c03526baa4a08e1e667b8972d6ed98015080bcd9c7e4e7c4cbf7bcb6",
+    "checkpointDigest": "0xedbdd9a9ebd4e2e3767ec12a7c2e2fa499fd328953513ff27eb7ad385e3163f9"
+  }
+}

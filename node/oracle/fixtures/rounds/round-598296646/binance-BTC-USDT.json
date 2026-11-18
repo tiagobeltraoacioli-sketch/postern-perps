@@ -1,0 +1,1 @@
+{"venue": "binance-BTC-USDT", "url": "https://api.binance.com/api/v3/ticker/bookTicker?symbol=BTCUSDT", "sentMs": 1794889938004, "httpDateMs": 1794889938000, "error": null, "body": "{\"symbol\":\"BTCUSDT\",\"bidPrice\":\"64962.44000000\",\"bidQty\":\"0.61757000\",\"askPrice\":\"64962.45000000\",\"askQty\":\"2.85545000\"}", "receivedMs": 1794889938586}

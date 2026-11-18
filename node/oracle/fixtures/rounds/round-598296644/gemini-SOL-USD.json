@@ -1,0 +1,1 @@
+{"venue": "gemini-SOL-USD", "url": "https://api.gemini.com/v1/pubticker/solusd", "sentMs": 1794889932000, "httpDateMs": 1794889933000, "error": null, "body": "{\"bid\":\"72.56200\",\"ask\":\"72.58500\",\"last\":\"72.65000\",\"volume\":{\"SOL\":\"9856.889486\",\"USD\":\"716103.0211579\",\"timestamp\":1794889920000}}", "receivedMs": 1794889932996}

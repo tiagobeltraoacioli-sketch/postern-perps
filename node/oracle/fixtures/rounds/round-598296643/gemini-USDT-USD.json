@@ -1,0 +1,1 @@
+{"venue": "gemini-USDT-USD", "url": "https://api.gemini.com/v1/pubticker/usdtusd", "sentMs": 1794889929005, "httpDateMs": 1794889930000, "error": null, "body": "{\"bid\":\"0.99911\",\"ask\":\"0.99912\",\"last\":\"0.99902\",\"volume\":{\"USD\":\"2194375.5713694045\",\"USDT\":\"2196528.168975\",\"timestamp\":1794889920000}}", "receivedMs": 1794889930771}

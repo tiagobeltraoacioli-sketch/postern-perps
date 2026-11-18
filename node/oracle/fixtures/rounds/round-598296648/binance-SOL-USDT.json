@@ -1,0 +1,1 @@
+{"venue": "binance-SOL-USDT", "url": "https://api.binance.com/api/v3/ticker/bookTicker?symbol=SOLUSDT", "sentMs": 1794889944000, "httpDateMs": 1794889944000, "error": null, "body": "{\"symbol\":\"SOLUSDT\",\"bidPrice\":\"72.64000000\",\"bidQty\":\"1961.15100000\",\"askPrice\":\"72.65000000\",\"askQty\":\"182.51900000\"}", "receivedMs": 1794889944711}

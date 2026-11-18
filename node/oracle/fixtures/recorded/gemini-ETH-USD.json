@@ -1,0 +1,1 @@
+{"venue": "gemini-ETH-USD", "url": "https://api.gemini.com/v1/pubticker/ethusd", "sentMs": 1794888382051, "receivedMs": 1794888382822, "curlExit": 0, "body": "{\"bid\":\"1827.93000\",\"ask\":\"1827.94000\",\"last\":\"1830.62000\",\"volume\":{\"ETH\":\"1858.727884\",\"USD\":\"3402624.43900808\",\"timestamp\":1794888360000}}"}

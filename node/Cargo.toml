@@ -1,0 +1,54 @@
+[package]
+name = "postern-perps-node"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+description = "PosternDEX Perpetuals node: sequencer, validators, API server (UNAUDITED PROTOTYPE)"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+name = "perps_node"
+path = "src/lib.rs"
+
+[[bin]]
+name = "postern-perps-node"
+path = "src/main.rs"
+
+[[bin]]
+name = "perps-loadgen"
+path = "src/bin/loadgen.rs"
+
+[dependencies]
+# Versions pinned to what the build host already caches; Cargo.lock is committed.
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "fs", "signal"] }
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
+k256 = { version = "=0.13.4", features = ["ecdsa", "std"] }
+sha3 = "=0.10.9"
+hex = "0.4.3"
+anyhow = "1"
+postern-perps-engine = { path = "../engine" }
+postern-geoblock = { path = "../compliance/geoblock/rust" }
+
+[features]
+# DEV ONLY: a stand-in oracle committee with throwaway keys and fixed prices (no price source). Off by default;
+# refused in a build without debug assertions (the release profile) by a compile_error, and at start unless the
+# node runs in dev mode with the dev-derived oracle committee.
+dev-oracle = []
+
+[dev-dependencies]
+tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect"] }
+
+[profile.release]
+debug = 1
+overflow-checks = true
+
+[profile.test]
+overflow-checks = true

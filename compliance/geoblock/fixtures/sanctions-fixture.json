@@ -1,0 +1,88 @@
+{
+ "schema": "postern-perps/sanctions-evm",
+ "version": "2026-11-13+0d3f294a240a",
+ "status": "UNAUDITED prototype output. Screening data, not legal advice; what to do on a hit is for counsel.",
+ "builtUtc": "2026-11-17T00:00:00Z",
+ "source": {
+  "publisher": "U.S. Department of the Treasury, Office of Foreign Assets Control (OFAC)",
+  "list": "Specially Designated Nationals and Blocked Persons List (SDN)",
+  "publishDate": "2026-11-13",
+  "recordCount": 4,
+  "files": [
+   {
+    "name": "SDN.XML",
+    "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
+    "bytes": 6211,
+    "sha256": "72a19b5e0066818220ac6aaa302083cd992e43138c7b5742abe96c7889db88b5"
+   },
+   {
+    "name": "SDN_ADVANCED.XML",
+    "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN_ADVANCED.XML",
+    "bytes": 22661,
+    "sha256": "14c2370517f2cf3d29606386c4358eba907e8c82eb156e871c341b4bd9b979c8"
+   }
+  ],
+  "crossCheck": "SDN.XML and SDN_ADVANCED.XML name the same 11 (uid, currency, address) triples"
+ },
+ "counts": {
+  "triples": 11,
+  "duplicatesWithinSdnXml": 0,
+  "byType": {
+   "ETH": 3,
+   "LTC": 1,
+   "TRX": 2,
+   "USDC": 1,
+   "USDT": 1,
+   "XBT": 3
+  },
+  "evmAddresses": 3
+ },
+ "evmAddressesSha256": "0d3f294a240a9ade158dbbb126078c656934974bf130b9fc7ea020388d4c12ba",
+ "evm": [
+  {
+   "address": "0x0931ca4d13bb4ba75d9b7132ab690265d749a5e7",
+   "symbols": [
+    "ETH"
+   ],
+   "uids": [
+    "50641"
+   ]
+  },
+  {
+   "address": "0x19f8f2b0915daa12a3f5c9cf01df9e24d53794f7",
+   "symbols": [
+    "ETH"
+   ],
+   "uids": [
+    "48432"
+   ]
+  },
+  {
+   "address": "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2",
+   "symbols": [
+    "ETH",
+    "USDC",
+    "USDT"
+   ],
+   "uids": [
+    "45314"
+   ]
+  }
+ ],
+ "other": {
+  "LTC": [
+   "M8yFL6SFC6TreATegTyuSYkDfDRbisdpT3"
+  ],
+  "TRX": [
+   "TFdTr9C3BqQrzKBXqSxJfAZFTh8UwBAfSg",
+   "TTUDyVhhpCC1xJoPmWzdjLAzeoPwbSABdr"
+  ],
+  "XBT": [
+   "13JtX4h7G5ZuNK5mFudKGq9DHLvvMFuNuz",
+   "13fhnkmpBBWXUQucJd6efWvXdEj78DKavk",
+   "bc1qardcxz845jw83vgfvcmewhuxa0ag9gchjwmcfd"
+  ]
+ },
+ "removalsAccepted": [],
+ "anomalies": []
+}

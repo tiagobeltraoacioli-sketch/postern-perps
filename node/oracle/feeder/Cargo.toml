@@ -1,0 +1,29 @@
+[package]
+name = "postern-perps-oracle-feeder"
+description = "PosternDEX Perpetuals oracle feeder: venue adapters, observation signer, record/replay CLI (UNAUDITED PROTOTYPE)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "perps-oracle"
+path = "src/main.rs"
+
+[lib]
+name = "perps_oracle_feeder"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Live fetching from public venues (HTTPS). Off by default: tests, replay and verification are offline.
+net = ["dep:ureq"]
+
+[dependencies]
+postern-perps-oracle-core = { path = "../core" }
+# arbitrary_precision: venue numbers (Bitfinex sends JSON numbers) keep their exact decimal text; no f64 anywhere.
+serde_json = { version = "=1.0.149", features = ["arbitrary_precision"] }
+hex = "=0.4.3"
+k256 = { version = "=0.13.4", default-features = false, features = ["ecdsa", "std"] }
+ureq = { version = "=3.5.2", optional = true, default-features = false, features = ["rustls"] }

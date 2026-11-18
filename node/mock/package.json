@@ -1,0 +1,12 @@
+{
+  "name": "postern-perps-mock",
+  "private": true,
+  "description": "UNAUDITED prototype: reference mock of docs/API.md and the shared API conformance tests (agent 393). No dependencies.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "conformance": "node conformance/run.mjs"
+  }
+}

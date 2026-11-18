@@ -1,0 +1,2936 @@
+{
+  "schema": "postern-perps/geoblock",
+  "version": "0.2.1",
+  "generated_utc": "2026-11-17",
+  "status": "DRAFT FOR COUNSEL. UNAUDITED prototype. Not legal advice. v0.2: every ISO 3166-1 code listed; researched entries carry source ids (compliance/research/sources.json, exact sentences); every unresearched code is restricted-review (denied); no country is allowed until counsel decides (Q-2).",
+  "rule": "Deny by default. A request is allowed only if its ISO 3166-1 alpha-2 country is listed with tier 'allowed' AND its ISO 3166-2 subdivision (when known) is not listed in 'subdivisions' as blocked AND no anonymizer rule denies it. Any country not listed, an unknown country (missing header, 'XX', 'T1', private or unresolvable IP), and tier 'restricted-review' are all denied.",
+  "tiers": {
+    "blocked": {
+      "effect": "deny",
+      "meaning": "No access to trading at all (no order, no deposit credit, no wallet connection in the UI). Read-only public market data and the escape-hatch/withdraw-only flow remain: see compliance/geoblock/DESIGN.md."
+    },
+    "restricted-review": {
+      "effect": "deny",
+      "meaning": "Counsel must decide. Denied until decided."
+    },
+    "allowed": {
+      "effect": "allow",
+      "meaning": "No restriction identified in the research at the stated confidence; counsel confirms before launch."
+    }
+  },
+  "default_tier": "restricted-review",
+  "unknown_country_effect": "deny",
+  "reason_categories": [
+    "retail-crypto-derivatives-ban",
+    "authorisation-required",
+    "general-crypto-ban",
+    "comprehensive-sanctions",
+    "regulator-enforcement-offshore-perps",
+    "not-researched",
+    "sanctions-crypto-services-prohibition",
+    "residual-sanctions",
+    "fatf-call-for-action",
+    "retail-leverage-limit"
+  ],
+  "research": {
+    "note": "informational (agent 397's loader accepts only listed top-level keys; decision code ignores this)",
+    "sources_file": "compliance/research/sources.json",
+    "iso3166_source": "S-ISO3166-TZDATA",
+    "counsel_questions": {
+      "Q-1": "Sanctioned countries: may exit-only (cancel, reduce-only close, withdraw) stay open to a user located there, or must funds be frozen as for a listed address? 0.2 keeps 354's exit-only policy until counsel decides.",
+      "Q-2": "Which countries, if any, may be 'allowed' at launch for a perpetuals venue whose frontend is operated by Bloch Inc (Panama)? 0.2 opens none (deny by default).",
+      "Q-3": "United States: do the 2026 CFTC developments (perpetuals on registered venues; foreign-futures relief through a U.S. FCM) change anything for an unregistered venue? Assumed no.",
+      "Q-4": "EU/EEA: does offering crypto perpetuals to EU residents from Panama without solicitation require MiFID II authorisation (reverse solicitation limits)?",
+      "Q-5": "Panama: does serving Panamanian residents require a licence (operator's home jurisdiction)? Not researched; denied meanwhile.",
+      "Q-6": "Syria and the occupied regions of Zaporizhzhia and Kherson: current EU/UK/UN status; kept blocked.",
+      "Q-7": "Australia, Singapore, Japan: do the retail leverage limits and registration regimes reach an offshore venue that does not solicit there; is a professional-investor route relevant? Blocked or denied meanwhile."
+    }
+  },
+  "countries": {
+    "AD": {
+      "name": "Andorra",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AE": {
+      "name": "United Arab Emirates",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AF": {
+      "name": "Afghanistan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AG": {
+      "name": "Antigua & Barbuda",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AI": {
+      "name": "Anguilla",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AL": {
+      "name": "Albania",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AM": {
+      "name": "Armenia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AO": {
+      "name": "Angola",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AQ": {
+      "name": "Antarctica",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AR": {
+      "name": "Argentina",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AS": {
+      "name": "American Samoa (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-CFTC-8412"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "U.S. territory"
+    },
+    "AT": {
+      "name": "Austria",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "AU": {
+      "name": "Australia",
+      "tier": "blocked",
+      "reasons": [
+        "retail-leverage-limit"
+      ],
+      "sources": [
+        "S-ASIC-21-060"
+      ],
+      "confidence": "medium",
+      "researched": true,
+      "counsel": [
+        "Q-7"
+      ],
+      "note": "NEW in 0.2: retail CFD leverage on crypto-assets is limited far below this venue's 10x-20x; blocked (stricter than review) until counsel decides"
+    },
+    "AW": {
+      "name": "Aruba",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AX": {
+      "name": "Åland Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "AZ": {
+      "name": "Azerbaijan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BA": {
+      "name": "Bosnia & Herzegovina",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BB": {
+      "name": "Barbados",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BD": {
+      "name": "Bangladesh",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BE": {
+      "name": "Belgium",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "BF": {
+      "name": "Burkina Faso",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BG": {
+      "name": "Bulgaria",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "BH": {
+      "name": "Bahrain",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BI": {
+      "name": "Burundi",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BJ": {
+      "name": "Benin",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BL": {
+      "name": "St Barthelemy",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BM": {
+      "name": "Bermuda",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BN": {
+      "name": "Brunei",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BO": {
+      "name": "Bolivia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BQ": {
+      "name": "Caribbean NL",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BR": {
+      "name": "Brazil",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ],
+      "sources": [
+        "S-CVM-BYBIT",
+        "S-BR-L6385",
+        "S-BR-L14478"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "derivatives are valores mobiliarios whatever the underlying (Lei 6.385 art. 2 VIII); CVM stop orders against offshore platforms soliciting residents; virtual-asset service providers need prior authorisation (Lei 14.478 art. 2)"
+    },
+    "BS": {
+      "name": "Bahamas",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BT": {
+      "name": "Bhutan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BV": {
+      "name": "Bouvet Island",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BW": {
+      "name": "Botswana",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "BY": {
+      "name": "Belarus",
+      "tier": "blocked",
+      "reasons": [
+        "sanctions-crypto-services-prohibition"
+      ],
+      "sources": [
+        "S-EU-765"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "counsel": [
+        "Q-1"
+      ],
+      "note": "restated from 'comprehensive-sanctions': EU Reg. 765/2006 prohibits crypto-asset wallet, account or custody services to Belarusian residents"
+    },
+    "BZ": {
+      "name": "Belize",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CA": {
+      "name": "Canada (all provinces and territories)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ],
+      "sources": [
+        "S-OSC-BYBIT",
+        "S-OSC-2022"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "Ontario sources; every province and territory blocked (provincial regimes not researched one by one)"
+    },
+    "CC": {
+      "name": "Cocos (Keeling) Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CD": {
+      "name": "Congo (Dem. Rep.)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CF": {
+      "name": "Central African Rep.",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CG": {
+      "name": "Congo (Rep.)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CH": {
+      "name": "Switzerland",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CI": {
+      "name": "Côte d’Ivoire",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CK": {
+      "name": "Cook Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CL": {
+      "name": "Chile",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CM": {
+      "name": "Cameroon",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CN": {
+      "name": "China (mainland)",
+      "tier": "blocked",
+      "reasons": [
+        "general-crypto-ban"
+      ],
+      "sources": [
+        "S-PBOC-2021"
+      ],
+      "confidence": "medium",
+      "researched": true,
+      "note": "secondary reports of the 2021 notice; a 2026 replacement is reported (unverified); kept blocked"
+    },
+    "CO": {
+      "name": "Colombia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CR": {
+      "name": "Costa Rica",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CU": {
+      "name": "Cuba",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [
+        "S-OFAC-PROGRAMS",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "counsel": [
+        "Q-1"
+      ]
+    },
+    "CV": {
+      "name": "Cape Verde",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CW": {
+      "name": "Curaçao",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CX": {
+      "name": "Christmas Island",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "CY": {
+      "name": "Cyprus",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "CZ": {
+      "name": "Czech Republic",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "DE": {
+      "name": "Germany",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "DJ": {
+      "name": "Djibouti",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "DK": {
+      "name": "Denmark",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "DM": {
+      "name": "Dominica",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "DO": {
+      "name": "Dominican Republic",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "DZ": {
+      "name": "Algeria",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "EC": {
+      "name": "Ecuador",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "EE": {
+      "name": "Estonia",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "EG": {
+      "name": "Egypt",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "EH": {
+      "name": "Western Sahara",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ER": {
+      "name": "Eritrea",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ES": {
+      "name": "Spain",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "ET": {
+      "name": "Ethiopia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "FI": {
+      "name": "Finland",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "FJ": {
+      "name": "Fiji",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "FK": {
+      "name": "Falkland Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "FM": {
+      "name": "Micronesia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "FO": {
+      "name": "Faroe Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "FR": {
+      "name": "France",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "GA": {
+      "name": "Gabon",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GB": {
+      "name": "United Kingdom",
+      "tier": "blocked",
+      "reasons": [
+        "retail-crypto-derivatives-ban"
+      ],
+      "sources": [
+        "S-FCA-2020"
+      ],
+      "confidence": "high",
+      "researched": true
+    },
+    "GD": {
+      "name": "Grenada",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GE": {
+      "name": "Georgia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GF": {
+      "name": "French Guiana",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GG": {
+      "name": "Guernsey",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GH": {
+      "name": "Ghana",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GI": {
+      "name": "Gibraltar",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GL": {
+      "name": "Greenland",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GM": {
+      "name": "Gambia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GN": {
+      "name": "Guinea",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GP": {
+      "name": "Guadeloupe",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GQ": {
+      "name": "Equatorial Guinea",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GR": {
+      "name": "Greece",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "GS": {
+      "name": "South Georgia & the South Sandwich Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GT": {
+      "name": "Guatemala",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GU": {
+      "name": "Guam (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-CFTC-8412"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "U.S. territory"
+    },
+    "GW": {
+      "name": "Guinea-Bissau",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "GY": {
+      "name": "Guyana",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "HK": {
+      "name": "Hong Kong",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "HM": {
+      "name": "Heard Island & McDonald Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "HN": {
+      "name": "Honduras",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "HR": {
+      "name": "Croatia",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "HT": {
+      "name": "Haiti",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "HU": {
+      "name": "Hungary",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "ID": {
+      "name": "Indonesia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "IE": {
+      "name": "Ireland",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "IL": {
+      "name": "Israel",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "IM": {
+      "name": "Isle of Man",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "IN": {
+      "name": "India",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "IO": {
+      "name": "British Indian Ocean Territory",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "IQ": {
+      "name": "Iraq",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "IR": {
+      "name": "Iran",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions",
+        "fatf-call-for-action"
+      ],
+      "sources": [
+        "S-OFAC-PROGRAMS",
+        "S-FATF-CFA-2026-10",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "counsel": [
+        "Q-1"
+      ]
+    },
+    "IS": {
+      "name": "Iceland",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "IT": {
+      "name": "Italy",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "JE": {
+      "name": "Jersey",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "JM": {
+      "name": "Jamaica",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "JO": {
+      "name": "Jordan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "JP": {
+      "name": "Japan",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ],
+      "sources": [
+        "S-FSA-592"
+      ],
+      "confidence": "medium",
+      "researched": true,
+      "counsel": [
+        "Q-7"
+      ],
+      "note": "warnings to unregistered (including foreign-based) operators; derivatives fall under the financial instruments business registration"
+    },
+    "KE": {
+      "name": "Kenya",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KG": {
+      "name": "Kyrgyzstan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KH": {
+      "name": "Cambodia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KI": {
+      "name": "Kiribati",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KM": {
+      "name": "Comoros",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KN": {
+      "name": "St Kitts & Nevis",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KP": {
+      "name": "North Korea",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions",
+        "fatf-call-for-action"
+      ],
+      "sources": [
+        "S-OFAC-PROGRAMS",
+        "S-FATF-CFA-2026-10",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "counsel": [
+        "Q-1"
+      ]
+    },
+    "KR": {
+      "name": "Korea (South)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KW": {
+      "name": "Kuwait",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KY": {
+      "name": "Cayman Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "KZ": {
+      "name": "Kazakhstan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LA": {
+      "name": "Laos",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LB": {
+      "name": "Lebanon",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LC": {
+      "name": "St Lucia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LI": {
+      "name": "Liechtenstein",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "LK": {
+      "name": "Sri Lanka",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LR": {
+      "name": "Liberia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LS": {
+      "name": "Lesotho",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "LT": {
+      "name": "Lithuania",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "LU": {
+      "name": "Luxembourg",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "LV": {
+      "name": "Latvia",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "LY": {
+      "name": "Libya",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MA": {
+      "name": "Morocco",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MC": {
+      "name": "Monaco",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MD": {
+      "name": "Moldova",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ME": {
+      "name": "Montenegro",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MF": {
+      "name": "St Martin (French)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MG": {
+      "name": "Madagascar",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MH": {
+      "name": "Marshall Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MK": {
+      "name": "North Macedonia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ML": {
+      "name": "Mali",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MM": {
+      "name": "Myanmar (Burma)",
+      "tier": "blocked",
+      "reasons": [
+        "fatf-call-for-action"
+      ],
+      "sources": [
+        "S-FATF-CFA-2026-10",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "note": "NEW in 0.2: FATF list read only as a search summary; benchmark venue restricts it; blocked until counsel reads the primary list"
+    },
+    "MN": {
+      "name": "Mongolia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MO": {
+      "name": "Macau",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MP": {
+      "name": "Northern Mariana Islands (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-CFTC-8412"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "U.S. territory"
+    },
+    "MQ": {
+      "name": "Martinique",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MR": {
+      "name": "Mauritania",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MS": {
+      "name": "Montserrat",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MT": {
+      "name": "Malta",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "MU": {
+      "name": "Mauritius",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MV": {
+      "name": "Maldives",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MW": {
+      "name": "Malawi",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MX": {
+      "name": "Mexico",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MY": {
+      "name": "Malaysia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "MZ": {
+      "name": "Mozambique",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NA": {
+      "name": "Namibia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NC": {
+      "name": "New Caledonia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NE": {
+      "name": "Niger",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NF": {
+      "name": "Norfolk Island",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NG": {
+      "name": "Nigeria",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NI": {
+      "name": "Nicaragua",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NL": {
+      "name": "Netherlands",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "NO": {
+      "name": "Norway",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "NP": {
+      "name": "Nepal",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NR": {
+      "name": "Nauru",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NU": {
+      "name": "Niue",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "NZ": {
+      "name": "New Zealand",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "OM": {
+      "name": "Oman",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PA": {
+      "name": "Panama",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false,
+      "counsel": [
+        "Q-5"
+      ],
+      "note": "operator's home jurisdiction (Bloch Inc, Panama): denied until counsel answers Q-5"
+    },
+    "PE": {
+      "name": "Peru",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PF": {
+      "name": "French Polynesia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PG": {
+      "name": "Papua New Guinea",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PH": {
+      "name": "Philippines",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PK": {
+      "name": "Pakistan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PL": {
+      "name": "Poland",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "PM": {
+      "name": "St Pierre & Miquelon",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PN": {
+      "name": "Pitcairn",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PR": {
+      "name": "Puerto Rico (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-CFTC-8412"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "U.S. territory: same regime as US"
+    },
+    "PS": {
+      "name": "Palestine",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PT": {
+      "name": "Portugal",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "PW": {
+      "name": "Palau",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "PY": {
+      "name": "Paraguay",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "QA": {
+      "name": "Qatar",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "RE": {
+      "name": "Réunion",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "RO": {
+      "name": "Romania",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "RS": {
+      "name": "Serbia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "RU": {
+      "name": "Russia",
+      "tier": "blocked",
+      "reasons": [
+        "sanctions-crypto-services-prohibition"
+      ],
+      "sources": [
+        "S-EU-833",
+        "S-OFAC-UKR"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "counsel": [
+        "Q-1"
+      ],
+      "note": "354's 0.1.1 reason 'comprehensive-sanctions' restated: the EU prohibits crypto-asset wallet, account or custody services to Russian residents (Reg. 833/2014); U.S. programs are list-based, not countrywide"
+    },
+    "RW": {
+      "name": "Rwanda",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SA": {
+      "name": "Saudi Arabia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SB": {
+      "name": "Solomon Islands",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SC": {
+      "name": "Seychelles",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SD": {
+      "name": "Sudan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SE": {
+      "name": "Sweden",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "SG": {
+      "name": "Singapore",
+      "tier": "blocked",
+      "reasons": [
+        "retail-leverage-limit",
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-MAS-2022"
+      ],
+      "confidence": "medium",
+      "researched": true,
+      "counsel": [
+        "Q-7"
+      ],
+      "note": "NEW in 0.2: leverage for retail cryptocurrency trading disallowed for DPT service providers"
+    },
+    "SH": {
+      "name": "St Helena",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SI": {
+      "name": "Slovenia",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "SJ": {
+      "name": "Svalbard & Jan Mayen",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SK": {
+      "name": "Slovakia",
+      "tier": "restricted-review",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-ESMA-CA-FI"
+      ],
+      "confidence": "low",
+      "researched": true,
+      "counsel": [
+        "Q-4"
+      ],
+      "note": "crypto-asset derivatives are expected to be MiFID II financial instruments (ESMA guidelines located, text not extracted): an authorisation question for counsel; denied meanwhile"
+    },
+    "SL": {
+      "name": "Sierra Leone",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SM": {
+      "name": "San Marino",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SN": {
+      "name": "Senegal",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SO": {
+      "name": "Somalia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SR": {
+      "name": "Suriname",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SS": {
+      "name": "South Sudan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ST": {
+      "name": "Sao Tome & Principe",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SV": {
+      "name": "El Salvador",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SX": {
+      "name": "St Maarten (Dutch)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "SY": {
+      "name": "Syria",
+      "tier": "blocked",
+      "reasons": [
+        "residual-sanctions"
+      ],
+      "sources": [
+        "S-OFAC-SYRIA-2025",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "medium",
+      "researched": true,
+      "counsel": [
+        "Q-1",
+        "Q-6"
+      ],
+      "note": "354's 0.1.1 reason 'comprehensive-sanctions' is OUTDATED for the U.S.: OFAC removed the Syrian Sanctions Regulations effective 2025-08-26. Kept blocked (never weakened without counsel): residual designations remain; EU and UN status not read."
+    },
+    "SZ": {
+      "name": "Eswatini (Swaziland)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TC": {
+      "name": "Turks & Caicos Is",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TD": {
+      "name": "Chad",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TF": {
+      "name": "French S. Terr.",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TG": {
+      "name": "Togo",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TH": {
+      "name": "Thailand",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TJ": {
+      "name": "Tajikistan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TK": {
+      "name": "Tokelau",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TL": {
+      "name": "East Timor",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TM": {
+      "name": "Turkmenistan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TN": {
+      "name": "Tunisia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TO": {
+      "name": "Tonga",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TR": {
+      "name": "Turkey",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TT": {
+      "name": "Trinidad & Tobago",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TV": {
+      "name": "Tuvalu",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TW": {
+      "name": "Taiwan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "TZ": {
+      "name": "Tanzania",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "UA": {
+      "name": "Ukraine",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "UG": {
+      "name": "Uganda",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "UM": {
+      "name": "U.S. Minor Outlying Islands",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-CFTC-8412"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "U.S. territory"
+    },
+    "US": {
+      "name": "United States",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required",
+        "regulator-enforcement-offshore-perps"
+      ],
+      "sources": [
+        "S-CFTC-8412",
+        "S-CFTC-8715",
+        "S-US-2026-ONSHORE"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "counsel": [
+        "Q-3"
+      ]
+    },
+    "UY": {
+      "name": "Uruguay",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "UZ": {
+      "name": "Uzbekistan",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "VA": {
+      "name": "Vatican City",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "VC": {
+      "name": "St Vincent",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "VE": {
+      "name": "Venezuela",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "VG": {
+      "name": "Virgin Islands (UK)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "VI": {
+      "name": "U.S. Virgin Islands (US territory)",
+      "tier": "blocked",
+      "reasons": [
+        "authorisation-required"
+      ],
+      "sources": [
+        "S-CFTC-8412"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "U.S. territory"
+    },
+    "VN": {
+      "name": "Vietnam",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "VU": {
+      "name": "Vanuatu",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "WF": {
+      "name": "Wallis & Futuna",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "WS": {
+      "name": "Samoa (western)",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "YE": {
+      "name": "Yemen",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "YT": {
+      "name": "Mayotte",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ZA": {
+      "name": "South Africa",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ZM": {
+      "name": "Zambia",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    },
+    "ZW": {
+      "name": "Zimbabwe",
+      "tier": "restricted-review",
+      "reasons": [
+        "not-researched"
+      ],
+      "sources": [],
+      "confidence": "none",
+      "researched": false
+    }
+  },
+  "subdivisions": {
+    "UA-09": {
+      "name": "Luhansk oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [
+        "S-OFAC-UKR",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "as UA-14"
+    },
+    "UA-14": {
+      "name": "Donetsk oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [
+        "S-OFAC-UKR",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "EO 14065 covers the so-called DNR region; the whole oblast is blocked (geolocation cannot draw the line)"
+    },
+    "UA-23": {
+      "name": "Zaporizhzhia oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [],
+      "confidence": "low",
+      "researched": false,
+      "counsel": [
+        "Q-6"
+      ],
+      "note": "kept from 0.1.1 (never weakened); the EU's extension to the non-government-controlled areas was not read today (EUR-Lex refused the page): UNVERIFIED"
+    },
+    "UA-40": {
+      "name": "Sevastopol (Ukraine, occupied)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [
+        "S-OFAC-UKR"
+      ],
+      "confidence": "high",
+      "researched": true,
+      "note": "Crimea region"
+    },
+    "UA-43": {
+      "name": "Crimea (Ukraine, occupied)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [
+        "S-OFAC-UKR",
+        "S-DYDX-TERMS"
+      ],
+      "confidence": "high",
+      "researched": true
+    },
+    "UA-65": {
+      "name": "Kherson oblast (Ukraine)",
+      "tier": "blocked",
+      "reasons": [
+        "comprehensive-sanctions"
+      ],
+      "sources": [],
+      "confidence": "low",
+      "researched": false,
+      "counsel": [
+        "Q-6"
+      ],
+      "note": "as UA-23"
+    }
+  },
+  "anonymizers": {
+    "tor": "deny",
+    "vpn_proxy": "deny",
+    "hosting": "deny-ui-allow-api-with-attested-account"
+  },
+  "denied_policy": {
+    "policy": "exit_only",
+    "exit_only_actions": [
+      "CancelOrder",
+      "CancelAll",
+      "PlaceOrder(reduceOnly=true)",
+      "Withdraw"
+    ],
+    "refused_actions": "every other action type, deposit credit to a new account included",
+    "public_reads": "market data, node status and account reads are not geoblocked",
+    "sanctioned_address_policy": "frozen: an address on the sanctions list (compliance/geoblock/sanctions) is refused for EVERY action, exit-only included (HTTP 451 SANCTIONED); what happens to funds already inside is for counsel",
+    "note": "For counsel: whether exit-only may stay open for tier-'blocked' entries whose reason is comprehensive-sanctions."
+  }
+}

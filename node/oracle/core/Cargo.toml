@@ -1,0 +1,16 @@
+[package]
+name = "postern-perps-oracle-core"
+description = "PosternDEX Perpetuals oracle: deterministic acceptance, halt and aggregation rules (UNAUDITED PROTOTYPE)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "perps_oracle"
+
+[dependencies]
+# Same pins as node/Cargo.toml (389), so the engine and node link one copy.
+k256 = { version = "=0.13.4", default-features = false, features = ["ecdsa", "std"] }
+sha3 = { version = "=0.10.9", default-features = false }

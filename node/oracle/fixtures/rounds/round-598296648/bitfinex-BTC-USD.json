@@ -1,0 +1,1 @@
+{"venue": "bitfinex-BTC-USD", "url": "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD", "sentMs": 1794889944000, "httpDateMs": 1794889944000, "error": null, "body": "[64932,3.28075416,64950,1.37123927,60,0.00092448,64961,880.44204027,65685,63910,1358182043000]", "receivedMs": 1794889944359}

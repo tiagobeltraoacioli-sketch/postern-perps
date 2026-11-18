@@ -1,0 +1,34 @@
+{
+  "schema": "postern-perps/notices",
+  "version": "NOTICES-0.2-20261117",
+  "status": "DRAFT FOR COUNSEL. Not legal advice. UNAUDITED prototype. Texts for the Interface (agent 391); generated into notices.json with the hashes of every document by compliance/tools/build_notices.py.",
+  "operatorLine": "PosternDEX Perpetuals by Bloch Inc. This interface is operated by Bloch Inc (Panama).",
+  "prototypeLine": "Unaudited prototype. Not live: no real funds. Nothing here is an offer or advice.",
+  "riskPoints": [
+    "Perpetual futures are leveraged. A small price move can lose your whole margin, and a cross-margin position can use your whole account balance.",
+    "A position is liquidated when its margin falls below the maintenance requirement. Liquidation closes it through the book, never worse than the price at which your account reaches zero, with a 0.5% liquidation fee; in extreme markets the backstop, the insurance fund and, last, auto-deleveraging of profitable positions are used.",
+    "A market halts when its price feed is stale or jumps. While halted you can only cancel: no closing, no liquidation, no stop-loss or take-profit. It may resume far from where it stopped.",
+    "Funding is paid every hour between longs and shorts (capped at 0.05% of position value per hour) and can cost you money while you hold a position.",
+    "One sequencer orders all actions. It cannot sign for you or move funds out, but it can delay or reorder; the forced-action path on the Bloch L2 bounds that delay.",
+    "Collateral is bUSDC on the Bloch L2: it depends on the Bloch bridge, on the L2 and on USDC (which its issuer can freeze) as well as on this exchange.",
+    "The software is an unaudited prototype and may contain errors that lose funds."
+  ],
+  "attestationPoints": [
+    "I am not a resident of, located in, or incorporated in a restricted jurisdiction, and I will not use a VPN or similar tool to hide my location.",
+    "I am not a person or entity on a sanctions list, and I am not acting for one.",
+    "I have read the Risk Disclosure and the Terms of Use, and I understand that I can lose all the funds I deposit."
+  ],
+  "restricted": {
+    "known": "PosternDEX Perpetuals is not available in your region ({country}). You can still cancel orders, reduce or close positions and withdraw.",
+    "unknown": "Your region could not be determined, so trading is not available. You can still cancel orders, reduce or close positions and withdraw.",
+    "anonymizer": "Trading is not available through a VPN, proxy or Tor. You can still cancel orders, reduce or close positions and withdraw.",
+    "sanctioned": "This address cannot use PosternDEX Perpetuals."
+  },
+  "restrictedSummary": "Not available in, among others, the United States and its territories, Canada, the United Kingdom, Brazil, mainland China, Australia, Singapore, Cuba, Iran, North Korea, Syria, Russia, Belarus, Myanmar and the Crimea, Sevastopol, Donetsk, Luhansk, Zaporizhzhia and Kherson regions of Ukraine; and, until counsel decides, in every other country.",
+  "documents": {
+    "terms": "compliance/legal/terms-of-use.md",
+    "risk": "compliance/legal/risk-disclosure.md",
+    "privacy": "compliance/legal/privacy-notice.md",
+    "attestation": "compliance/legal/attestation.md"
+  }
+}
