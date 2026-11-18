@@ -333,37 +333,21 @@ pub fn run_live(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
                         signature: sig::sign(key, &d),
                     })
                     .collect();
-                let mut posts = Vec::new();
-                if let Some(n) = &node {
-                    let bodies: Vec<(&str, String)> = if committee_mode {
+                let posts = match &node {
+                    Some(n) => {
                         let u = perps_oracle::types::OracleUpdate {
                             round: o.round,
                             observations: signed.clone(),
                         };
-                        vec![(
-                            crate::submit::UPDATES_PATH,
-                            json::update_to_json(&u).to_string(),
-                        )]
-                    } else {
-                        signed
-                            .iter()
-                            .map(|s| {
-                                let mut ob = json::signed_to_json(s, o.round);
-                                ob.as_object_mut().unwrap().remove("round");
-                                (
-                                    crate::submit::OBSERVATIONS_PATH,
-                                    json!({"round": o.round, "observation": ob}).to_string(),
-                                )
-                            })
-                            .collect()
-                    };
-                    for (path, body) in bodies {
-                        posts.push(match n.post_json(path, &body) {
-                            Ok((status, reply)) => json!({"status": status, "reply": reply}),
-                            Err(e) => json!({"error": e}),
-                        });
+                        let mode = if committee_mode {
+                            crate::submit::Mode::Updates
+                        } else {
+                            crate::submit::Mode::Observations
+                        };
+                        n.post_round(&u, mode).log
                     }
-                }
+                    None => Vec::new(),
+                };
                 json!({"observation": json::signed_to_json(&signed[0], o.round),
                        "signers": signed.iter().map(|s| s.signer).collect::<Vec<_>>(),
                        "posts": posts, "report": report, "events": events, "fetches": fetch_ms})

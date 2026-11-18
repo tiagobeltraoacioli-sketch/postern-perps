@@ -17,7 +17,7 @@ use perps_oracle::{eip712, sig, ROUND_MS};
 use serde_json::{json, Value};
 
 use crate::json as j;
-use crate::submit::{NodeClient, OBSERVATIONS_PATH, UPDATES_PATH};
+use crate::submit::NodeClient;
 use crate::tape::{index_at, Step};
 
 /// The signed round of one tape step at time `time_ms`: one observation per signing committee index, each over
@@ -100,13 +100,7 @@ impl Clock for SystemClock {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    /// One `POST /v1/oracle/updates` per round (the whole committee's update).
-    Updates,
-    /// One `POST /v1/oracle/observations` per signer per round (the production shape: each feeder on its own).
-    Observations,
-}
+pub use crate::submit::Mode;
 
 pub struct Options {
     pub speed: usize,
@@ -182,44 +176,12 @@ pub fn run(
             continue;
         };
         let mut posts: Vec<Value> = Vec::new();
-        let (mut ok, mut refused, mut unreachable) = (true, false, false);
         if let Some(n) = node {
-            let bodies: Vec<(&str, String)> = match opt.mode {
-                Mode::Updates => vec![(UPDATES_PATH, j::update_to_json(&u).to_string())],
-                Mode::Observations => u
-                    .observations
-                    .iter()
-                    .map(|o| {
-                        let mut ob = j::signed_to_json(o, u.round);
-                        ob.as_object_mut().unwrap().remove("round");
-                        (
-                            OBSERVATIONS_PATH,
-                            json!({"round": u.round, "observation": ob}).to_string(),
-                        )
-                    })
-                    .collect(),
-            };
-            for (path, body) in bodies {
-                match n.post_json(path, &body) {
-                    Ok((status, reply)) => {
-                        if !(200..300).contains(&status) {
-                            ok = false;
-                            refused = true;
-                        }
-                        let reply: Value =
-                            serde_json::from_str(&reply).unwrap_or(Value::String(reply));
-                        posts.push(json!({"status": status, "reply": reply}));
-                    }
-                    Err(e) => {
-                        ok = false;
-                        unreachable = true;
-                        posts.push(json!({"error": e}));
-                    }
-                }
-            }
-            sum.accepted += u64::from(ok);
-            sum.refused += u64::from(refused);
-            sum.unreachable += u64::from(unreachable);
+            let p = n.post_round(&u, opt.mode);
+            sum.accepted += u64::from(p.accepted);
+            sum.refused += u64::from(p.refused);
+            sum.unreachable += u64::from(p.unreachable);
+            posts = p.log;
         }
         let line = json!({
             "step": i, "round": round, "timeMs": t,
