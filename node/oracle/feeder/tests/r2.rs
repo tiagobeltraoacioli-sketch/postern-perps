@@ -101,6 +101,48 @@ fn r432_1_feeder_prices_are_in_the_engine_price_scale() {
         .all(|m| m.price_decimals == 8));
 }
 
+/// R436-8 (Info, reviewer 436): "R432-1 would not have failed closed". Now it does, at the feeder: a market
+/// configured with another scale than the engine's (the round-1 display decimals) signs NOTHING, because the
+/// integer it would sign, read at 1e-8 USD, is not a plausible price; a venue set that agrees on a price a
+/// thousand times off (a unit change at the venues) is refused the same way.
+#[test]
+fn r432_1_a_wrong_scale_or_unit_abstains_instead_of_signing() {
+    let (t0, resp) = load_round_dir(&fixtures().join("rounds/round-598296643")).unwrap();
+    let mut c = default_config();
+    for (m, d) in c.markets.iter_mut().zip([1u8, 2, 3]) {
+        m.price_decimals = d;
+    }
+    let mut f = Feeder::new(c).unwrap();
+    let (obs, rep) = f.observe(round_of(t0), t0, &resp);
+    assert_eq!(obs, None, "nothing to sign");
+    for m in &rep.markets {
+        let e = m.result.as_ref().unwrap_err();
+        assert!(e.starts_with("implausible: "), "{}: {e}", m.symbol);
+    }
+    // The bounds are an order of magnitude or more away from the recorded prices on both sides.
+    let mut c = default_config();
+    c.markets[0].plausible_usd = Some((70_000, 5_000_000));
+    c.markets[2].plausible_usd = Some((1, 70));
+    let mut f = Feeder::new(c).unwrap();
+    let (obs, rep) = f.observe(round_of(t0), t0, &resp);
+    assert_eq!(
+        obs.unwrap()
+            .prices
+            .iter()
+            .map(|p| p.market_id)
+            .collect::<Vec<_>>(),
+        [2]
+    );
+    assert!(rep.markets[0].result.is_err() && rep.markets[2].result.is_err());
+    // A configuration without a usable range is refused at start.
+    let mut c = default_config();
+    c.markets[1].plausible_usd = Some((0, 10));
+    assert!(Feeder::new(c).is_err());
+    let mut c = default_config();
+    c.markets[1].plausible_usd = Some((10, 10));
+    assert!(Feeder::new(c).is_err());
+}
+
 /// The golden file of the six recorded rounds at the engine scale, and its relation to the round-1 golden file
 /// (display decimals, still checked by `pipeline::recorded_rounds_replay_to_the_golden_file`): the same median,
 /// so rounding the 1e-8 price half up to the display decimals gives the round-1 number.

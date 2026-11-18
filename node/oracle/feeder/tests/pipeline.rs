@@ -27,6 +27,9 @@ fn default_config() -> FeederConfig {
     let mut c = perps_oracle_feeder::pipeline::default_config();
     for (m, d) in c.markets.iter_mut().zip([1u8, 2, 3]) {
         m.price_decimals = d;
+        // The display-scale integers are not engine-scale prices: the round-2 plausibility tripwire (which reads
+        // the signed integer at 1e-8 USD) is off here, and tested in `tests/r2.rs`.
+        m.plausible_usd = None;
     }
     c
 }

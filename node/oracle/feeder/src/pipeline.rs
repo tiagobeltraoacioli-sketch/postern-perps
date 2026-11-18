@@ -16,6 +16,12 @@ pub struct MarketConfig {
     pub min_sources: u8,
     pub max_source_deviation_bps: u32,
     pub sources: Vec<Source>,
+    /// Plausible range of the price in WHOLE USD per base unit, both ends included (a unit and scale tripwire, not
+    /// a market view: an order of magnitude or more on each side). The feeder abstains when the integer it would
+    /// sign, read at the ENGINE's price scale (1e-8 USD), is outside it. R432-1 / R436-8: a feeder configured
+    /// with another scale than the engine's signs nothing instead of a price 10^5 times off. `None` switches the
+    /// tripwire off (tests of the scale-independent rules only; the default configuration always has it).
+    pub plausible_usd: Option<(u64, u64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +62,8 @@ impl FeederConfig {
             if i > 0 && self.markets[i - 1].market_id >= m.market_id {
                 return Err(ConfigError::MarketOrder);
             }
-            if m.price_decimals > 18 {
+            if m.price_decimals > 18 || m.plausible_usd.is_some_and(|(lo, hi)| lo == 0 || lo >= hi)
+            {
                 return Err(ConfigError::Decimals(m.symbol.clone()));
             }
             check_sources(&m.symbol, &m.sources, m.min_sources)?;
@@ -91,19 +98,20 @@ pub const ENGINE_PRICE_DECIMALS: u8 = 8;
 /// section 8. Prices are signed at the engine's price scale (R432-1: round 1 used the display decimals 1, 2, 3,
 /// which the engine would have read 10^7, 10^6 and 10^5 times too small).
 pub fn default_config() -> FeederConfig {
-    let m = |id, sym: &str, base| MarketConfig {
+    let m = |id, sym: &str, base, plausible_usd| MarketConfig {
         market_id: id,
         symbol: sym.into(),
         price_decimals: ENGINE_PRICE_DECIMALS,
         min_sources: 3,
         max_source_deviation_bps: 200,
         sources: default_sources(base),
+        plausible_usd: Some(plausible_usd),
     };
     FeederConfig {
         markets: vec![
-            m(1, "BTC-USD", "BTC"),
-            m(2, "ETH-USD", "ETH"),
-            m(3, "SOL-USD", "SOL"),
+            m(1, "BTC-USD", "BTC", (2_000, 5_000_000)),
+            m(2, "ETH-USD", "ETH", (50, 500_000)),
+            m(3, "SOL-USD", "SOL", (1, 50_000)),
         ],
         usdt_sources: default_sources("USDT"),
         usdt_min_sources: 3,
@@ -325,6 +333,12 @@ impl Feeder {
             {
                 Ok((p18, sources)) => {
                     match perps_oracle::decimal::to_scale_half_up(p18, m.price_decimals) {
+                        Some(price) if m.plausible_usd.is_some_and(|r| !plausible(price, r)) => {
+                            let (lo, hi) = m.plausible_usd.unwrap_or_default();
+                            Err(format!(
+                                "implausible: {price} at 1e-8 USD is outside {lo} .. {hi} USD (scale or unit error?)"
+                            ))
+                        }
                         Some(price) => {
                             self.last_obs.insert(m.market_id, p18);
                             let e = OraclePrice {
@@ -365,6 +379,13 @@ impl Feeder {
         };
         (obs, report)
     }
+}
+
+/// Is the integer `price`, read at the engine's scale (1e-8 USD), inside `[low, high]` whole USD?
+fn plausible(price: u64, (low, high): (u64, u64)) -> bool {
+    let unit = 10u128.pow(u32::from(ENGINE_PRICE_DECIMALS));
+    let p = u128::from(price);
+    p >= u128::from(low) * unit && p <= u128::from(high) * unit
 }
 
 /// Decimal text of a 1e-18 value with `dp` fraction digits, truncated (reports only, never signed).
