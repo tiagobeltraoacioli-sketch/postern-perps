@@ -9,5 +9,15 @@ description = "Agent 395: independent encoder (SPEC 2 and 3) and adversarial har
 sha3 = "0.10"
 k256 = { version = "0.13", features = ["ecdsa"] }
 hex = "0.4"
+# Agent 436 (round 2): the engine under test, for the fuzzer binary only (src/lib.rs stays SPEC-only).
+postern-perps-engine = { path = "../../engine" }
+
+[[bin]]
+name = "fuzz436"
+path = "src/bin/fuzz436.rs"
+
+[profile.release]
+overflow-checks = true
+debug-assertions = true
 
 [workspace]
