@@ -23,6 +23,12 @@
 //!  P9  the engine never panics (overflow checks and debug assertions ON in this build) and never refuses a
 //!      well-formed block.
 //!  P10 no book is crossed after a block; INSURANCE and PROTOCOL_FEE balances are never negative.
+//!  P11 SPEC 11: the state root recomputed HERE from the engine's raw state (account, market and withdrawal leaves
+//!      built from the SPEC text, this program's own Merkle trees, escape values, deposit / forced / withdrawal
+//!      counters and totals from this program's ledger; only auxHash, nextOrderId and dust are read as given)
+//!      equals the engine's, every 20th block; escape values per account equal this program's (insurance-first).
+//!  P12 forced requests leave the queue in index order, one event each; processed = served + rejected.
+//!  P13 the engine's account and withdrawal proofs verify against this program's roots (random picks).
 //!  Soft counters (reported, not failures): BACKSTOP negative; insurance paying out while the index never moved
 //!  (the R436-1 class); accounts still below maintenance after their liquidation step.
 //!
@@ -156,6 +162,10 @@ struct World {
     fee_ledger: i128,
     pos: BTreeMap<(u32, u32), i64>,
     wd_next: u64,
+    wd_total: u64,
+    wd_leaves: Vec<[u8; 32]>,
+    dep_ok: u64,
+    forced_done: u64,
     pool: Vec<Vec<u8>>,
     log: Vec<(u64, u64, Vec<u8>)>,
     roots: Vec<[u8; 32]>,
@@ -182,6 +192,43 @@ fn tier_mr(n: i128, tiers: &[pe::genesis::Tier]) -> i128 {
         acc += (n.min(hi) - lo) * t.mmf_ppm as i128;
     }
     (acc + 999_999) / 1_000_000
+}
+
+fn leaf_hash(data: &[u8]) -> [u8; 32] {
+    let mut v = vec![0x00u8];
+    v.extend_from_slice(data);
+    sp::keccak(&v)
+}
+
+fn node_hash(l: &[u8; 32], r: &[u8; 32]) -> [u8; 32] {
+    let mut v = vec![0x01u8];
+    v.extend_from_slice(l);
+    v.extend_from_slice(r);
+    sp::keccak(&v)
+}
+
+/// SPEC 11: fixed depth, positions 0.. hold `leaves`, the rest are empty (`Z(0) = 0`, `Z(i+1) = H(0x01 || Z(i) || Z(i))`).
+fn tree_root(leaves: &[[u8; 32]], depth: usize) -> [u8; 32] {
+    let mut z = [0u8; 32];
+    let mut level = leaves.to_vec();
+    for _ in 0..depth {
+        let mut next = Vec::with_capacity(level.len() / 2 + 1);
+        for c in level.chunks(2) {
+            next.push(node_hash(&c[0], if c.len() == 2 { &c[1] } else { &z }));
+        }
+        z = node_hash(&z, &z);
+        level = next;
+    }
+    level.first().copied().unwrap_or(z)
+}
+
+/// The vault's walk: bit i of `index` set = the node is a right child at level i.
+fn walk(leaf: [u8; 32], index: u64, siblings: &[[u8; 32]]) -> [u8; 32] {
+    let mut h = leaf;
+    for (i, s) in siblings.iter().enumerate() {
+        h = if (index >> i) & 1 == 1 { node_hash(s, &h) } else { node_hash(&h, s) };
+    }
+    h
 }
 
 impl World {
@@ -225,6 +272,10 @@ impl World {
             fee_ledger: 0,
             pos: BTreeMap::new(),
             wd_next: 0,
+            wd_total: 0,
+            wd_leaves: Vec::new(),
+            dep_ok: 0,
+            forced_done: 0,
             pool: Vec::new(),
             log: Vec::new(),
             roots: Vec::new(),
@@ -534,6 +585,7 @@ impl World {
             }
             if let (Some((acct, amount)), true) = (m.deposit, o.is_ok()) {
                 self.custody += amount as i128;
+                self.dep_ok += 1;
                 if acct == system_address(ACCT_PROTOCOL_FEE) {
                     self.fee_ledger += amount as i128;
                 }
@@ -602,12 +654,22 @@ impl World {
                     self.stats.add("liquidations", 1);
                 }
                 Event::ForcedServed { index } => {
+                    if *index != self.forced_done {
+                        return Err(format!("P12: forced request {index} served out of order (expected {})", self.forced_done));
+                    }
+                    self.forced_done += 1;
                     self.stats.add("forced_served", 1);
                     if let Some((who, 2, arg)) = self.forced.get(index).copied() {
                         expected_wd.push((who, who, if arg > 0 { Some((arg as i128 - fee) as u64) } else { None }));
                     }
                 }
-                Event::ForcedRejected { .. } => self.stats.add("forced_rejected", 1),
+                Event::ForcedRejected { index, .. } => {
+                    if *index != self.forced_done {
+                        return Err(format!("P12: forced request {index} rejected out of order (expected {})", self.forced_done));
+                    }
+                    self.forced_done += 1;
+                    self.stats.add("forced_rejected", 1)
+                }
                 Event::ForcedPending { .. } => self.stats.add("forced_pending_events", 1),
                 Event::Funding { .. } => self.stats.add("funding_settlements", 1),
                 Event::Halt { .. } => self.stats.add("halts", 1),
@@ -627,6 +689,14 @@ impl World {
             }
             self.wd_next += 1;
             self.custody -= w.amount as i128;
+            self.wd_total += w.amount;
+            let mut d = b"PPv1wdrl".to_vec();
+            d.extend_from_slice(&w.id.to_be_bytes());
+            d.extend_from_slice(&w.account);
+            d.extend_from_slice(&w.recipient);
+            d.extend_from_slice(&w.amount.to_be_bytes());
+            d.extend_from_slice(&w.height.to_be_bytes());
+            self.wd_leaves.push(leaf_hash(&d));
             if w.height != self.h {
                 return Err("P3: withdrawal record height differs from the block".into());
             }
@@ -753,8 +823,111 @@ impl World {
             self.stats.soft("engine_own_invariants_check_fails", format!("seed {} block {}: {m}", self.seed, self.h));
         }
         self.ins_prev = ins;
+        if self.forced_done != self.e.forced_processed {
+            return Err(format!("P12: engine processed {} forced requests, events say {}", self.e.forced_processed, self.forced_done));
+        }
+        if self.h % 20 == 0 {
+            self.spec11(&out.state_root)?;
+        }
         self.roots.push(out.state_root);
         self.log.push((self.h, self.t, enc));
+        Ok(())
+    }
+
+    /// P11 + P13: SPEC 11 recomputed from raw state and this program's ledger.
+    fn spec11(&mut self, engine_root: &[u8; 32]) -> Result<(), String> {
+        // escape values (SPEC 11): floor(E / 1e10) floored at 0, total negative equity charged to INSURANCE first
+        let mut esc: Vec<u64> = Vec::new();
+        let mut deficit: i128 = 0;
+        for a in &self.e.accounts {
+            let mut eq = a.balance * N10;
+            for (mid, p) in &a.positions {
+                eq += p.size as i128 * self.e.markets[mid].mark as i128 - p.open_notional;
+            }
+            if eq <= 0 {
+                deficit += (-eq + N10 - 1) / N10;
+                esc.push(0);
+            } else {
+                esc.push((eq / N10) as u64);
+            }
+        }
+        let i = ACCT_INSURANCE as usize;
+        esc[i] = (esc[i] as i128 - deficit).max(0) as u64;
+        if esc != self.e.escape_values() {
+            return Err(format!("P11: escape values differ from SPEC 11 at block {}", self.h));
+        }
+        let mut acct_leaves = Vec::with_capacity(self.e.accounts.len());
+        for (ai, a) in self.e.accounts.iter().enumerate() {
+            let mut ph = (a.positions.len() as u32).to_be_bytes().to_vec();
+            for (mid, p) in &a.positions {
+                ph.extend_from_slice(&mid.to_be_bytes());
+                ph.extend_from_slice(&p.size.to_be_bytes());
+                ph.extend_from_slice(&p.open_notional.to_be_bytes());
+                ph.extend_from_slice(&0u64.to_be_bytes());
+                ph.push(0);
+            }
+            let mut d = b"PPv1acct".to_vec();
+            d.extend_from_slice(&a.address);
+            d.extend_from_slice(&(ai as u32).to_be_bytes());
+            d.extend_from_slice(&a.balance.to_be_bytes());
+            d.extend_from_slice(&esc[ai].to_be_bytes());
+            d.extend_from_slice(&sp::keccak(&ph));
+            acct_leaves.push(leaf_hash(&d));
+        }
+        let max_mid = *self.e.markets.keys().next_back().unwrap() as usize;
+        let mut mkt_leaves = vec![[0u8; 32]; max_mid + 1];
+        for (mid, m) in &self.e.markets {
+            let mut d = b"PPv1mrkt".to_vec();
+            d.extend_from_slice(&mid.to_be_bytes());
+            d.extend_from_slice(&m.oracle.index.to_be_bytes());
+            d.extend_from_slice(&m.mark.to_be_bytes());
+            d.extend_from_slice(&m.long_oi.to_be_bytes());
+            d.extend_from_slice(&m.cum_funding.to_be_bytes());
+            d.push(match m.oracle.status {
+                Status::Active => 0,
+                Status::Halted(pe::oracle::HaltReason::Stale) => 1,
+                Status::Halted(pe::oracle::HaltReason::Jump) => 2,
+                Status::Halted(pe::oracle::HaltReason::Arithmetic) => 3,
+            });
+            mkt_leaves[*mid as usize] = leaf_hash(&d);
+        }
+        let (ar, mr, wr) = (tree_root(&acct_leaves, 32), tree_root(&mkt_leaves, 8), tree_root(&self.wd_leaves, 32));
+        let total_escape: u128 = esc.iter().map(|x| *x as u128).sum();
+        let mut sys = b"PPv1sys".to_vec();
+        sys.extend_from_slice(&self.dep_ok.to_be_bytes());
+        sys.extend_from_slice(&self.forced_done.to_be_bytes());
+        sys.extend_from_slice(&self.e.next_order_id.to_be_bytes());
+        sys.extend_from_slice(&total_escape.to_be_bytes());
+        sys.extend_from_slice(&(self.e.dust as u128).to_be_bytes());
+        sys.extend_from_slice(&self.e.aux_hash());
+        sys.extend_from_slice(&(self.wd_leaves.len() as u64).to_be_bytes());
+        sys.extend_from_slice(&self.wd_total.to_be_bytes());
+        let mut st = b"PosternPerps/state/v1".to_vec();
+        st.extend_from_slice(&self.h.to_be_bytes());
+        st.extend_from_slice(&self.t.to_be_bytes());
+        st.extend_from_slice(&ar);
+        st.extend_from_slice(&mr);
+        st.extend_from_slice(&wr);
+        st.extend_from_slice(&sp::keccak(&sys));
+        if sp::keccak(&st) != *engine_root {
+            return Err(format!("P11: SPEC 11 state root recomputed from raw state and the event ledger differs from the engine's at block {}", self.h));
+        }
+        self.stats.add("spec11_roots_recomputed", 1);
+        // P13: the engine's proofs against these roots
+        let ai = self.rng.below(self.e.accounts.len() as u64) as usize;
+        let addr = self.e.accounts[ai].address;
+        let (data, index, sib) = self.e.account_proof(&addr).ok_or("P13: no account proof")?;
+        if sib.len() != 32 || index as usize != ai || walk(leaf_hash(&data), index as u64, &sib) != ar {
+            return Err(format!("P13: account proof of index {ai} does not verify at block {}", self.h));
+        }
+        if !self.wd_leaves.is_empty() {
+            let id = self.rng.below(self.wd_leaves.len() as u64);
+            let (data, sib) = self.e.withdrawal_proof(id).ok_or("P13: no withdrawal proof")?;
+            if sib.len() != 32 || leaf_hash(&data) != self.wd_leaves[id as usize] || walk(leaf_hash(&data), id, &sib) != wr {
+                return Err(format!("P13: withdrawal proof {id} does not verify at block {}", self.h));
+            }
+        }
+        self.stats.add("proofs_verified", 2);
         Ok(())
     }
 
