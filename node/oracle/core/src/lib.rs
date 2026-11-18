@@ -14,6 +14,7 @@
 //! - [`sig`]: 65-byte secp256k1 signatures (low-s, v 27/28) and address recovery.
 //! - [`committee`]: the engine's acceptance rule (C1 to C5) and the per-market halt machine (H1 to H3).
 //! - [`feeder_rule`]: one validator's aggregation of venue readings into an observation (F2 to F6).
+//! - [`selection`]: the exact reach of the sequencer's choice of observations (R395-9) and the omission check.
 
 #![forbid(unsafe_code)]
 
@@ -22,6 +23,7 @@ pub mod decimal;
 pub mod eip712;
 pub mod encoding;
 pub mod feeder_rule;
+pub mod selection;
 pub mod sig;
 pub mod types;
 
