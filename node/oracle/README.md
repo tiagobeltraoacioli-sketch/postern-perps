@@ -276,8 +276,10 @@ the sequencer cannot narrow it (X2 only widens; withholding only ages the index,
 during a long halt honest users can withdraw less than their mark-to-market equity, and `settle` after a halt
 without any committee price is the pre-halt index (the only price the protocol stands behind).
 
-Defaults (section 8): `exitHaircutBps = jumpBps`, `exitHaircutPerMinBps = 100`, `exitMaxHaircutBps = 5000`,
-`maxHaltMs = 3600000` (one hour, well inside the vault's one-day forced-request delay).
+Defaults (section 8): `exitHaircutBps` BTC 500, ETH 700, SOL 1300 (never below `jumpBps`; calibrated in section
+8a so that the band is at least 1.3 times the largest recorded move at every horizon from 1 to 60 minutes),
+`exitHaircutPerMinBps = 100`, `exitMaxHaircutBps = 5000`, `maxHaltMs = 3600000` (one hour, well inside the vault's
+forced-request delay).
 - Stated limit: the halt machine bounds the size of one step (`jumpBps` per round from a fresh index), not the
   level. A coordinated manipulation of a majority of a market's venues that creeps in steps below `jumpBps`, or
   holds a new level for `confirmRounds` rounds, reaches the index. The defences against that are the choice of
@@ -382,12 +384,49 @@ five silent rounds) is replayed through the engine rule round by round in `feede
 | `frozenAfterMs`, `frozenMoveBps` | 60000, 20 | feeder |
 | `fetchTimeoutMs`, `maxClockSkewMs` | 1500, 1000 | feeder |
 | `dropAfterFails`, `cooldownRounds`, `maxCooldownRounds` | 5, 20, 1200 | feeder (section 7a) |
-| `exitHaircutBps`, `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs` | `jumpBps`, 100, 5000, 3600000 | engine, per market (section 6a) |
+| `exitHaircutBps` | BTC 500, ETH 700, SOL 1300 (round 2 proposal from the calibration, section 8a; round 1: `jumpBps`, i.e. 500, 500, 800, which is what the engine's converter still uses when the field is absent) | engine, per market (section 6a) |
+| `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs` | 100, 5000, 3600000 | engine, per market (section 6a) |
 | USDT/USD conversion: `minSources`, `maxDepegBps` | 3, 500 | feeder |
+
+## 8a. Calibration and the live hour (round 2; full tables, method and limits in `calibration/CALIBRATION.md`)
+
+Public minute candles of four venues over 34 days that include the worst days named in `docs/MARKETS.md`
+(2025-10-10, 2026-01-31, 2026-02-05, 2026-11-15), and one continuous hour of the live feeder against the seven
+venues (2026-11-18). No bound is loosened.
+
+| Parameter | Value | What the data shows | Result |
+|---|---|---|---|
+| `jumpBps` | 500 / 500 / 800 | a whole minute moved more than this in 0 / 1 / 4 of 48,960 minutes, all on 2025-10-10 | keep |
+| `agreeBps` | 100 | signers differ by sampling time inside a round; the 3 s move of an observation in the live hour stays far below it | keep |
+| `maxSourceDeviationBps` | 200 | never reached in 30 calm days; on the worst days the feeder would have abstained 1 / 1 / 36 minutes (fail closed) | keep |
+| `maxStalenessMs` | 10,000 | live hour: see CALIBRATION.md section 4 | keep |
+| `exitHaircutBps` | 500 / 500 / 800 | the band must contain the real move after m minutes of darkness: BTC yes (factor 1.9 or more), ETH barely (1.16 at 2 min), SOL NO (1,003 bps in 2 min against 1,000; 1,366 in 5 min against 1,300) | WIDEN to 500 / 700 / 1300 |
+| `exitHaircutPerMinBps`, `exitMaxHaircutBps` | 100, 5000 | the largest recorded move grows far slower than the band after 10 minutes; largest 60-minute move 1,692 bps | keep |
+| `maxHaltMs` | 3,600,000 | settling at the pre-halt index after an hour is wrong by up to 883 / 1,232 / 1,587 bps on the worst days | keep the hour; X3 only at a committee price (section 6a, proposal to 430) |
 
 ## 9. Not done / not proven
 
-See the report `~/Desktop/POSTERNDEX-PERPS-20261117/agents/394-oracle.md` for the current list. In short: not
-reviewed; parameters not calibrated on historical data; venue terms of use and most rate limits unconfirmed; the
-feeder's submission to the sequencer and the node's ingest are not wired (389); the engine does not call `core` yet
-(388); the price scale (10^priceDecimals per market vs a fixed 1e8) waits for SPEC.md.
+- No independent review yet of the round-2 work (436 has the commits). The round-1 feeder was not reviewed by 395.
+- R395-9 is stated and measured, not closed: the sequencer can still choose which valid observations a block
+  carries (section 5a). What would close it needs the node (validator refusal with an observation gossip plane) or
+  a consensus change (an omission-proof median); neither is built.
+- R436-10: the oracle side is restated and tested (section 6a); the ENGINE still serves a forced close in a halt at
+  `settle` until 430 changes SPEC 14 and the engine. X3 at the pre-halt index after `maxHaltMs` of withheld oracle
+  inputs remains possible until 430 adopts the committee-price condition.
+- The widened `exitHaircutBps` (ETH 700, SOL 1300) is a proposal: `compliance/markets.json` (435) and the engine's
+  converter default (430) still give `jumpBps`.
+- Calibration limits (CALIBRATION.md section 1): minute candles cannot resolve a 3 s round; four venues of seven;
+  34 chosen days; `jumpBps` and `agreeBps` are therefore confirmed as not too tight for genuine moves, NOT shown to
+  be as tight as they could be. No order-book depth study: the cost of moving a majority of venues was not
+  measured.
+- Live run: one hour, one host, one feeder process (a dev committee of seven keys in one process). The spread
+  BETWEEN independent feeders on different hosts was not measured; the round-to-round move of one feeder is used as
+  its upper proxy. Rate limits were not hit in the hour, which does not prove the limits (SOURCES.md).
+- The feeder reaches its sequencer over loopback plain HTTP only. A feeder on another host needs an authenticated
+  and encrypted channel (mutual TLS or a tunnel): not built. The observation's own signature authenticates the
+  CONTENT end to end either way.
+- `omitted` (section 5a) is a library function with a test; no validator calls it yet (431's decision).
+- Production keys: each validator operator generates its own oracle key on its own host. Everything here uses
+  throwaway keys (public-label derivations in tests, random run-time keys in rehearsals).
+- Venue terms of use: unconfirmed for every venue (SOURCES.md, for counsel).
+- OKX and Binance batching endpoints are not used (three requests each per round).
