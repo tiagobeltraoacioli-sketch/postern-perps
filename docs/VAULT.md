@@ -411,12 +411,12 @@ partial effect), so the cost is a failed transaction, not a loss; relayers, keep
 
 ## 10. Tests (contracts/, `forge test --offline`)
 
-**v0.3: 80 tests in 15 suites** (54 at the start of round 2, none removed; one restated,
+**v0.3: 81 tests in 16 suites** (54 at the start of round 2, none removed; one restated,
 `test_keyless_deposit_refused`, with the reason in the test). Added in round 2: `DevToken.t.sol` 3 (the local-stack
 token against the real vault); `SystemFunding.t.sol` 4 (system deposits, refund to the payer, R395-26 kept,
 insurance first); `Invariant.t.sol` +3 invariants and 1 probe test (below); `EngineVectors.t.sol` 4 (section 10a);
 `R433.t.sol` 3; `DeployScript.t.sol` 4 (post gate: runtime code, R436-9; token code pin); `Keeper.t.sol` 4 (section
-8a).
+8a); `EngineCliProofs.t.sol` 1 (section 10a, last paragraph).
 
 Invariants (stateful fuzz, 128 runs x 64 calls, handler with an honest engine model, a colluding committee, system
 funding, guardians and escape; 8 invariants): the five of v0.2 plus
@@ -463,6 +463,20 @@ For every step it writes the effect expected of the vault, computed by an indepe
 | `insurance` (19) | an account at 10x falls to -6,640.08 equity behind a halted market (no liquidation, SPEC S-4.10); the engine charges the deficit to INSURANCE in the escape values (60,000 -> 53,359.92); validators stop; escape by silence (reason 1); a 54,599.71 claim waits the large-amount delay | sum of escape values 136,000.000000 == custody; every user in full; the underwater account's claim refused `InvalidWithdrawal`; vault ends at 0 |
 | `backstop` (19) | same with seeds 5,000 / 2,000: the insurance value is 0 and the engine's values exceed custody by 1,640.08 | the vault's subordination pays every user in full out of the BACKSTOP share; system remainder 359.92 |
 | `shortfall` (18) | same with seeds 5,000 / 1,000: the deficit exceeds both system shares | users and PROTOCOL_FEE pro rata (57,000.000000 of 57,640.078160), INSURANCE and BACKSTOP nothing; 2 base units of rounding stay in the vault (R433-2) |
+
+**Round-2 engine and node.** The vectors were generated with engine and node at `main` `f0e3967`. Rebuilt on the
+build host against `codex/perps-engine-r2-20261118` `cd8e5ae` (SPEC 0.2.2) with `codex/perps-node-r2-20261118`
+`b897344`, the generator gives the SAME BYTES for all four stories (`cmp` equal): the round-2 engine changes no root,
+leaf or checkpoint field of these stories. The integrator reruns `generate.sh` on the merged tree; a difference
+means an interface change to announce, never a file to overwrite silently.
+
+**The engine CLI's own proofs (430).** `test/vectors/engine-cli/proofs-example.json` is an unchanged copy of
+`engine/vectors/proofs-example.json` (`cd8e5ae`, output of `engine proofs-example`; sha256 `d9925150…682a9d`).
+`test/EngineCliProofs.t.sol` checks it with the vault's own code: the vault's state-root equation gives the CLI's
+state root; each of the 6 account leaves and 2 withdrawal leaves has the vault's byte format and verifies by the
+vault's Merkle walk against the checkpoint's roots, and not at the neighbouring position; the escape values sum to
+`totalEscape` and to custody, with the under-water account at 0 and INSURANCE below its balance. That checkpoint is
+unsigned and made for the testkit vault address, so it shows format and proof agreement, not acceptance.
 
 What the replays prove: the bytes the engine commits and the node code signs are the bytes the vault verifies
 (checkpoint digest, state root, both chain heads, both leaf formats, proof direction), for the scenarios above, and
