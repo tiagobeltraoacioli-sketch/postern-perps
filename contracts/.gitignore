@@ -2,3 +2,5 @@ out/
 cache/
 deploy/*.local.json
 broadcast/
+# Local anvil deployments (addresses, ABI copies, run-time throwaway keys): never committed.
+deploy/local/

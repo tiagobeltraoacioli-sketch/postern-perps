@@ -47,3 +47,39 @@ use that vault (it has no funds and no owner; abandon it) and deploy again.
   address"); the committed config with `TBD` values ("not an address (TBD?): TBD-deploy"); an RPC whose chain id
   differs from the config ("RPC chain id differs from the config").
 - Not rehearsed: a Ledger signing, the real Bloch L2 node, the real bUSDC bytecode.
+
+## Local stack deployment (round 2; private anvil only, never a real network)
+
+`script/local_deploy.py` deploys `src/dev/MockBUSDC.sol` (6 decimals, open faucet, no value) and `PerpsVault` with a
+5-of-7 committee and 3 guardians on a private anvil, for the local full stack (node 431, frontend 434, e2e 435).
+It refuses a non-loopback RPC, an RPC that does not answer `anvil_nodeInfo`, a chain id other than `--chain-id`
+(default 700770), and an output directory that git would track when it has to generate keys. It takes no private
+key: transactions go from anvil's unlocked dev account. The committee is either passed in (`--validators`, seven
+addresses of the node's throwaway committee; `--guardians`, three) or generated at run time with `cast wallet new`
+into `<out>/throwaway-keys.json` (mode 0600; `deploy/local/` is git-ignored).
+
+Start anvil (loopback, chain id 700770; ports 49700-49799 are agent 433's, 435 uses its own):
+
+```
+anvil --host 127.0.0.1 --port 49700 --chain-id 700770
+```
+
+Deploy (from `contracts/`):
+
+```
+python3 script/local_deploy.py --rpc http://127.0.0.1:49700 --out deploy/local --validators 0xV1,0xV2,0xV3,0xV4,0xV5,0xV6,0xV7 --fund 0xUSER
+```
+
+Output in `--out`: `deployment.json` (schema `postern-perps/local-deployment/1`: `token`, `vault`,
+`vaultDeployBlock`, `chainId`, `validators`, `guardians`, `limits`, `eip712Domain`, `domainSeparator`,
+`depositHead0`, `forcedHead0`, `gasUsed`), `PerpsVault.abi.json`, `MockBUSDC.abi.json`; the same JSON on stdout,
+last line `LOCAL-DEPLOY OK <vault> <token>`. On a fresh anvil the addresses are always token
+`0x5FbDB2315678afecb367f032d93F642f64180aa3` and vault `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` (deployer nonces
+0 and 1). Limits default to the proposal of `deploy/vault.config.json`; `--set forcedDelay=86400` style overrides
+stay inside the constructor's bounds (a rehearsal passes the delays with `evm_increaseTime`, it does not shrink
+them). The committed ABI files `abi/PerpsVault.abi.json` and `abi/MockBUSDC.abi.json` are written by
+`python3 script/export_abi.py` and compared with the build by `python3 script/export_abi.py --check`.
+
+Rehearsed 2026-11-18 (agent 433, anvil 1.7.1 on 127.0.0.1:49700): deployment and post gate pass (vault creation
+4,934,833 gas as an anvil transaction, token 390,403); refusals shown for a non-loopback RPC, a dead RPC, a wrong
+chain id, `forcedDelay=60` (constructor `InvalidConfiguration`) and a tracked output directory.
