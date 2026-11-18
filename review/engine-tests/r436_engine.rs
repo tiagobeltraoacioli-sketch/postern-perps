@@ -282,3 +282,58 @@ fn r436_8_converter_wraps_out_of_range_integers_instead_of_refusing() {
     assert_eq!(wrapped.markets[0].tiers[0].imf_ppm as u64, imf);
     assert_eq!(wrapped.markets[0].oracle.min_sources as u64, src);
 }
+
+/// Shared scenario of R436-10. A is long 1 BTC against S, short 1 BTC, at 67,250. No oracle round is included for
+/// 12 s (the sequencer alone decides whether an oracle input is in a block): the market halts STALE with the index
+/// frozen at 67,250. With `forced`, S's forced CloseAll (posted on the L2 earlier; the sequencer also chooses the
+/// block that includes it) is processed during the halt. The oracle then returns 4% higher.
+/// Returns (A's equity, S's equity) in USDC units after the market resumed.
+fn r436_10_run(forced: bool) -> (i128, i128) {
+    let mut r = Rig::new();
+    let (ka, ks) = (key(4391), key(4392));
+    let (a, s) = (addr(&ka), addr(&ks));
+    let deps = vec![r.dep(a, usdc(50_000)), r.dep(s, usdc(50_000))];
+    all_ok(&r.block(P, deps));
+    let i1 = r.order(&ka, true, ORDER_LIMIT, TIF_GTC, P, ONE);
+    let i2 = r.order(&ks, false, ORDER_MARKET, TIF_IOC, P - 100 * TICK, ONE);
+    all_ok(&r.block(P, vec![i1, i2]));
+    // 4 blocks, 3 s apart, WITHOUT an oracle input: halted after 10 s
+    for _ in 0..4 {
+        r.h += 1;
+        r.t += 3000;
+        r.e.apply_block(&Block { height: r.h, time: r.t, inputs: vec![] }).unwrap();
+    }
+    assert!(r.e.markets[&BTC].oracle.status != postern_perps_engine::oracle::Status::Active, "halted (stale)");
+    if forced {
+        r.h += 1;
+        r.t += 3000;
+        let f = Input::Forced { index: 0, account: s, kind: FORCED_CLOSE, deadline: r.t / 1000 + 86_400, arg: 0 };
+        let out = r.e.apply_block(&Block { height: r.h, time: r.t, inputs: vec![f] }).unwrap();
+        assert!(out.events.iter().any(|e| matches!(e, Event::ForcedServed { index: 0 })), "served during the halt: {:?}", out.events);
+        let fill = out.events.iter().find_map(|e| if let Event::Fill { kind: FillKind::Adl, price, size, .. } = e { Some((*price, *size)) } else { None });
+        println!("forced close during the halt: ADL fill {fill:?} (the frozen index is {P})");
+        assert_eq!(fill, Some((P, ONE)), "closed against A at the STALE index, whole size");
+    }
+    let up = P / 100 * 104;
+    all_ok(&r.block(up, vec![]));
+    all_ok(&r.block(up, vec![]));
+    assert!(r.e.markets[&BTC].oracle.status == postern_perps_engine::oracle::Status::Active && r.e.markets[&BTC].oracle.index == up, "resumed 4% higher");
+    let eq = |x: &Addr| r.e.equity(r.e.by_addr[x]) / 10_000_000_000;
+    (eq(&a), eq(&s))
+}
+
+/// R436-10 (Medium, design; breaks SPEC 12 "the sequencer cannot move funds"). A forced close in a HALTED market
+/// is served at `settle` = the frozen index with no haircut (engine.rs:1011-1024, SPEC 14), against the opposite
+/// positions in ADL order. Whoever can choose WHEN the index freezes holds a free stop-loss at the last price,
+/// paid by the counterparties: the sequencer withholds oracle inputs when the market turns against its own
+/// position and includes its own (pre-posted) forced CloseAll. S-9.2 values a halted position at the side of the
+/// exit band WORSE for its holder for withdrawals; the forced close does not.
+#[test]
+fn r436_10_forced_close_in_a_halt_is_a_free_exit_at_the_stale_index_paid_by_the_adl_counterparty() {
+    let (a_plain, s_plain) = r436_10_run(false);
+    let (a_forced, s_forced) = r436_10_run(true);
+    println!("no forced close : A (long) equity {:.2}, S (short) equity {:.2}", f(a_plain), f(s_plain));
+    println!("forced close    : A (long) equity {:.2}, S (short) equity {:.2}", f(a_forced), f(s_forced));
+    assert!(s_forced - s_plain > usdc(2_600) as i128, "S avoided the 4% loss on 1 BTC (2,690 USDC) except for a fee");
+    assert!(a_plain - a_forced > usdc(2_600) as i128, "A lost exactly that gain: it was closed at the stale price without asking");
+}
