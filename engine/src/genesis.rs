@@ -136,6 +136,11 @@ pub struct Genesis {
     #[serde(with = "strnum")]
     pub backstop_oi_ppm: u32,
     pub markets: Vec<MarketParams>,
+    /// The collateral token contract on the L2 (bUSDC), SPEC S-9.2.1 (R395-22): never a withdrawal recipient.
+    /// Optional in 0.2 and LAST, omitted from the canonical encoding when absent, so a genesis written before 0.2
+    /// keeps its `logHash(0)` and every root; a genesis bound to a real vault MUST set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collateral_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -159,6 +164,7 @@ pub struct Checked {
     pub verifying_contract: Addr,
     pub fee_recipient: Addr,
     pub oracle_signers: Vec<Addr>,
+    pub collateral_token: Option<Addr>,
     pub hash: H256,
 }
 
@@ -189,6 +195,16 @@ impl Genesis {
         if fr != parse_addr(OWNER_FEE_RECIPIENT).unwrap() {
             return Err("feeRecipient must be the owner's fee address (SPEC S-9.3)".into());
         }
+        let token = match &self.collateral_token {
+            None => None,
+            Some(t) => {
+                let a = parse_addr(t)?;
+                if a[..18] == [0u8; 18] || a == vc || a == fr {
+                    return Err("collateralToken must be a contract address distinct from the vault and the fee recipient".into());
+                }
+                Some(a)
+            }
+        };
         let mut signers = Vec::new();
         for s in &self.oracle_signers {
             let a = parse_addr(s)?;
@@ -289,7 +305,7 @@ impl Genesis {
             }
         }
         let hash = keccak(&self.encoding());
-        Ok(Checked { verifying_contract: vc, fee_recipient: fr, oracle_signers: signers, hash, g: self })
+        Ok(Checked { verifying_contract: vc, fee_recipient: fr, oracle_signers: signers, collateral_token: token, hash, g: self })
     }
 }
 
@@ -420,6 +436,8 @@ pub fn from_compliance(
         launch_backstop_min: dec_units(backstop_seed_usdc, UD)?,
         backstop_oi_ppm,
         markets: ms,
+        // a deployment input (the bUSDC address of the vault's chain): the caller sets it; never guessed here
+        collateral_token: None,
     }
     .check()
     .map(|c| c.g)

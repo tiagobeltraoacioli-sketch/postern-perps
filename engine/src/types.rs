@@ -188,6 +188,8 @@ pub enum Error {
     SelfTrade,
     Cancelled,
     NotLaunched,
+    /// S-9.2.1 (R395-22): the vault, the collateral token or a keyless low address as withdrawal recipient.
+    BadRecipient,
 }
 
 impl Error {
@@ -228,6 +230,7 @@ impl Error {
             SelfTrade => "SELF_TRADE",
             Cancelled => "CANCELLED",
             NotLaunched => "NOT_LAUNCHED",
+            BadRecipient => "BAD_RECIPIENT",
         }
     }
 }

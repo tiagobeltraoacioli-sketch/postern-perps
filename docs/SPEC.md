@@ -1,10 +1,12 @@
 # PosternDEX Perpetuals: engine specification (`docs/SPEC.md`)
 
-**UNAUDITED PROTOTYPE. Version 0.1.6, 2026-11-17. Owner: agent 388 (continues 350).** Nothing here is deployed.
+**UNAUDITED PROTOTYPE. Version 0.2.0, 2026-11-18. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
+here is deployed.
 The perpetuals are not to be deployed before an external audit and a legal review.
 
 This document is normative for `engine/` (the deterministic state machine), and is the interface that `node/`
-(389), `contracts/` (390), `frontend/` (391), the mock (393) and the oracle (394) build against. Changes are
+(389, round 2: 431), `contracts/` (390; 433), `frontend/` (391; 434), the mock and the end-to-end stack (393; 435)
+and the oracle (394; 432) build against. Changes are
 requested in `~/Desktop/POSTERNDEX-PERPS-20261117/agents/CROSS-AREA.md`; every change bumps the version in the
 table at the end. Rule identifiers (`S-…`, `E-…`, `I-…`) are stable: tests and reviews cite them.
 
@@ -119,7 +121,7 @@ Field rules:
 | `clientOrderId` | opaque, echoed in events; `0x00…00` allowed; not unique-checked in v0.1 |
 | `leverage` | integer `1 <= leverage <= maxLeverage` of the market's first tier |
 | `UpdateMargin.amount` | USDC units; moves collateral into (`add = true`) or out of (`false`) an ISOLATED position's margin. Decided (technical): `uint64` + `bool` rather than `int64`, so a wallet shows a direction word and an unsigned amount (no two's-complement reading) |
-| `Withdraw.amount` | USDC units, gross; the flat `withdrawalFee` is deducted from it (section 9.2); `recipient` any address except the zero address; shown by the wallet |
+| `Withdraw.amount` | USDC units, gross; the flat `withdrawalFee` is deducted from it (section 9.2); `recipient` any address the vault can pay: not the zero address (`MALFORMED`), and none of the addresses of S-9.2.1 (`BAD_RECIPIENT`, R395-22); shown by the wallet |
 | `ApproveAgent.name` | UTF-8, 0 to 32 bytes; `expiresAt` Unix ms, `T < expiresAt <= T + 180 days` |
 
 Reserved type names (S-2.3.1): `Attestation` (the user attestation of 392/397, `compliance/legal/notices.json`,
@@ -140,6 +142,22 @@ At most `MAX_AGENTS = 4` unexpired agents per account. An agent address MUST NOT
 address with a ledger entry), MUST NOT be an agent of another account, and MUST NOT equal `account`
 (`AGENT_INVALID`). Approving an existing agent address of the same account replaces its name and expiry.
 Expired agents are removed lazily (at the next action of the account) and count for nothing.
+
+- S-2.4.1 (R395-21, the rule). Accounts appear by deposit and anyone may deposit to any address, so "an agent is not
+  an account" is checked ONLY when an `ApproveAgent` is applied; it is not an invariant, and no code may assume it.
+  A deposit to an approved agent's address makes that address an account as well: the approval stays valid until
+  it expires or is revoked, and nothing is confused, because the signer is always resolved through
+  `message.account` (S-2.2): the address acts for itself with `account` = itself (every type) and for its principal
+  with `account` = the principal (agent types only; `Withdraw` for the principal stays `AGENT_NOT_ALLOWED`). The
+  cost a third party can impose with such a deposit: a later approval OR RENEWAL of that address by anyone is
+  `AGENT_INVALID`, so the user approves a fresh key; the existing approval is not cut short. Test
+  `r395_21_deposit_to_an_agent_address`.
+- S-2.4.2 (R395-20). Nonce sets (2.5) belong to the SIGNER address, not to the approval: they are never deleted
+  or reset when an agent is revoked, expires, is removed lazily or is approved again (by the same or by another
+  account). An action of an agent applied before its removal therefore stays single-use after any re-approval
+  (`NONCE_USED`). v0.2 keeps every signer's set for the whole history (a stronger rule than "at least the nonce
+  window"); the cost is state that only grows: at most 64 nonces per address that ever signed an applied action
+  (O-11). Test `r395_20_agent_nonces_survive_revoke_expiry_and_reapproval`.
 
 ### 2.5 Nonces (S-2.5)
 
@@ -210,7 +228,14 @@ block: it is recorded as a failed outcome with its error and has no other effect
 7. Deposits, then forced requests, then actions, each in input order.
 8. Mark price recomputed (section 5).
 9. Triggers (section 4.6), then liquidations (section 6), repeated until no trigger fires and no account is
-   liquidatable, bounded by `MAX_SYSTEM_PASSES = 8` (remaining work carries to the next block).
+   liquidatable, bounded by `MAX_SYSTEM_PASSES = 8` (remaining work carries to the next block). Property P-3
+   (section 17): after a block whose step 9 ran to completion, no account whose markets are all active is below its
+   maintenance requirement; an account can end a block below maintenance only when the pass bound was hit (the
+   engine exposes this per block as the diagnostic `last_passes`, not state) or while one of its markets is halted
+   (6.3).
+   (9b, 0.2: whole units of dust move into `INSURANCE`, THEN bad debt of flat accounts is paid by `INSURANCE`,
+   section 8. The dust sweep comes first so that no flat account stays negative at the end of a block while the
+   fund holds anything.)
 10. Protocol fee sweep (section 9.3).
 11. State root (section 11).
 
@@ -262,6 +287,14 @@ block: it is recorded as a failed outcome with its error and has no other effect
 - S-5.1 Index = the committee oracle price of 394's rules (median of validator-signed observations, agreement band,
   jump halt and confirmation). The engine applies those rules exactly as 394's README sections 4 to 6 state them
   (normative by reference for v0.1; the vectors in `node/oracle/vectors/` are shared test vectors).
+- S-5.1.1 (R430-2, 0.2; an engine bound on top of 394's rules, fail closed). A committee value above `MAX_PRICE`
+  (section 1) is not a price of this engine: that observation does not count for the market (exactly as an
+  observation with too few sources), so a round in which fewer than the quorum report a price `<= MAX_PRICE` gives
+  no committee price for the market, and the market goes stale and halts (H1). Reason: every product of section 1
+  is bounded through `MAX_PRICE`; at `f0e3967` the mark was clamped but the INDEX, the exit band and the settle
+  price were not. The update itself is still accepted (its form and signatures are valid; 394's `max-values`
+  vector decodes and is accepted). Test `r430_2_committee_price_above_max_price_never_becomes_the_index` (fails on
+  `f0e3967`).
 - S-5.2 Mark (bounded book component):
   `bookRef = median(bestBid, bestAsk, lastTradePrice)` using, for a missing value, the index (and for
   `lastTradePrice` older than `markTradeMaxAgeMs = 60000`, the index);
@@ -291,7 +324,9 @@ open part), leverage: u32, isolated: bool, isoMargin: u64, lastFundingIndex: i12
 - Maintenance `MR = sum over cross positions of mmr(|size| * mark)` with the CONTINUOUS piecewise schedule
   `mmr(n) = sum over tiers t of (part of n inside [floor_t, floor_{t+1})) * mmf_t / 10^6`, rounded UP. (Decided:
   continuous, so the requirement never jumps when a position crosses a tier floor.)
-- Initial `IR` the same with `imf_t' = max(imf_t, ceil(10^6 / leverage))`, rounded up, and including resting
+- Initial `IR` the same with `imf_t' = max(imf_t, ceil(10^6 / leverage))` (R395-15: the leverage fraction rounds
+  UP, toward the protocol: leverage 3 is 333334 ppm, never 333333; in the code since `647a401`, pinned by
+  `r395_15_leverage_fraction_rounds_up`), rounded up, and including resting
   orders: per market on `max(|size| * mark, n_buy, n_sell)` with `n_buy = |size + bids| * max(mark, highest bid
   price)` and `n_sell = |size - asks| * max(mark, highest ask price)`. Reduce-only orders and untriggered trigger
   orders reserve nothing (a trigger is margin-checked when it fires). `leverage` is the account's setting for the
@@ -310,8 +345,14 @@ fills pay no taker fee (step 4's fee replaces it); makers pay their normal fee.
 
 1. Cancel all its resting orders and triggers (all markets).
 2. For each position (ascending market id): bankruptcy price `bp` = the price at which `E` would be 0 holding the
-   other positions at mark (rounded toward the account: up for a long, down for a short; recomputed for each
-   position after the previous ones closed). Liquidation price bound (R395-13) `lp = max(bp, mark - mark *
+   other positions at mark (rounded toward the account: up for a long, down for a short). R395-17 (b), stated:
+   `bp` is RECOMPUTED for each position, in ascending market id, from the account as it stands after the previous
+   positions were closed: its balance then includes the realised result of those closes (at their fill prices,
+   floored, S-0.3), the insurance cover of step 5 and MINUS the liquidation fee of step 4 already taken for them;
+   it is never the value computed at the start of the liquidation. `bp = ceil((openNotional - rest) / size)` for a
+   long, `floor` for a short, `rest = balance * 10^10 + sum of U of the OTHER open positions at mark`, clamped to
+   `[1, MAX_PRICE]`. Test `r395_17_bankruptcy_price_is_recomputed_between_positions` rebuilds the second price
+   from the block's events. Liquidation price bound (R395-13) `lp = max(bp, mark - mark *
    mmf_0 / 2)` for a long, `min(bp, mark + mark * mmf_0 / 2)` for a short (`mmf_0` = tier-0 maintenance fraction).
    Send a reduce-only IOC to the book for the whole position with limit `lp`, which never fills against an order
    placed in the SAME block (the sequencer knows which accounts step 9 liquidates; its own last-moment order is
@@ -330,7 +371,10 @@ fills pay no taker fee (step 4's fee replaces it); makers pay their normal fee.
 5. If `E < 0` at the start (a gap: the oracle moved past bankruptcy), `INSURANCE` first pays the deficit AS FAR AS
    ITS BALANCE GOES (R395-31: partial cover too); if that restores `E >= 0` the liquidation continues with steps 2
    and 3; otherwise the positions are closed by ADL at the bankruptcy price (no deficit is ever socialised outside
-   ADL).
+   ADL). R395-17 (c), stated: `INSURANCE` pays `min(its balance, the deficit)` and NEVER goes below zero (I-3); the
+   same holds for bad debt (section 8) and for the isolated-funding shortfall of S-7.3 (when isolated margin
+   exists, O-6): what the fund cannot pay is deleveraged (here) or stays a recorded negative balance (section 8),
+   and shows in the escape values (section 11). Test `r395_17_insurance_never_goes_below_zero`.
 
 ### 6.4 Auto-deleveraging (last resort)
 
@@ -338,6 +382,15 @@ Counterparties are ranked by `profitRatio * leverage` (`U / (|size| * mark)` tim
 ppm, integer, ties by ascending account index) on the opposite side of the same market; their positions are
 reduced at the bankruptcy price in that order until the remainder is gone. Every ADL fill is an event naming both
 accounts.
+
+The rank, exactly (R395-17 (a), `engine::adl_score`): `score = U * 10^6 / E` rounded toward zero, with `U` the
+position's unrealised result at mark and `E` the account's whole equity at mark, DEFINED ONLY FOR `E > 0`. An
+account with `E <= 0` has no profit to give up: it is ranked LAST, after every account with positive equity
+whatever its `U` (score = minus infinity), and several such accounts go by ascending index. `BACKSTOP` is ranked
+FIRST whatever its equity (R395-14). Higher score first; equal scores by ascending account index. `PROTOCOL_FEE`
+and `INSURANCE` hold no positions and are never candidates. Within section 1's bounds `|U| * 10^6 <= 2 * 10^36`
+fits i128. Tests `r395_17_adl_score_rule`, `r395_17_adl_ranks_non_positive_equity_last`. Not proven: that this
+ranking is fair in any stronger sense than "most profitable and most leveraged first".
 
 ## 7. Funding
 
@@ -364,14 +417,28 @@ accounts.
 - System accounts (no key, never sign): `PROTOCOL_FEE` (address `0x…0001`), `INSURANCE` (`0x…0002`), `BACKSTOP`
   (`0x…0003`). They have `index` 0, 1, 2 in the account tree. `INSURANCE` also holds `dust: u128` in notional units;
   whenever `dust >= 10^10`, `floor(dust / 10^10)` moves into its balance.
-- Bad debt: after the system passes, an account with no position and a negative balance is paid up to zero by
-  `INSURANCE` as far as its balance goes; the rest stays as the account's negative balance and is reported as a
-  `BadDebt` event (never hidden; I-2 stays exact because it counts signed balances).
+- Bad debt: after the system passes (and after the dust sweep, 3.3 step 9b), an account with no position and a
+  negative balance is paid up to zero by `INSURANCE` as far as its balance goes; the rest stays as the account's
+  negative balance and is reported as a `BadDebt` event in EVERY block in which it remains (never hidden; I-2
+  stays exact because it counts signed balances), and is paid in a later block as soon as the fund holds anything.
+- `BACKSTOP` and bad debt (R430-1, 0.2). `BACKSTOP` has no key and is never liquidated (6.3), so a position it took
+  can lose more than its balance; when ADL, a forced close or X3 then closes that position, its balance goes
+  NEGATIVE. This is bad debt like a user's: the rule above applies to `BACKSTOP` too (paid by `INSURANCE` first once
+  it is flat, `BadDebt` event for the rest), it takes no new position while its balance is not positive (6.3 step
+  3), and its negative equity is charged to `INSURANCE` in the escape values (section 11). At `f0e3967` this
+  reachable state broke the engine's own assertion "system accounts are never negative" (test
+  `r430_1_backstop_loss_beyond_its_balance_is_bad_debt_paid_by_insurance` fails there). Not solved: an unwind rule
+  that would cut the backstop's loss earlier (O-9).
 - I-1 (size balance): for every market, the sum of `size` over all positions is 0.
 - I-2 (conservation): `10^10 * (sum of all balances + all isoMargins) + dust - sum of all openNotional
   == 10^10 * (credited deposits - withdrawal records)` exactly, at every height.
-- I-3 no balance is negative; every resting order satisfies tick, step and the book's price-time order; no book is
-  crossed after a block.
+- I-3 (restated in 0.2; the 0.1 text "no balance is negative" was false as written, R395-17 and R430-1):
+  `PROTOCOL_FEE` and `INSURANCE` are never negative and never hold a position or an order; a user's or `BACKSTOP`'s
+  balance is negative only as bad debt (above), and at the end of a block no FLAT account is negative while
+  `INSURANCE` holds anything; `BACKSTOP` never holds an order; every resting order satisfies tick, step and the
+  book's price-time order; no book is crossed after a block; an account holds at most `MAX_OPEN_ORDERS` per market
+  and 1000 in total, at most `MAX_AGENTS` agents, and every index kept beside the primary data (address to
+  account, agent to owner, account to orders, market to triggers) is exactly what the primary data implies.
 - I-4 every applied action's `(signer, nonce)` is unique over the whole history.
 - I-5 determinism: the state root is a function of the log only (replay on two machines; `engine replay`).
 
@@ -392,6 +459,16 @@ accounts.
   than their mark-to-market equity. Effect: `balance -= amount`; `withdrawalFee` to `PROTOCOL_FEE`; a withdrawal record
   `{withdrawalId (u64, consecutive from 0), account, recipient, amount - withdrawalFee, height}` is appended to the
   withdrawal tree.
+- S-9.2.1 Recipients (R395-22, 0.2). A signed `Withdraw` is refused with `BAD_RECIPIENT`, before any state
+  change, when `recipient` is (a) the vault (`verifyingContract`), (b) the collateral token contract (genesis
+  `collateralToken`, section 10), or (c) any address `<= 0x000000000000000000000000000000000000ffff`: VAULT.md
+  pays no record to such a keyless recipient, and the range holds the system accounts `0x…01` to `0x…03` and the
+  EVM precompiles. Tokens sent to (a) or (b) would be stranded; a record to (c) would debit the account and never
+  be paid. The zero address stays `MALFORMED`. As for every failed action the nonce is consumed (S-2.5). A forced
+  withdrawal pays the account itself and the fee sweep pays `feeRecipient`: neither can name such an address
+  (genesis refuses a `collateralToken` equal to the vault or the fee recipient or inside range (c)). Tests
+  `r395_22_withdraw_to_the_vault_or_a_keyless_address_is_refused` (fails on `f0e3967`),
+  `r395_22_recipient_rule_and_collateral_token`.
 - S-9.3 Trading fees: `fee = ceil(|size| * price * feePpm / 10^6 / 10^10)` USDC units per fill, `feePpm` from the
   account's volume tier (S-9.4); no rebates (every tier's maker fee `>= 0`).
 - S-9.4 Volume tiers (392's `risk.json` `feeTiers`, genesis `feeTiers[{minVolume14d (USDC units), takerFeePpm,
@@ -412,7 +489,13 @@ accounts.
 The reference is `engine/src/genesis.rs` (`deny_unknown_fields`, every integer a decimal string without leading
 zeros, in engine units): `{specVersion "0.1", chainId "700770", verifyingContract, feeRecipient (MUST be
 0x775a…0544), oracleSigners[n], oracleQuorum (odd, strict majority), oracleMaxFutureMs, oracleMaxAgeMs,
-withdrawalFee, minFeeSweep, feeTiers[], launchInsuranceMin, launchBackstopMin, backstopOiPpm, markets[]}`, per market `{marketId (ascending, 1..255), symbol, tick, step, minSize,
+withdrawalFee, minFeeSweep, feeTiers[], launchInsuranceMin, launchBackstopMin, backstopOiPpm, markets[],
+collateralToken? }` (0.2: `collateralToken` = the bUSDC contract of the vault's chain, S-9.2.1; OPTIONAL and LAST,
+and omitted from `genesisEncoding` when absent, so a genesis written before 0.2 keeps its `logHash(0)` and every
+state root: the round-1 demo log still replays to its committed root, test
+`demo_log_of_round_1_replays_to_its_committed_root`. A genesis bound to a REAL vault MUST set it; the converter
+never guesses it: `engine genesis … --collateral-token 0x…`, and a caller of `from_compliance` sets the field
+before `check()`. Without it rule S-9.2.1 (b) is not enforced; (a) and (c) always are), per market `{marketId (ascending, 1..255), symbol, tick, step, minSize,
 maxSize, oiCap, maxLeverage, defaultLeverage, tiers[{floor (USDC units), imfPpm, mmfPpm}], takerFeePpm,
 makerFeePpm, liquidationFeePpm, markBandBps, marketSlippageBps, impactNotional (USDC units), fundingIntervalMs,
 interest, fundingClamp, maxFundingRate, oracle{minSources, agreeBps, jumpBps, maxStalenessMs, confirmRounds}}`.
@@ -454,6 +537,12 @@ leaves and nodes). Empty subtree of height 0 is `bytes32(0)`; `Z(i+1) = H(0x01 |
 - Proof: `{leafData, index, siblings[depth]}`; sibling order bottom-up; bit `i` of `index` = 1 means the node is a
   right child at level `i`. The vault receives `accountsRoot`, `withdrawalsRoot` and `totalEscape` in the committee
   checkpoint (VAULT.md, 390) together with `stateRoot`, and checks the root equation.
+- Bound on the escape total (0.2, checked after every block, unconditional form of R395-23's invariant): from I-1
+  and I-2 the signed equities of all accounts sum to `10^10 * custody - dust`, hence
+  `totalEscape <= custody + max(0, D - floor(E_INSURANCE / 10^10))` where `custody` = credited deposits minus
+  withdrawal records and `D` = the sum of `ceil(-E / 10^10)` over the accounts with `E < 0` (`BACKSTOP` included):
+  the escape values exceed custody by at most the deficit the insurance fund could not absorb, and not at all
+  while it covers `D`.
 - Escape solvency (input to 390): in escape mode the vault pays `escapeValue * min(1, vaultBalance / totalEscape)`
   per account (pro-rata if the last root shows less in the vault than is owed), plus deposits with
   `index >= nextDepositIndex` refunded to their depositors. 390 decides the exact rule in VAULT.md; the engine
@@ -484,7 +573,8 @@ Error names (the API passes them through): `BAD_SIGNATURE`, `AGENT_NOT_ALLOWED`,
 `NONCE_WINDOW`, `NONCE_USED`, `UNKNOWN_ACCOUNT` (actions only from addresses with a ledger entry, created by a
 deposit), `SELF_TRADE`, `CANCELLED`, `ISOLATED_UNSUPPORTED`, `MALFORMED`, `UNKNOWN_MARKET`, `MARKET_HALTED`, `TICK`, `STEP`, `SIZE_BOUNDS`,
 `WOULD_CROSS`, `REDUCE_ONLY`, `INSUFFICIENT_MARGIN`, `TOO_MANY_ORDERS`, `OI_CAP`, `NO_LIQUIDITY`, `SELF_TRADE`,
-`ORDER_NOT_FOUND`, `LEVERAGE`, `NOT_ISOLATED`, `WITHDRAW_TOO_SMALL`, `POSITION_IN_HALTED_MARKET`, `OVERFLOW`,
+`ORDER_NOT_FOUND`, `LEVERAGE`, `NOT_ISOLATED`, `WITHDRAW_TOO_SMALL`, `BAD_RECIPIENT` (0.2, S-9.2.1),
+`NOT_LAUNCHED` (S-4.11), `POSITION_IN_HALTED_MARKET`, `OVERFLOW`,
 `DEPOSIT_ORDER`, `FORCED_ORDER`, oracle errors of 394 (`ORACLE_ROUND_NOT_NEW`, `ORACLE_MALFORMED`,
 `ORACLE_BAD_SIGNATURE`, `ORACLE_TIME`).
 
@@ -505,14 +595,23 @@ actions) the engine serves the queue FROM ITS HEAD with the current state; each 
   than the book; withdraw: when `amount` (or all) is within free collateral;
 - rejected and CONSUMED (event `ForcedRejected`) only for a reason the user caused and that is provable from
   finalized state on live prices: an unknown market id, a withdrawal above free collateral or not above the fee
-  while the account has no position in a halted market, an unknown kind;
+  while the HALT IS NOT INVOLVED in the account's free collateral, an unknown kind. The halt is involved
+  (`Engine::halted_involved`) when the account has a position in a halted market or (R395-39, 0.2) a resting
+  order there that reserves margin: both lower free collateral through a price the oracle rules do not stand
+  behind. Trigger orders and reduce-only orders reserve nothing (6.2) and do not count, so a user cannot park the
+  queue with a free order (test `r395_39_trigger_in_a_halted_market_does_not_make_an_overlarge_request_pending`);
 - a close of a position in a HALTED market is also SERVED, never refused for a halt (0.1.4, 394's README 6a):
   reduce-only through the book only inside the exit band (`low` for a sell, `high` for a buy), the rest against
   the opposite positions in ADL order at the settle price `settle` (the latest committee price since the halt,
   else the last good index; always inside the band) with the account's taker fee;
-- PENDING, NOT consumed (event `ForcedPending`): a withdrawal that the halt rule of S-9.2 keeps below the request
-  while a position is in a halted market, or a request from an address whose deposit is not yet credited (the
-  sequencer's delay). A pending head blocks everything behind it (strict index order).
+- PENDING, NOT consumed (event `ForcedPending`): a withdrawal that cannot be served (above free collateral, or
+  not above the fee) while the halt is involved as defined above, or a request from an address whose deposit is
+  not yet credited (the sequencer's delay). A pending head blocks everything behind it (strict index order). At
+  `f0e3967` a request that failed only because an order in a halted market held margin was rejected and consumed
+  (R395-39; test `r395_39_order_in_a_halted_market_makes_a_forced_withdraw_pending_not_rejected` fails there). It
+  is served as soon as the order is gone (the user's signed cancel is accepted in a halt, S-4.10) or the market
+  resumes, and at the latest after X3 (`maxHaltMs`), which cancels the market's orders. `amount = 0` (all free
+  collateral) is the recommended form of a forced withdrawal: it is never rejected for an amount.
 - X3 settlement: when a market has been halted for `maxHaltMs` (default one hour, inside the vault's one-day
   `forcedDelay`), step 5b of 3.3 cancels its orders and triggers and settles EVERY position of the market at
   `settle` (event `MarketSettled`; exact: the sizes sum to zero, I-1, so I-2 holds); its collateral is then free
@@ -553,6 +652,11 @@ generated by the engine and checked by an independent Python implementation.
 - O-9 Backstop unwind (392's proposal: reduce-only limit orders at mark +/- markBandBps): not in 0.1.2; the
   backstop holds what it takes until ADL or a later engine version (it has no key and cannot trade).
 - O-10 R395-16 (premium samples from a book the sequencer can quote into): open; the funding cap stays 0.05%/h.
+- O-11 (0.2) Nonce sets are kept for every address that ever signed an applied action (S-2.4.2): state that only
+  grows, bounded by 64 nonces per signer; a sound pruning rule exists (a set whose highest nonce is below
+  `T - 120000` can no longer reject anything the window rule (a) does not already reject) and is NOT implemented:
+  it changes `auxHash` and belongs to a version that changes the state format.
+- O-12 (0.2) `collateralToken` optional (section 10): make it mandatory in the next genesis `specVersion`.
 - Reserved primary type names: `Attestation` (392/397's geoblock attestation) is NOT an engine action and has no
   input type id; the engine refuses it by construction (an unknown `typeId` is `MALFORMED` at decode, S-0.4).
 - Genesis from 392's files: `engine genesis <markets.json> <risk.json> --vault 0x.. --oracle-signers .. --quorum q
@@ -570,11 +674,16 @@ generated by the engine and checked by an independent Python implementation.
 | 0.1.4 | 2026-11-17 | 394's exit band (README 6a) used for free collateral during a halt (replaces 0.1.3's x2 rule) and for forced closes in a halt (served at `settle`, never pending); X3 market settlement after `maxHaltMs`; genesis oracle exit fields; `Attestation` and other reserved type names (S-2.3.1) |
 | 0.1.5 | 2026-11-17 | systemHash adds withdrawalCount/withdrawalsTotal, nextForcedIndex = processed (VAULT 5.2; 390's vectors reproduced, new vector in tests/r395b.rs); R395-13 liquidation bound `lp` + no same-block makers; R395-14 backstop rules; R395-16 post-action samples + median; R395-23 insurance-first escape values |
 | 0.1.6 | 2026-11-17 | forced-request input and forcedHead = VAULT.md 0.2 fields (index, account, kind 0/1/2, deadline, arg), close = every market (390's report on 64072cb) |
+| 0.2.0 | 2026-11-18 | round 2 (430): R395-39 (orders in a halted market make a forced withdrawal pending, section 14); R395-22 (S-9.2.1 recipients, error `BAD_RECIPIENT`, optional genesis `collateralToken`); R395-17 (ADL rank for `E <= 0`, bankruptcy price recomputed per position, INSURANCE never below zero; I-3 restated); R395-20 (S-2.4.2 nonce sets outlive agent removal); R395-21 (S-2.4.1 rule); R395-15 pinned; NEW R430-1 (BACKSTOP bad debt paid by INSURANCE; dust sweep before bad-debt settlement, 3.3 step 9b) and R430-2 (S-5.1.1 committee price above MAX_PRICE never becomes the index); unconditional escape bound (section 11); `NOT_LAUNCHED` listed in section 13. No change to any encoding, hash or root of a pre-0.2 log that does not exercise these rules |
 
 ## Not done / not proven
 
-`engine/` 0.1 implements this document except O-6 (isolated margin) and O-8 (snapshots); its tests check the
+`engine/` implements this document except O-6 (isolated margin) and O-8 (snapshots); its tests check the
 invariants of section 8 after every block of random and adversarial sequences, but tests are not proofs. Not
-proven: the liquidation
-order's solvency under gaps, the ADL ranking's fairness, the funding formula against benchmarks, the mark band
-against manipulation, gas of the vault's proofs. UNAUDITED.
+proven: the liquidation order's solvency under gaps, the ADL ranking's fairness, the funding formula against
+benchmarks, the mark band against manipulation, gas of the vault's proofs. Not done: a rule that unwinds the
+backstop before its loss exceeds its balance (O-9; R430-1 only settles the debt afterwards); pruning of nonce sets
+(O-11); a mandatory `collateralToken` (O-12); a freeze input (O-1); partial liquidation (O-2). The findings closed
+in 0.2 were demonstrated by tests that fail on `f0e3967` where the defect was in code (R395-39, R395-22, R430-1,
+R430-2) and by pins where the code already behaved as now specified (R395-15, R395-17, R395-20, R395-21): a pin
+shows the behaviour, not its failing-first history. UNAUDITED.

@@ -7,6 +7,7 @@
 pub mod num;
 pub mod hash;
 pub mod eip712;
+pub mod calc;
 pub mod types;
 pub mod codec;
 pub mod genesis;

@@ -6,7 +6,7 @@
 use crate::book::Book;
 use crate::codec::{encode_inputs, log_hash};
 use crate::eip712::{digest, domain_separator, recover, struct_hash};
-use crate::genesis::{Checked, MarketParams, Tier};
+use crate::genesis::{Checked, MarketParams};
 use crate::hash::{keccak, keccak_parts, Addr, H256};
 use crate::merkle;
 use crate::num::*;
@@ -286,7 +286,11 @@ pub struct Engine {
     pub total_withdrawn: i128,
     /// Launch gate latch (S-4.11): one-way.
     pub launched: bool,
-    events: Vec<Event>,
+    /// Diagnostic of the LAST applied block, not state (not in the root, not in a snapshot): how many trigger +
+    /// liquidation passes step 9 ran and whether it stopped because nothing was left to do (`true`) or at the
+    /// `MAX_SYSTEM_PASSES` bound with work carried to the next block (`false`).
+    pub last_passes: (usize, bool),
+    pub(crate) events: Vec<Event>,
 }
 
 fn new_account(address: Addr) -> Account {
@@ -297,23 +301,23 @@ fn abs64(x: i64) -> u64 {
     x.unsigned_abs()
 }
 
-/// Continuous piecewise requirement (SPEC 6.2): sum over tiers of (part of n in the tier) * fraction, ceil.
-fn tier_req(n: i128, tiers: &[Tier], frac: impl Fn(&Tier) -> i128) -> i128 {
-    if n <= 0 {
-        return 0;
+/// SPEC 6.4 ADL rank of a counterparty (higher = deleveraged first; ties by ascending account index).
+/// R395-14: the backstop (no key, cannot trade) is the FIRST counterparty of every ADL on the side opposite to its
+/// position. R395-17: `U * 10^6 / E` (toward zero) is defined only for `E > 0`; an account with `E <= 0` has no
+/// profit to give up and is ranked LAST (after every account with positive equity, whatever its U), among
+/// themselves by ascending index. Within section 1's bounds `|U| * 10^6 <= 10^36` fits i128 (the saturating
+/// multiply never saturates; it is there so that a violated bound cannot wrap).
+pub fn adl_score(account_index: u32, u: i128, e: i128) -> i128 {
+    if account_index == ACCT_BACKSTOP {
+        i128::MAX
+    } else if e > 0 {
+        u.saturating_mul(PPM) / e
+    } else {
+        i128::MIN
     }
-    let mut acc: i128 = 0;
-    for (i, t) in tiers.iter().enumerate() {
-        let lo = (t.floor as i128) * N_PER_USDC;
-        if n <= lo {
-            break;
-        }
-        let hi = tiers.get(i + 1).map(|x| (x.floor as i128) * N_PER_USDC).unwrap_or(i128::MAX);
-        let part = n.min(hi) - lo;
-        acc += part * frac(t);
-    }
-    div_ceil(acc, PPM)
 }
+
+use crate::calc::{self, tier_req};
 
 impl Engine {
     pub fn new(g: Checked) -> Engine {
@@ -351,6 +355,7 @@ impl Engine {
             total_deposits: 0,
             total_withdrawn: 0,
             launched: false,
+            last_passes: (0, true),
             events: Vec::new(),
         };
         e.deposits_head = chain_genesis("PosternPerps.deposit.v1", e.g.g.chain_id, &e.g.verifying_contract);
@@ -460,21 +465,27 @@ impl Engine {
                 self.sample_premium(*id);
             }
         }
+        self.last_passes = (0, false);
         for _ in 0..MAX_SYSTEM_PASSES {
             let a = self.trigger_pass();
             self.update_marks();
             let l = self.liquidation_pass();
             self.update_marks();
+            self.last_passes.0 += 1;
             if !a && !l {
+                self.last_passes.1 = true;
                 break;
             }
         }
+        // 9b. whole units of dust move into INSURANCE, then bad debt of flat accounts is paid by INSURANCE (0.2: the
+        // dust sweep runs BEFORE the bad-debt settlement, so no flat account stays negative at the end of a block
+        // while the insurance fund holds anything; invariant checked)
+        self.sweep_dust();
         self.settle_bad_debt();
         // 10. fee sweep (day boundary)
         if prev_t > 0 && t / DAY_MS > prev_t / DAY_MS {
             self.sweep_fees();
         }
-        self.sweep_dust();
         self.log_hash = log_hash(&self.log_hash, b.height, b.time, &enc);
         let state_root = self.state_root();
         Ok(BlockOutcome { outcomes, events: std::mem::take(&mut self.events), state_root, log_hash: self.log_hash })
@@ -519,16 +530,11 @@ impl Engine {
                 m.mark = 0;
                 continue;
             }
-            let bid = m.book.best_bid().unwrap_or(index);
-            let ask = m.book.best_ask().unwrap_or(index);
             let last = match m.last_trade {
-                Some((p, lt)) if t.saturating_sub(lt) <= MARK_TRADE_MAX_AGE_MS => p,
-                _ => index,
+                Some((p, lt)) if t.saturating_sub(lt) <= MARK_TRADE_MAX_AGE_MS => Some(p),
+                _ => None,
             };
-            let book_ref = median3(bid, ask, last) as i128;
-            let band = (index as i128) * (m.p.mark_band_bps as i128) / 10000;
-            let mark = index as i128 + (book_ref - index as i128).clamp(-band, band);
-            m.mark = mark.clamp(1, MAX_PRICE as i128) as u64;
+            m.mark = calc::mark_price(index, m.book.best_bid(), m.book.best_ask(), last, m.p.mark_band_bps);
         }
     }
 
@@ -566,27 +572,22 @@ impl Engine {
         if !self.active(mid) {
             return;
         }
-        let index = self.markets[&mid].oracle.index as i128;
-        let ib = self.impact_price(mid, false).map(|x| x as i128).unwrap_or(index);
-        let ia = self.impact_price(mid, true).map(|x| x as i128).unwrap_or(index);
-        let num = (ib - index).max(0) - (index - ia).max(0);
-        let prem = num * RATE_SCALE / index; // toward zero (S-7.1)
+        let index = self.markets[&mid].oracle.index;
+        let prem = calc::premium(self.impact_price(mid, false), self.impact_price(mid, true), index); // toward zero (S-7.1)
         self.markets.get_mut(&mid).unwrap().premium_samples.push(prem);
     }
 
     fn settle_funding(&mut self, mid: u32) {
-        let (mut samples, interest, clampc, maxr, mark) = {
+        let (samples, interest, clampc, maxr, mark) = {
             let m = self.markets.get_mut(&mid).unwrap();
-            (std::mem::take(&mut m.premium_samples), m.p.interest as i128, m.p.funding_clamp as i128, m.p.max_funding_rate as i128, m.mark as i128)
+            (std::mem::take(&mut m.premium_samples), m.p.interest, m.p.funding_clamp, m.p.max_funding_rate, m.mark)
         };
         if samples.is_empty() || !self.active(mid) {
             return;
         }
         // R395-16: the MEDIAN of the interval's samples (lower middle), not the mean: a minority of manipulated
         // samples cannot move it.
-        samples.sort_unstable();
-        let p = samples[(samples.len() - 1) / 2];
-        let rate = (p + (interest - p).clamp(-clampc, clampc)).clamp(-maxr, maxr);
+        let Some(rate) = calc::funding_rate(&samples, interest, clampc, maxr) else { return };
         if rate == 0 {
             return;
         }
@@ -598,11 +599,10 @@ impl Engine {
                     continue;
                 }
                 // f = size * mark * rate / RATE_SCALE; the account is credited -f, floored (S-7.3, S-0.3).
-                let Some(x) = (pos.size as i128).checked_mul(mark).and_then(|v| v.checked_mul(rate)) else {
+                let Some(credit) = calc::funding_credit(pos.size, mark, rate) else {
                     self.halt_arith(mid);
                     return;
                 };
-                let credit = div_floor(-x, RATE_SCALE * N_PER_USDC);
                 credited_total += credit;
                 changes.push((ai, credit));
             }
@@ -648,8 +648,7 @@ impl Engine {
     fn market_req_at(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>, price: u64) -> (i128, i128) {
         let m = &self.markets[&mid];
         let mark = price as i128;
-        let lev = self.leverage_of(ai, mid) as i128;
-        let lev_frac = div_ceil(PPM, lev);
+        let lev_frac = calc::leverage_fraction_ppm(self.leverage_of(ai, mid));
         let (mut bids, mut asks, mut pb, mut pa) = (0i128, 0i128, 0i128, 0i128);
         for oid in &self.accounts[ai as usize].orders {
             let o = &self.orders[oid];
@@ -779,8 +778,8 @@ impl Engine {
         let (na, nb) = (self.pos_size(a, mid), self.pos_size(b, mid));
         let oi_delta = (na.max(0) - sa.max(0)) as i128 + (nb.max(0) - sb.max(0)) as i128;
         let notional = (q as i128) * (p as i128);
-        let fa = div_ceil(notional * a_fee_ppm as i128, PPM * N_PER_USDC);
-        let fb = div_ceil(notional * b_fee_ppm as i128, PPM * N_PER_USDC);
+        let fa = calc::trade_fee(notional, a_fee_ppm);
+        let fb = calc::trade_fee(notional, b_fee_ppm);
         if kind == FillKind::Book || kind == FillKind::Liquidation {
             let day = self.time / DAY_MS;
             let v = (notional / N_PER_USDC) as u128;
@@ -874,7 +873,7 @@ impl Engine {
                 // S-4.9: per-fill check of the taker's initial requirement after the fill.
                 let mark = m.mark as i128;
                 let notional = (q as i128) * (price as i128);
-                let fee = div_ceil(notional * taker_fee as i128, PPM * N_PER_USDC);
+                let fee = calc::trade_fee(notional, taker_fee);
                 let e_after = self.equity(ai) + (d as i128) * (mark - price as i128) - fee * N_PER_USDC - N_PER_USDC;
                 let (ir, _) = self.account_req(ai, Some((mid, nts, None)));
                 if e_after < ir {
@@ -1207,9 +1206,20 @@ impl Engine {
         }
     }
 
+    /// S-9.2.1 (R395-22): a recipient the vault can never pay, or where the token would be stranded, is refused
+    /// before any state changes: the vault itself, the collateral token contract (genesis `collateralToken`, when
+    /// set) and every keyless low address `<= 0xffff` (VAULT.md: "no record to a keyless recipient is paid"; this
+    /// range holds the system accounts 0x..01 to 0x..03 and the EVM precompiles).
+    pub fn recipient_refused(&self, recipient: &Addr) -> bool {
+        recipient[..18] == [0u8; 18] || *recipient == self.g.verifying_contract || self.g.collateral_token == Some(*recipient)
+    }
+
     fn withdraw(&mut self, ai: u32, amount: u64, recipient: Addr) -> Result<(), Error> {
         if recipient == [0u8; 20] {
             return Err(Error::Malformed);
+        }
+        if self.recipient_refused(&recipient) {
+            return Err(Error::BadRecipient);
         }
         if amount <= self.g.g.withdrawal_fee {
             return Err(Error::WithdrawTooSmall);
@@ -1293,8 +1303,18 @@ impl Engine {
         }
     }
 
+    /// Does a halt take part in this account's free collateral? True for a position in a halted market and
+    /// (R395-39) for a resting order that reserves margin there: both lower `free_collateral` through a price the
+    /// oracle rules do not stand behind, so a forced withdrawal that fails because of them is the halt's doing
+    /// (PENDING), never a user-caused rejection. Triggers and reduce-only orders reserve nothing (SPEC 6.2) and
+    /// do not count.
     pub fn halted_involved(&self, ai: u32) -> bool {
-        self.accounts[ai as usize].positions.keys().any(|m| !self.active(*m))
+        let a = &self.accounts[ai as usize];
+        a.positions.keys().any(|m| !self.active(*m))
+            || a.orders.iter().any(|id| {
+                let o = &self.orders[id];
+                o.trigger.is_none() && !o.reduce_only && !self.active(o.market)
+            })
     }
 
     pub fn checkpoint_fields(&self) -> CheckpointFields {
@@ -1507,12 +1527,9 @@ impl Engine {
     fn bankruptcy_price(&self, ai: u32, mid: u32) -> u64 {
         let a = &self.accounts[ai as usize];
         let pos = &a.positions[&mid];
-        let s = pos.size as i128;
         let rest: i128 = a.balance * N_PER_USDC
             + a.positions.iter().filter(|(k, _)| **k != mid).map(|(k, p)| (p.size as i128) * (self.markets[k].mark as i128) - p.open_notional).sum::<i128>();
-        let num = pos.open_notional - rest;
-        let bp = if s > 0 { div_ceil(num, s) } else { div_floor(-num, -s) };
-        bp.clamp(1, MAX_PRICE as i128) as u64
+        calc::bankruptcy_price(pos.size, pos.open_notional, rest)
     }
 
     fn liquidate(&mut self, ai: u32) {
@@ -1543,9 +1560,7 @@ impl Engine {
             // R395-13: liquidation price bound = mark -/+ half the tier-0 maintenance fraction, never past bankruptcy;
             // the book, the backstop and ADL all fill at or inside it, so a liquidated account loses at most
             // mmf0/2 of the notional beyond mark plus the liquidation fee (the rest of its equity stays its own).
-            let half_mmf = self.markets[&mid].p.tiers[0].mmf_ppm as u128 / 2;
-            let off = ((mark as u128) * half_mmf / 1_000_000) as u64;
-            let lp = if is_buy { bp.min(mark.saturating_add(off).min(MAX_PRICE)) } else { bp.max(mark.saturating_sub(off).max(1)) };
+            let lp = calc::liquidation_bound(!is_buy, bp, mark, self.markets[&mid].p.tiers[0].mmf_ppm);
             if !gap {
                 let oid = self.next_order_id;
                 self.next_order_id += 1;
@@ -1563,8 +1578,7 @@ impl Engine {
                 self.adl(ai, mid, if gap { bp } else { lp }, r, is_buy, 0);
             }
             // liquidation fee to the insurance fund, never below zero equity
-            let notional = (abs64(s0) as i128) * (mark as i128);
-            let fee = div_ceil(notional * self.markets[&mid].p.liquidation_fee_ppm as i128, PPM * N_PER_USDC);
+            let fee = calc::liquidation_fee(abs64(s0), mark, self.markets[&mid].p.liquidation_fee_ppm);
             let avail = div_floor(self.equity(ai).max(0), N_PER_USDC).min(self.accounts[ai as usize].balance.max(0));
             let f = fee.min(avail);
             if f > 0 {
@@ -1587,11 +1601,7 @@ impl Engine {
                 // the liquidated account buys (closing a short) -> counterparties are longs, and vice versa
                 if (liq_is_buy && p.size > 0) || (!liq_is_buy && p.size < 0) {
                     let u = (p.size as i128) * mark - p.open_notional;
-                    let e = self.equity(bi);
-                    // R395-14: the backstop (no key, cannot trade) is the FIRST counterparty of every ADL on the side
-                    // opposite to its position: the only way its book is reduced in 0.1.5
-                    let score = if bi == ACCT_BACKSTOP { i128::MAX } else if e > 0 { u.saturating_mul(PPM) / e } else { i128::MIN };
-                    cands.push((score, bi));
+                    cands.push((adl_score(bi, u, self.equity(bi)), bi));
                 }
             }
         }
@@ -1612,8 +1622,11 @@ impl Engine {
 
     /// Accounts without positions and with a negative balance are covered by the insurance fund as far as it
     /// goes; the rest stays recorded as bad debt (never hidden, I-2 still exact).
+    /// R430-1: BACKSTOP is included. It has no key and is never liquidated, so a position it took can lose more than
+    /// its balance; once that position is closed (ADL, forced close, X3) the negative balance is bad debt like any
+    /// other and the insurance fund pays it first. INSURANCE itself never goes below zero (R395-17).
     fn settle_bad_debt(&mut self) {
-        for ai in FIRST_USER..self.accounts.len() as u32 {
+        for ai in ACCT_BACKSTOP..self.accounts.len() as u32 {
             let a = &self.accounts[ai as usize];
             if a.balance < 0 && a.positions.is_empty() {
                 let need = -a.balance;

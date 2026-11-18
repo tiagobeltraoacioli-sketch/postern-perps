@@ -197,6 +197,11 @@ pub fn committee_prices(
             .iter()
             .filter_map(|o| o.prices.iter().find(|x| x.market_id == *mid))
             .filter(|x| x.sources >= p.min_sources)
+            // R430-2 (0.2): a value above MAX_PRICE (SPEC section 1) is not a price of this engine: the observation
+            // does not count for the market (as if its sources were too few), so a committee that signs such a
+            // value gets no index and the market goes stale and halts (fail closed) instead of an index outside
+            // the bound every product of section 1 relies on.
+            .filter(|x| x.price <= crate::num::MAX_PRICE)
             .map(|x| x.price)
             .collect();
         if v.len() < quorum {
