@@ -1049,8 +1049,11 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
     let mut books: Vec<String> = Vec::new();
     let mut trades: Vec<u32> = Vec::new();
     let mut candles: Vec<(u32, usize)> = Vec::new();
-    // ticker subscriptions: market id -> last time a ticker was sent (at most one per market per second)
-    let mut tickers: HashMap<u32, Option<tokio::time::Instant>> = HashMap::new();
+    // ticker subscriptions: market id -> (last time a ticker was sent, a block happened since). At most one per
+    // market per second; a change inside that second is sent when the second ends (`flush`), funding at once.
+    let mut tickers: HashMap<u32, (Option<tokio::time::Instant>, bool)> = HashMap::new();
+    let mut flush = tokio::time::interval(Duration::from_millis(200));
+    flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     macro_rules! send {
         ($v:expr) => {
             if sock.send(Message::Text($v.to_string().into())).await.is_err() {
@@ -1132,7 +1135,7 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                                         let ms: Vec<&crate::genesis::Market> = if sym == "*" { app.g.markets.iter().collect() } else { app.g.market_by_symbol(sym).into_iter().collect() };
                                         send!(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}));
                                         for m in ms {
-                                            tickers.insert(m.market_id, Some(tokio::time::Instant::now()));
+                                            tickers.insert(m.market_id, (Some(tokio::time::Instant::now()), false));
                                             send!(serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)}));
                                         }
                                     }
@@ -1213,10 +1216,11 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                 if !tickers.is_empty() {
                     let now = tokio::time::Instant::now();
                     let funded: Vec<u32> = info.delta.as_ref().map(|d| d.funding.iter().map(|f| f.market).collect()).unwrap_or_default();
-                    let due: Vec<u32> = tickers.iter().filter(|(m, last)| funded.contains(m) || last.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))).map(|(m, _)| *m).collect();
+                    for (_, v) in tickers.iter_mut() { v.1 = true; }
+                    let due: Vec<u32> = tickers.iter().filter(|(m, (last, _))| funded.contains(m) || last.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))).map(|(m, _)| *m).collect();
                     for mid in due {
                         if let Some(m) = app.g.market(mid) {
-                            tickers.insert(mid, Some(now));
+                            tickers.insert(mid, (Some(now), false));
                             send!(serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)}));
                         }
                     }
@@ -1239,6 +1243,16 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                     for a in touched {
                         let data = account_update(&app, &info, &a, &inputs);
                         send!(serde_json::json!({"channel":"account","type":"update","account":to_hex(&a),"data":data}));
+                    }
+                }
+            }
+            _ = flush.tick(), if tickers.values().any(|v| v.1) => {
+                let now = tokio::time::Instant::now();
+                let due: Vec<u32> = tickers.iter().filter(|(_, (last, pending))| *pending && last.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))).map(|(m, _)| *m).collect();
+                for mid in due {
+                    if let Some(m) = app.g.market(mid) {
+                        tickers.insert(mid, (Some(now), false));
+                        send!(serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)}));
                     }
                 }
             }

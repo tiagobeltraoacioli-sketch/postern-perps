@@ -445,3 +445,281 @@ async fn r395_36_ws_action_needs_its_own_edge_assertion() {
     assert_eq!(s, 200, "{e}");
     let _ = n.stop.send(true);
 }
+
+// ------------------------------------------------------------------------------------------------ round 2 (431)
+
+const ORACLE_TOKEN: &str = "test-oracle-ingest-token-0123456789";
+
+struct RealRunning {
+    url: String,
+    app: Arc<App>,
+    stop: tokio::sync::watch::Sender<bool>,
+    g: Arc<perps_node::genesis::Genesis>,
+    keys: perps_node::dev::DevKeys,
+}
+
+/// The REAL engine behind the HTTP API: producer, seven in-process validators, oracle ingest with a bearer token.
+async fn start_real_node(name: &str) -> RealRunning {
+    let (g, keys, checked) = perps_node::dev::dev_genesis_real(&format!("http-real-{name}"), 7, 5, 5, 0);
+    let dir = tmpdir(name);
+    let sv = view();
+    let mk = || -> Box<dyn Engine> { Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked.clone()).unwrap()) };
+    let seq = Sequencer::open(g.clone(), keys.sequencer.clone(), mk(), dir, sv.clone()).unwrap();
+    let geo = GeoPolicy::from_json(
+        &serde_json::json!({"version": "test", "unknown_country_effect": "deny",
+            "tiers": {"allowed": {"effect": "allow"}, "blocked": {"effect": "deny"}},
+            "countries": {"PA": {"tier": "allowed"}, "BR": {"tier": "blocked"}}, "denied_policy": {"policy": "exit_only"}}),
+        true,
+    )
+    .unwrap();
+    let app = App::with(g.clone(), seq, geo, Mode::Dev, sv.clone(), 50, false, [0x11; 20], Some(ORACLE_TOKEN.as_bytes().to_vec()));
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let views: Vec<_> = (0..7).map(|_| sv.clone()).collect();
+    let engines: Vec<Box<dyn Engine>> = (0..7).map(|_| mk()).collect();
+    spawn_local_validators(&app, keys.validators.clone(), engines, views, &rx).unwrap();
+    tokio::spawn(run_producer(app.clone(), rx.clone()));
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let r = perps_node::api::router(app.clone());
+    tokio::spawn(async move { axum::serve(l, r.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap() });
+    RealRunning { url: format!("http://{addr}"), app, stop: tx, g, keys }
+}
+
+fn observation_json(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, signer: u8, t: u64, prices: &[(u32, u64)]) -> serde_json::Value {
+    let mut o = perps_node::types::SignedObservation {
+        signer,
+        time_ms: t,
+        prices: prices.iter().map(|(m, p)| perps_node::types::OraclePrice { market_id: *m, price: *p, sources: 5 }).collect(),
+        signature: [0u8; 65],
+    };
+    o.signature = perps_node::sig::sign(key, &perps_node::oracle_pool::observation_digest(g, t / 3000, &o));
+    // 432's wire form: numbers for signer / timeMs / marketId / sources, a decimal string for the price
+    serde_json::json!({"signer": signer, "timeMs": t, "prices": prices.iter().map(|(m, p)| serde_json::json!({"marketId": m, "price": p.to_string(), "sources": 5})).collect::<Vec<_>>(), "signature": to_hex(&o.signature)})
+}
+
+/// A stand-in for 432's feeder: every 3 s, the round of the wall clock signed by the seven throwaway oracle keys,
+/// four through `/v1/oracle/updates` and three one by one through `/v1/oracle/observations`.
+async fn feed(url: String, g: Arc<perps_node::genesis::Genesis>, keys: Vec<k256::ecdsa::SigningKey>, price: u64, mut stop: tokio::sync::watch::Receiver<bool>) {
+    let auth = format!("Bearer {ORACLE_TOKEN}");
+    let mut last_round = 0;
+    loop {
+        let t = now();
+        if t / 3000 > last_round {
+            last_round = t / 3000;
+            let obs: Vec<serde_json::Value> = keys.iter().enumerate().map(|(i, k)| observation_json(&g, k, i as u8, t, &[(1, price)])).collect();
+            let (s, j) = post_json(&format!("{url}/v1/oracle/updates"), &serde_json::json!({"round": last_round, "observations": &obs[..4]}), &[("Authorization", &auth)]).await;
+            assert_eq!((s, j["held"].as_u64(), j["status"].as_str()), (200, Some(4), Some("held")), "{j}");
+            for o in &obs[4..] {
+                let (s, j) = post_json(&format!("{url}/v1/oracle/observations"), &serde_json::json!({"round": last_round, "observation": o}), &[("Authorization", &auth)]).await;
+                assert_eq!(s, 200, "{j}");
+            }
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+            _ = stop.changed() => return,
+        }
+    }
+}
+
+type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn ws_send(ws: &mut Ws, v: serde_json::Value) {
+    ws.send(tokio_tungstenite::tungstenite::Message::Text(v.to_string().into())).await.unwrap();
+}
+
+/// Reads frames for `ms` milliseconds.
+async fn ws_collect(ws: &mut Ws, ms: u64) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    let end = tokio::time::Instant::now() + Duration::from_millis(ms);
+    while let Ok(Some(Ok(m))) = tokio::time::timeout_at(end, ws.next()).await {
+        if let tokio_tungstenite::tungstenite::Message::Text(t) = m {
+            out.push(serde_json::from_str(&t).unwrap());
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn order_req(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, nonce: u64, is_buy: bool, tif: u8, price: u64, size: u64) -> serde_json::Value {
+    let a = signed(
+        g,
+        key,
+        "PlaceOrder",
+        serde_json::json!({"account": to_hex(&key_address(key)), "nonce": nonce.to_string(), "marketId": 1, "isBuy": is_buy, "orderType": 0,
+            "timeInForce": tif, "price": price.to_string(), "size": size.to_string(), "reduceOnly": false, "triggerPrice": "0",
+            "clientOrderId": to_hex(&[0u8; 32])}),
+    );
+    request(g, &a)
+}
+
+/// Round 2: the oracle ingest path (bearer token, pre-filter) and the whole market-data surface over HTTP and
+/// WebSocket, served from the real engine: ingest -> active market -> trade -> trades / candles / ticker /
+/// positions / fills / orders / proofs, and the WebSocket channels deliver the block's changes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn real_engine_oracle_ingest_market_data_and_websocket_channels() {
+    const P: u64 = 6_725_000_000_000;
+    let n = start_real_node("md").await;
+    let g = n.g.clone();
+    let base = n.url.clone();
+    // ingest authentication: no token, a wrong token -> 401 and nothing is held
+    let t = now();
+    let o = observation_json(&g, &n.keys.oracle[0], 0, t, &[(1, P)]);
+    let body = serde_json::json!({"round": t / 3000, "observation": o});
+    let (s, e) = post_json(&format!("{base}/v1/oracle/observations"), &body, &[]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (401, Some("UNAUTHORIZED")));
+    let (s, _) = post_json(&format!("{base}/v1/oracle/observations"), &body, &[("Authorization", "Bearer wrong-token-wrong-token-wrong")]).await;
+    assert_eq!(s, 401);
+    let (_, rounds) = get_json(&format!("{base}/v1/oracle/rounds/latest")).await;
+    assert_eq!((rounds["enabled"].as_bool(), rounds["accepted"].as_u64(), rounds["held"].as_array().map(|a| a.len())), (Some(true), Some(0), Some(0)), "{rounds}");
+    // an observation signed by a key outside the committee is refused by the pre-filter, with the right token
+    let auth = format!("Bearer {ORACLE_TOKEN}");
+    let forged = observation_json(&g, &user(5), 0, t, &[(1, P)]);
+    let (s, e) = post_json(&format!("{base}/v1/oracle/observations"), &serde_json::json!({"round": t / 3000, "observation": forged}), &[("Authorization", &auth)]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("ORACLE_BAD_SIGNATURE")), "{e}");
+    let (s, e) = post_json(&format!("{base}/v1/oracle/observations"), &serde_json::json!({"round": t / 3000, "observation": o, "extra": 1}), &[("Authorization", &auth)]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("ORACLE_MALFORMED")), "{e}");
+
+    // the feeder stand-in runs; two funded accounts
+    let (a, b) = (user(61), user(62));
+    let (aa, ba) = (key_address(&a), key_address(&b));
+    {
+        let mut v = n.app.view.lock().unwrap();
+        v.deposits.insert(0, deposit(0, aa, 100_000_000_000));
+        v.deposits.insert(1, deposit(1, ba, 1_000_000_000));
+    }
+    let (fstop_tx, fstop_rx) = tokio::sync::watch::channel(false);
+    let feeder = tokio::spawn(feed(base.clone(), g.clone(), n.keys.oracle.clone(), P, fstop_rx));
+    // three agreeing rounds (confirmRounds) make the market active: at most ~12 s of wall clock
+    let mut active = false;
+    for _ in 0..160 {
+        let (_, m) = get_json(&format!("{base}/v1/markets/BTC-USD")).await;
+        if m["status"] == "active" {
+            active = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(active, "BTC-USD did not become active from the ingested rounds");
+    let (s, os) = get_json(&format!("{base}/v1/oracle/BTC-USD")).await;
+    assert_eq!((s, os["status"].as_str(), os["price"].as_str(), os["threshold"].as_u64(), os["haltReason"].is_null()), (200, Some("ok"), Some("67250"), Some(5), true), "{os}");
+    let (_, rounds) = get_json(&format!("{base}/v1/oracle/rounds/latest")).await;
+    assert_eq!(rounds["lastBuilt"]["signers"], serde_json::json!([0, 1, 2, 3, 4, 5, 6]), "every observation of the round went into the block: {rounds}");
+    assert_eq!(rounds["conflicts"], 0);
+
+    // WebSocket subscriptions before the trade
+    let ws_url = format!("{}/v1/ws", base.replace("http://", "ws://"));
+    let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
+    ws_send(&mut ws, serde_json::json!({"op":"subscribe","id":1,"channel":"trades","symbol":"BTC-USD"})).await;
+    ws_send(&mut ws, serde_json::json!({"op":"subscribe","id":2,"channel":"candles","symbol":"BTC-USD","interval":"1m"})).await;
+    ws_send(&mut ws, serde_json::json!({"op":"subscribe","id":3,"channel":"ticker","symbol":"*"})).await;
+    ws_send(&mut ws, serde_json::json!({"op":"subscribe","id":4,"channel":"account","account":to_hex(&ba)})).await;
+    ws_send(&mut ws, serde_json::json!({"op":"subscribe","id":5,"channel":"candles","symbol":"BTC-USD","interval":"7m"})).await;
+    let first = ws_collect(&mut ws, 400).await;
+    let has = |v: &[serde_json::Value], f: &dyn Fn(&serde_json::Value) -> bool| v.iter().any(f);
+    assert!(has(&first, &|m| m["channel"] == "trades" && m["type"] == "snapshot" && m["data"]["trades"].as_array().is_some_and(|a| a.is_empty())), "{first:?}");
+    assert!(has(&first, &|m| m["channel"] == "candles" && m["type"] == "snapshot" && m["interval"] == "1m"), "{first:?}");
+    assert_eq!(first.iter().filter(|m| m["channel"] == "ticker" && m["type"] == "update").count(), 3, "one ticker per market for \"*\": {first:?}");
+    assert!(has(&first, &|m| m["channel"] == "account" && m["type"] == "snapshot" && m["data"]["account"]["collateral"] == "1000.000000"), "{first:?}");
+    assert!(has(&first, &|m| m["op"] == "error" && m["id"] == 5 && m["error"]["code"] == "MALFORMED"), "unknown interval refused: {first:?}");
+
+    // the trade: A rests an ask, B takes 0.14 with an IOC
+    let t = now();
+    let (s, ack) = post_json(&format!("{base}/v1/actions?wait=included"), &order_req(&g, &a, t, false, 0, P, 50_000_000), &[("X-Mock-Country", "PA")]).await;
+    assert_eq!((s, ack["result"]["ok"].as_bool(), ack["result"]["orderStatus"].as_str()), (200, Some(true), Some("open")), "{ack}");
+    let maker_order = ack["result"]["orderId"].as_str().unwrap().to_string();
+    let (s, ack) = post_json(&format!("{base}/v1/actions?wait=included"), &order_req(&g, &b, t + 1, true, 1, P, 14_000_000), &[("X-Mock-Country", "PA")]).await;
+    assert_eq!((s, ack["result"]["ok"].as_bool(), ack["result"]["orderStatus"].as_str(), ack["result"]["filledSize"].as_str()), (200, Some(true), Some("filled"), Some("0.1400")), "{ack}");
+
+    // REST market data
+    let (_, tr) = get_json(&format!("{base}/v1/markets/BTC-USD/trades")).await;
+    assert_eq!(tr["trades"].as_array().unwrap().len(), 1, "{tr}");
+    assert_eq!((tr["trades"][0]["price"].as_str(), tr["trades"][0]["size"].as_str(), tr["trades"][0]["side"].as_str(), tr.get("nextCursor")), (Some("67250.0"), Some("0.1400"), Some("buy"), None));
+    for iv in ["1m", "5m", "15m", "1h", "4h", "1d"] {
+        let (s, c) = get_json(&format!("{base}/v1/markets/BTC-USD/candles?interval={iv}")).await;
+        assert_eq!((s, c["candles"].as_array().unwrap().len(), c["candles"][0]["n"].as_u64(), c["candles"][0]["c"].as_str(), c["candles"][0]["q"].as_str()), (200, 1, Some(1), Some("67250.0"), Some("9415.000000")), "{iv}: {c}");
+    }
+    let (s, e) = get_json(&format!("{base}/v1/markets/BTC-USD/candles?interval=2m")).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("MALFORMED")));
+    let (s, e) = get_json(&format!("{base}/v1/markets/BTC-USD/trades?limit=0")).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("MALFORMED")));
+    let (s, e) = get_json(&format!("{base}/v1/markets/BTC-USD/trades?before=abc")).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("MALFORMED")));
+    let (s, _) = get_json(&format!("{base}/v1/markets/XYZ-USD/trades")).await;
+    assert_eq!(s, 404);
+    let (_, tk) = get_json(&format!("{base}/v1/markets/BTC-USD/ticker")).await;
+    assert_eq!((tk["lastPrice"].as_str(), tk["openInterest"].as_str(), tk["volume24h"].as_str(), tk["indexPrice"].as_str()), (Some("67250"), Some("0.14"), Some("9415.000000"), Some("67250")), "{tk}");
+    let (_, fu) = get_json(&format!("{base}/v1/markets/BTC-USD/funding")).await;
+    assert_eq!(fu, serde_json::json!({"funding": []}), "no settlement yet");
+
+    // REST account data
+    let (_, acc) = get_json(&format!("{base}/v1/accounts/{}", to_hex(&ba))).await;
+    assert_eq!((acc["collateral"].as_str(), acc["positions"][0]["size"].as_str(), acc["positions"][0]["entryPrice"].as_str(), acc["initialMargin"].as_str()), (Some("995.763250"), Some("0.14"), Some("67250"), Some("941.500000")), "{acc}");
+    assert!(acc.get("engine").is_none(), "exactly the schema's Account fields");
+    let (_, fills) = get_json(&format!("{base}/v1/accounts/{}/fills?symbol=BTC-USD", to_hex(&ba))).await;
+    assert_eq!((fills["fills"].as_array().unwrap().len(), fills["fills"][0]["fee"].as_str(), fills["fills"][0]["liquidity"].as_str()), (1, Some("4.236750"), Some("taker")), "{fills}");
+    let (_, none) = get_json(&format!("{base}/v1/accounts/{}/fills?symbol=ETH-USD", to_hex(&ba))).await;
+    assert_eq!(none["fills"].as_array().unwrap().len(), 0, "symbol filter");
+    let (_, oo) = get_json(&format!("{base}/v1/accounts/{}/orders", to_hex(&aa))).await;
+    assert_eq!((oo["orders"].as_array().unwrap().len(), oo["orders"][0]["orderId"].as_str(), oo["orders"][0]["status"].as_str(), oo["orders"][0]["filledSize"].as_str()), (1, Some(maker_order.as_str()), Some("open"), Some("0.1400")), "{oo}");
+    let (_, all) = get_json(&format!("{base}/v1/accounts/{}/orders?status=all", to_hex(&ba))).await;
+    assert_eq!(all["orders"][0]["status"], "filled");
+    let (s, e) = get_json(&format!("{base}/v1/accounts/{}/orders?status=closed", to_hex(&ba))).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("MALFORMED")));
+    let (s, one) = get_json(&format!("{base}/v1/orders/{maker_order}")).await;
+    assert_eq!((s, one["account"].as_str()), (200, Some(to_hex(&aa).as_str())));
+    let (_, pays) = get_json(&format!("{base}/v1/accounts/{}/funding", to_hex(&ba))).await;
+    assert_eq!(pays, serde_json::json!({"payments": []}));
+    let (_, deps) = get_json(&format!("{base}/v1/accounts/{}/deposits", to_hex(&ba))).await;
+    let d0 = &deps["deposits"][0];
+    assert_eq!((d0["depositId"].as_str(), d0["amount"].as_str(), d0["status"].as_str()), (Some("1"), Some("1000.000000"), Some("credited")), "{deps}");
+    assert_eq!(d0.as_object().unwrap().len(), 9, "exactly the schema's Deposit fields: {d0}");
+    let (_, st) = get_json(&format!("{base}/v1/status")).await;
+    assert_eq!(st["network"]["collateralToken"], to_hex(&[0x11; 20]));
+    let (_, ni) = get_json(&format!("{base}/v1/node")).await;
+    assert_eq!((ni["index"]["mismatches"].as_u64(), ni["oracleIngest"]["enabled"].as_bool()), (Some(0), Some(true)), "{ni}");
+
+    // the account proof against the latest final checkpoint (the validators sign in real time)
+    let mut proof = serde_json::Value::Null;
+    for _ in 0..80 {
+        let (s, p) = get_json(&format!("{base}/v1/accounts/{}/proof", to_hex(&ba))).await;
+        if s == 200 {
+            proof = p;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(proof["proof"].as_array().map(|a| a.len()), Some(32), "{proof}");
+    let body = verify_checkpoint_json(&g, &proof["checkpoint"]).unwrap();
+    let leaf = perps_node::util::parse_hex_fixed::<32>(proof["leaf"].as_str().unwrap()).unwrap();
+    let sib: Vec<[u8; 32]> = proof["proof"].as_array().unwrap().iter().map(|p| perps_node::util::parse_hex_fixed::<32>(p.as_str().unwrap()).unwrap()).collect();
+    assert!(postern_perps_engine::merkle::verify(&leaf, proof["index"].as_str().unwrap().parse().unwrap(), &sib, &body.accounts_root));
+    let (s, e) = get_json(&format!("{base}/v1/accounts/{}/proof?height=999999", to_hex(&ba))).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (404, Some("NOT_FOUND")));
+    let (s, fin) = get_json(&format!("{base}/v1/accounts/{}?finalized=true", to_hex(&ba))).await;
+    assert_eq!((s, fin["address"].as_str()), (200, Some(to_hex(&ba).as_str())));
+
+    // the WebSocket delivered the block's changes
+    let msgs = ws_collect(&mut ws, 1500).await;
+    assert!(has(&msgs, &|m| m["channel"] == "trades" && m["type"] == "update" && m["data"]["trades"][0]["size"] == "0.1400"), "{msgs:?}");
+    assert!(has(&msgs, &|m| m["channel"] == "candles" && m["type"] == "update" && m["interval"] == "1m" && m["data"]["n"] == 1), "{msgs:?}");
+    assert!(has(&msgs, &|m| m["channel"] == "ticker" && m["symbol"] == "BTC-USD" && m["data"]["lastPrice"] == "67250"), "{msgs:?}");
+    assert!(
+        has(&msgs, &|m| m["channel"] == "account" && m["type"] == "update" && m["data"]["fills"][0]["fee"] == "4.236750" && m["data"]["orders"][0]["status"] == "filled"
+            && m["data"]["account"]["positions"][0]["size"] == "0.14" && m["data"]["actions"][0]["status"] == "included"),
+        "{msgs:?}"
+    );
+    let _ = fstop_tx.send(true);
+    let _ = feeder.await;
+    let _ = n.stop.send(true);
+}
+
+/// A node without `--oracle-token-file` has no ingest path at all (503), whatever the caller presents.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn oracle_ingest_is_disabled_without_a_configured_token() {
+    let n = start_node("no-ingest").await;
+    for path in ["observations", "updates"] {
+        let (s, e) = post_json(&format!("{}/v1/oracle/{path}", n.url), &serde_json::json!({"round": 1}), &[("Authorization", "Bearer anything-at-all-0123456789")]).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (503, Some("ORACLE_INGEST_DISABLED")), "{path}: {e}");
+    }
+    let _ = n.stop.send(true);
+}
