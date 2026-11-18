@@ -105,6 +105,7 @@ cat > "$RUN/stack.json" <<JSON
 {"label": "$LABEL", "tree": "$TREE", "commit": "$(e2e_ssh "cat $S/src-$LABEL/.commit")", "l2": "$L2", "oracle": "$ORACLE", "localValidators": $LOCALV,
  "seed": "$E2E_SEED", "api": "http://127.0.0.1:$M_API", "l2Rpc": "http://127.0.0.1:$M_ANVIL", "l2Proxy": "http://127.0.0.1:$M_PROXY",
  "hostApi": "http://127.0.0.1:$H_API", "vault": "$VAULT", "token": "$TOKEN", "frontend": $( [ "$FRONTEND" = 1 ] && echo "\"http://127.0.0.1:$M_FRONTEND\"" || echo null ),
+ "oracleCommittee": $( [ -n "${ORACLE_LIST:-}" ] && printf '["%s"]' "$(printf '%s' "$ORACLE_LIST" | sed 's/,/","/g')" || echo null ), "oracleQuorum": 5,
  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
 say "stack up; description in $RUN/stack.json; stop with e2e/down.sh"

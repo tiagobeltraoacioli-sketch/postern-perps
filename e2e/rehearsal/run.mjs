@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Api, sleep } from '../lib/client.mjs';
 import { Chain } from '../lib/chain.mjs';
@@ -44,6 +44,21 @@ const ctx = {
   async host(script, ...a) {
     const { stdout } = await run('bash', [join(HERE, '..', 'hostctl.sh'), script, ...a.map(String)], { maxBuffer: 16 << 20 });
     return stdout.trim();
+  },
+  /** Same, with `input` on the script's stdin (a tape for the oracle feeder). */
+  hostIn(input, script, ...a) {
+    return new Promise((res, rej) => {
+      const p = spawn('bash', [join(HERE, '..', 'hostctl.sh'), script, ...a.map(String)]);
+      let out = '', err = '';
+      p.stdout.on('data', (d) => (out += d)); p.stderr.on('data', (d) => (err += d));
+      p.on('close', (code) => (code === 0 ? res(out.trim()) : rej(new Error(`${script}: exit ${code}: ${err.trim().slice(0, 300)}`))));
+      p.stdin.end(input);
+    });
+  },
+  /** Replaces the oracle tape: rows = array of tape rows (432's format); the feeder restarts on it. */
+  async feed(name, rows) {
+    if (this.stack.oracle !== 'replay') throw new Blocked('the stack runs the fixed-price dev oracle: no scripted price path');
+    return this.hostIn(rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'feeder-start.sh', '--tape', name);
   },
   async check(id, title, fn) {
     const t0 = Date.now();
