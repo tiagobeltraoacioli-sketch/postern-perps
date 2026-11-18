@@ -143,6 +143,8 @@ impl Stats {
 struct World {
     seed: u64,
     rng: Rng,
+    /// Picks of the checks only (P13), so that adding a check never changes the generated inputs of a seed.
+    rng_checks: Rng,
     e: Engine,
     dom: sp::Domain,
     users: Vec<SigningKey>,
@@ -257,6 +259,7 @@ impl World {
             stranger: pe::testkit::key(43_999),
             okeys: pe::testkit::oracle_keys(n_or),
             rng,
+            rng_checks: Rng(seed ^ 0x5EED_C0DE_0436),
             e,
             dom,
             t: T0,
@@ -914,14 +917,14 @@ impl World {
         }
         self.stats.add("spec11_roots_recomputed", 1);
         // P13: the engine's proofs against these roots
-        let ai = self.rng.below(self.e.accounts.len() as u64) as usize;
+        let ai = self.rng_checks.below(self.e.accounts.len() as u64) as usize;
         let addr = self.e.accounts[ai].address;
         let (data, index, sib) = self.e.account_proof(&addr).ok_or("P13: no account proof")?;
         if sib.len() != 32 || index as usize != ai || walk(leaf_hash(&data), index as u64, &sib) != ar {
             return Err(format!("P13: account proof of index {ai} does not verify at block {}", self.h));
         }
         if !self.wd_leaves.is_empty() {
-            let id = self.rng.below(self.wd_leaves.len() as u64);
+            let id = self.rng_checks.below(self.wd_leaves.len() as u64);
             let (data, sib) = self.e.withdrawal_proof(id).ok_or("P13: no withdrawal proof")?;
             if sib.len() != 32 || leaf_hash(&data) != self.wd_leaves[id as usize] || walk(leaf_hash(&data), id, &sib) != wr {
                 return Err(format!("P13: withdrawal proof {id} does not verify at block {}", self.h));
