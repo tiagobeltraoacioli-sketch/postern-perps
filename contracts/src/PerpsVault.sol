@@ -2,7 +2,7 @@
 pragma solidity 0.8.24;
 
 /// @title PerpsVault: collateral custody of PosternDEX Perpetuals on the Bloch L2 (chain 700770)
-/// @notice STATUS: PROTOTYPE, UNAUDITED. Not for deployment. Specification: docs/VAULT.md (v0.2), with docs/SPEC.md
+/// @notice STATUS: PROTOTYPE, UNAUDITED. Not for deployment. Specification: docs/VAULT.md (v0.3), with docs/SPEC.md
 ///         section 11 (state root and proofs) as the engine side.
 ///
 /// The vault holds the collateral token (bUSDC, 6 decimals) for the off-chain exchange engine. It never trusts the
@@ -10,7 +10,8 @@ pragma solidity 0.8.24;
 /// within limits fixed at deployment. There is no owner, no admin, no upgrade, no setter, no rescue.
 ///
 /// - Deposits: anyone deposits for an engine account; every deposit extends a hash chain and a cumulative total; a
-///   checkpoint must name the vault's own chain head after the deposits it credited (R395-1).
+///   checkpoint must name the vault's own chain head after the deposits it credited (R395-1). The engine's INSURANCE
+///   (0x..02) and BACKSTOP (0x..03) accounts are funded the same way (v0.3); the vault records who funded them.
 /// - Checkpoints (EIP-712, domain "PosternPerpsVault"/"1"/chainid/this): k-of-n signatures, strictly ascending signer
 ///   addresses, low-s, v 27/28 (the bridge's `_checkCertificate`). The vault recomputes the engine's `stateRoot` from
 ///   the signed components (SPEC 11), so the withdrawal and account roots it pays against are the ones inside the
@@ -51,6 +52,9 @@ contract PerpsVault {
 
     /// SPEC 8 system accounts (no key). Only PROTOCOL_FEE is ever paid, and only to `feeRecipient`.
     address internal constant PROTOCOL_FEE = address(1);
+    /// Fundable through `deposit` (SPEC 4.11 seeds, SPEC O-3); never a payout recipient.
+    address internal constant INSURANCE = address(2);
+    address internal constant BACKSTOP = address(3);
     /// Addresses at or below this are keyless (system accounts, precompiles): never a payout recipient (R395-26).
     uint160 internal constant KEYLESS_MAX = 0xffff;
 
@@ -170,6 +174,10 @@ contract PerpsVault {
     uint128 public subordinatedTotal;
     bool public systemSharesProven;
     bool public surplusSwept;
+
+    /// v0.3, appended so that no earlier slot moves. Who paid deposit `index` when it credits INSURANCE or BACKSTOP
+    /// (zero for every other deposit): the only address an uncredited system deposit is ever refunded to.
+    mapping(uint64 => address) public systemFunder;
 
     // ------------------------------------------------------------------ types
     struct Config {
@@ -488,12 +496,16 @@ contract PerpsVault {
     }
 
     // ------------------------------------------------------------------ deposits
-    /// @notice Deposits `amount` for engine account `account` (credited by the engine after L2 finality).
+    /// @notice Deposits `amount` for engine account `account` (credited by the engine after L2 finality). `account`
+    ///         may be INSURANCE (0x..02) or BACKSTOP (0x..03): that funds the engine's insurance fund or backstop
+    ///         (a contribution, not a claim: once credited it is paid out only by the escape subordination rule).
+    ///         Every other keyless address is refused.
     function deposit(uint64 amount, address account) external nonReentrant returns (uint64 index) {
         if (escapeAt != 0) revert EscapeActive();
         if (paused()) revert Paused();
+        bool system = account == INSURANCE || account == BACKSTOP;
         if (
-            account == address(this) || account == token || amount < minDeposit || _keyless(account)
+            account == address(this) || account == token || amount < minDeposit || (_keyless(account) && !system)
                 || uint256(custody()) + amount > cap
         ) revert InvalidDeposit();
         uint256 beforeVault = _balance(address(this));
@@ -508,7 +520,10 @@ contract PerpsVault {
         depositHeadAt[index + 1] = head;
         depositTotalAt[index + 1] = depositTotalAt[index] + amount;
         depositedTotal += amount;
-        hasDeposited[account] = true;
+        // A system account never posts forced requests (it has no key), and funding one gives the funder no such
+        // right either; the funder is kept only for the escape refund of a deposit the engine never credited.
+        if (system) systemFunder[index] = msg.sender;
+        else hasDeposited[account] = true;
         emit Deposit(index, account, msg.sender, amount, head);
     }
 
@@ -759,7 +774,8 @@ contract PerpsVault {
     }
 
     /// @notice In escape: refunds deposit `index` that the latest checkpoint did not credit, to the credited account,
-    ///         from the vault's own chain. No committee input, so no bucket, delay or pause applies.
+    ///         from the vault's own chain. No committee input, so no bucket, delay or pause applies. A deposit that
+    ///         funded INSURANCE or BACKSTOP is refunded to the address that paid it, never to the keyless account.
     function refundDeposit(uint64 index, address account, uint64 amount) external nonReentrant {
         if (escapeAt == 0) revert NotEscape();
         if (
@@ -770,7 +786,11 @@ contract PerpsVault {
         refunded[index] = true;
         refundedTotal += amount;
         committedOut += amount;
-        _transferOut(account, amount);
+        // The chain link proves `account`; a keyless one can only be INSURANCE or BACKSTOP (`deposit` refuses the
+        // rest), and then the funder was recorded with the deposit.
+        address to = _keyless(account) ? systemFunder[index] : account;
+        if (_keyless(to)) revert InvalidRefund();
+        _transferOut(to, amount);
         emit Refunded(index, account, amount);
     }
 
