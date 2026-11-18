@@ -2,6 +2,18 @@
 //! (including halts and large drops that liquidate). After every block: the invariants of SPEC section 8. At the
 //! end: the whole log re-encoded to canonical bytes, decoded and replayed on a fresh engine gives the same state
 //! root at every height (I-5, codec canonicality).
+//!
+//! Round 2 (agent 430, SPEC 0.2) adds, after EVERY block of every run (nothing of the above removed):
+//! - P-1 conservation from an independent ledger: deposits counted from the INPUTS the engine accepted and
+//!   withdrawals from the records it emitted, never from the engine's own totals; I-1 and I-2 recomputed here;
+//! - P-2 `sum(escapeValue) <= custody + deficit the insurance fund could not absorb`, and `<= custody` outright
+//!   whenever the fund covers the deficits; `totalEscape` equals the sum of the leaves' values;
+//! - P-3 no account ends a block below maintenance unless step 9 stopped at its pass bound (the maintenance
+//!   requirement is recomputed here from the genesis tiers, not taken from the engine);
+//! - P-4 snapshot: `state_root(restore(snapshot(s))) == state_root(s)`, byte-identical re-encoding, and (at the
+//!   end of the run) an engine restored from a mid-run snapshot replays the rest of the log to the same roots and
+//!   log hashes;
+//! - P-5 replay through the codec also reproduces every log hash and every per-input outcome.
 use k256::ecdsa::SigningKey;
 use postern_perps_engine::codec::{decode_inputs, encode_inputs};
 use postern_perps_engine::testkit::*;
@@ -51,6 +63,120 @@ struct Sim {
     log: Vec<Block>,
     roots: Vec<[u8; 32]>,
     stats: std::collections::BTreeMap<String, u64>,
+    /// P-1: independent ledger (USDC units).
+    ledger_deposits: i128,
+    ledger_withdrawn: i128,
+    log_hashes: Vec<[u8; 32]>,
+    outcomes: Vec<Vec<Result<(), Error>>>,
+    /// P-4: a snapshot taken in the middle of the run (height, bytes).
+    mid_snapshot: Option<(u64, Vec<u8>)>,
+}
+
+/// P-3: maintenance requirement of one position from the genesis tiers (SPEC 6.2), written independently of
+/// `engine.rs`: the part of the notional inside each tier times its fraction, summed, divided by 10^6 rounding up.
+fn mmr_independent(notional: i128, tiers: &[postern_perps_engine::genesis::Tier]) -> i128 {
+    let mut acc: i128 = 0;
+    for (i, t) in tiers.iter().enumerate() {
+        let lo = t.floor as i128 * 10_000_000_000;
+        let hi = tiers.get(i + 1).map(|n| n.floor as i128 * 10_000_000_000);
+        let top = match hi {
+            Some(h) => notional.min(h),
+            None => notional,
+        };
+        if top > lo {
+            acc += (top - lo) * t.mmf_ppm as i128;
+        }
+    }
+    (acc + 999_999) / 1_000_000
+}
+
+fn round2_properties(sim: &mut Sim, b: &Block, out: &BlockOutcome) {
+    let e = &sim.e;
+    let h = sim.h;
+    // ---- P-1
+    for (i, o) in b.inputs.iter().zip(&out.outcomes) {
+        if let (Input::Deposit { amount, .. }, Ok(())) = (i, o) {
+            sim.ledger_deposits += *amount as i128;
+        }
+    }
+    for ev in &out.events {
+        if let Event::Withdrawal(w) = ev {
+            sim.ledger_withdrawn += w.amount as i128;
+        }
+    }
+    let custody = sim.ledger_deposits - sim.ledger_withdrawn;
+    assert!(custody >= 0, "P-1: more withdrawn than deposited at height {h}");
+    let mut balances: i128 = 0;
+    let mut open_notional: i128 = 0;
+    let mut sizes: std::collections::BTreeMap<u32, i128> = Default::default();
+    for a in &e.accounts {
+        balances += a.balance;
+        for (mid, p) in &a.positions {
+            open_notional += p.open_notional;
+            *sizes.entry(*mid).or_default() += p.size as i128;
+        }
+    }
+    for (mid, s) in &sizes {
+        assert_eq!(*s, 0, "P-1 / I-1: sizes of market {mid} do not sum to zero at height {h}");
+    }
+    assert_eq!(10_000_000_000 * balances + e.dust - open_notional, 10_000_000_000 * custody, "P-1 / I-2 against the independent ledger at height {h}");
+    assert!(e.dust >= 0 && e.dust < 10_000_000_000, "dust is swept every block: {}", e.dust);
+    let recorded: i128 = e.withdrawals.iter().map(|w| w.amount as i128).sum();
+    assert_eq!(recorded, sim.ledger_withdrawn, "P-1: withdrawal tree vs emitted records at height {h}");
+    // ---- P-2
+    let esc = e.escape_values();
+    let total: i128 = esc.iter().map(|x| *x as i128).sum();
+    let mut deficit: i128 = 0;
+    for ai in 0..e.accounts.len() as u32 {
+        let eq = e.equity(ai);
+        if eq < 0 {
+            deficit += (-eq + 9_999_999_999) / 10_000_000_000;
+        }
+    }
+    let ins = (e.equity(1).max(0)) / 10_000_000_000;
+    let uncovered = (deficit - ins).max(0);
+    assert!(total <= custody + uncovered, "P-2: escape total {total} > custody {custody} + uncovered {uncovered} at height {h}");
+    if uncovered == 0 {
+        assert!(total <= custody, "P-2: escape total {total} > custody {custody} with the deficit covered at height {h}");
+    } else {
+        *sim.stats.entry("p2:uncovered-deficit".into()).or_default() += 1;
+    }
+    if deficit > 0 {
+        *sim.stats.entry("p2:deficit".into()).or_default() += 1;
+    }
+    // ---- P-3
+    let (passes, complete) = e.last_passes;
+    assert!(passes >= 1 && passes <= postern_perps_engine::engine::MAX_SYSTEM_PASSES);
+    for ai in 3..e.accounts.len() as u32 {
+        let a = &e.accounts[ai as usize];
+        if a.positions.is_empty() {
+            continue;
+        }
+        let all_active = a.positions.keys().all(|m| e.markets[m].oracle.status == postern_perps_engine::oracle::Status::Active && e.markets[m].mark > 0);
+        if !all_active {
+            *sim.stats.entry("p3:skipped-halted".into()).or_default() += 1;
+            continue; // SPEC 6.3: not liquidated while one of its markets is halted (stated)
+        }
+        let mr: i128 = a.positions.iter().map(|(m, p)| mmr_independent((p.size as i128).abs() * e.markets[m].mark as i128, &e.markets[m].p.tiers)).sum();
+        if e.equity(ai) < mr {
+            assert!(!complete, "P-3: account {ai} below maintenance at the end of height {h} although step 9 ran to completion");
+            *sim.stats.entry("p3:carried-to-next-block".into()).or_default() += 1;
+        }
+    }
+    if !complete {
+        *sim.stats.entry("p3:pass-bound-hit".into()).or_default() += 1;
+    }
+    // ---- P-4
+    let snap = e.snapshot();
+    let back = Engine::restore(e.g.clone(), &snap, Some(&out.state_root)).unwrap_or_else(|er| panic!("P-4: restore failed at height {h}: {er}"));
+    assert_eq!(back.state_root(), out.state_root, "P-4 at height {h}");
+    assert_eq!(back.snapshot(), snap, "P-4: re-encoding at height {h}");
+    assert_eq!((back.log_hash, back.total_deposits, back.height, back.time), (e.log_hash, e.total_deposits, e.height, e.time));
+    if h % 7 == 3 || sim.mid_snapshot.is_none() {
+        sim.mid_snapshot = Some((h, snap));
+    }
+    sim.log_hashes.push(out.log_hash);
+    sim.outcomes.push(out.outcomes.clone());
 }
 
 fn round_tick(p: u64, tick: u64) -> u64 {
@@ -66,7 +192,7 @@ impl Sim {
         m2.max_size = 100_000_000_000;
         m2.oi_cap = 2_000_000_000_000;
         let e = Engine::new(genesis(5, vec![market(1, "BTC-USD"), m2]));
-        Sim { e, ok: oracle_keys(5), keys: (0..TRADERS as u32).map(|i| key(100 + i)).collect(), t: T0, h: 0, dep: 0, px: [0, 6_725_000_000_000, 348_000_000_000], pending: vec![], deposits: vec![], nonce: 0, log: vec![], roots: vec![], stats: Default::default() }
+        Sim { e, ok: oracle_keys(5), keys: (0..TRADERS as u32).map(|i| key(100 + i)).collect(), t: T0, h: 0, dep: 0, px: [0, 6_725_000_000_000, 348_000_000_000], pending: vec![], deposits: vec![], nonce: 0, log: vec![], roots: vec![], stats: Default::default(), ledger_deposits: 0, ledger_withdrawn: 0, log_hashes: vec![], outcomes: vec![], mid_snapshot: None }
     }
     fn next_nonce(&mut self) -> u64 {
         self.nonce += 1;
@@ -98,6 +224,7 @@ impl Sim {
             *self.stats.entry(k).or_default() += 1;
         }
         self.roots.push(out.state_root);
+        round2_properties(self, &b, &out);
         self.log.push(b);
     }
     fn run(&mut self, ops: &[Op]) {
@@ -183,12 +310,27 @@ impl Sim {
 
 fn replay_matches(sim: &Sim) {
     let mut fresh = Engine::new(sim.e.g.clone());
-    for (b, root) in sim.log.iter().zip(&sim.roots) {
+    for (i, (b, root)) in sim.log.iter().zip(&sim.roots).enumerate() {
         let bytes = encode_inputs(&b.inputs);
         let decoded = decode_inputs(&bytes).expect("canonical bytes decode");
+        assert_eq!(encode_inputs(&decoded), bytes, "P-5: decode then encode is the identity");
         let out = fresh.apply_block(&Block { height: b.height, time: b.time, inputs: decoded }).unwrap();
         assert_eq!(&out.state_root, root, "replay diverged at height {}", b.height);
+        assert_eq!(out.log_hash, sim.log_hashes[i], "P-5: log hash at height {}", b.height);
+        assert_eq!(out.outcomes, sim.outcomes[i], "P-5: outcomes at height {}", b.height);
     }
+    assert_eq!(fresh.snapshot(), sim.e.snapshot(), "P-5: the replayed engine is byte-equal to the original in every field a snapshot holds");
+    // P-4: recovery from a mid-run snapshot, then the rest of the log, reaches the same roots and log hashes
+    let (h0, snap) = sim.mid_snapshot.clone().expect("a snapshot was taken");
+    let mut resumed = Engine::restore(sim.e.g.clone(), &snap, Some(&sim.roots[h0 as usize - 1])).expect("mid-run snapshot restores");
+    for b in sim.log.iter().filter(|b| b.height > h0) {
+        let decoded = decode_inputs(&encode_inputs(&b.inputs)).unwrap();
+        let out = resumed.apply_block(&Block { height: b.height, time: b.time, inputs: decoded }).unwrap();
+        assert_eq!(out.state_root, sim.roots[b.height as usize - 1], "P-4: resumed engine diverged at height {}", b.height);
+        assert_eq!(out.log_hash, sim.log_hashes[b.height as usize - 1], "P-4: resumed log hash at height {}", b.height);
+        invariants::check(&resumed).expect("invariants after resuming from a snapshot");
+    }
+    assert_eq!(resumed.snapshot(), sim.e.snapshot(), "P-4: resumed and original engines are byte-equal");
 }
 
 proptest! {
