@@ -934,3 +934,52 @@ fn committed_tapes_do_what_their_notes_say() {
         }
     }
 }
+
+/// R432-2 (Low, found by the integration run against 431's node, 2026-11-18: 7 x `409 ORACLE_CONFLICT`). A feed
+/// that ends and another that starts inside the same 3 s round both signed for that round, with different
+/// prices: the same signer signing twice for one round is equivocation (the node kept the first and refused the
+/// second). A process cannot know what an earlier instance signed, so it never signs for the round it starts in.
+#[test]
+fn r432_2_a_restarted_feed_never_signs_the_round_it_started_in() {
+    let ks = keys(3);
+    let rounds_of = |tape: &str, start: u64| -> Vec<u64> {
+        let steps = tape::parse(tape).unwrap();
+        let mut log = Vec::new();
+        replay::run(
+            &steps,
+            &ks,
+            &VAULT,
+            None,
+            &opts(Mode::Updates),
+            &mut FakeClock(start),
+            &mut log,
+        )
+        .unwrap();
+        String::from_utf8(log)
+            .unwrap()
+            .lines()
+            .map(|l| {
+                serde_json::from_str::<Value>(l).unwrap()["round"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect()
+    };
+    let start = 1_800_000_000_000u64; // the first millisecond of a round
+    let first = rounds_of("{\"p\":{\"1\":\"100\"},\"repeat\":2}", start);
+    // The first instance signed its last round at +150 ms and exited; the second starts 300 ms into that round.
+    let restart = first[1] * ROUND_MS + 300;
+    let second = rounds_of("{\"p\":{\"1\":\"101\"},\"repeat\":2}", restart);
+    assert!(
+        second[0] > first[1],
+        "round {} signed by both instances",
+        first[1]
+    );
+    assert_eq!(second, [first[1] + 1, first[1] + 2]);
+    // Whenever it starts inside a round, the first signed round is the one after the round of its first clock
+    // reading (the scripted clock advances 1 ms per reading).
+    for offset in [0, 1, 149, 150, 1499, 1500, 2998, 2999] {
+        let r = rounds_of("{\"p\":{\"1\":\"100\"}}", start + offset);
+        assert_eq!(r, [round_of(start + offset + 1) + 1], "offset {offset}");
+    }
+}

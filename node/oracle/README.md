@@ -355,7 +355,10 @@ engine's round cannot be compressed); `--loop` plays forward then backward for e
 A node that is down or refuses a round does not stop the feed (a sequencer restart in a rehearsal); the exit code is
 0 at the end of the tape and the last line on stderr counts `accepted`, `refused`, `unreachable`, `silent` rounds
 (`--strict`: exit 2 unless every round was accepted). A step whose round was lost (the process was stopped) is
-played in the next round; never two updates in one round.
+played in the next round; never two updates in one round. A feed never signs for the round it starts in (R432-2:
+an earlier instance may have signed for it, and a signer that signs two different observations for one round
+equivocates; found by the run against 431's node, which refused the second with `ORACLE_CONFLICT`); the live `run`
+waits for the next round start for the same reason.
 
 Keys: `perps-oracle committee-gen --n 7 --quorum 5 --out DIR` makes fresh random THROWAWAY keys at run time
 (`/dev/urandom`, files 0600 in a new 0700 directory, a public `committee.json`); nothing is committed. For a node

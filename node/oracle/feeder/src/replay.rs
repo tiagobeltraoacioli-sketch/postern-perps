@@ -6,7 +6,8 @@
 //! What is deterministic: the sequence of prices, sources, signers and overrides (a pure function of the tape text
 //! and the options). What is not: `round` and `timeMs`, which are the wall clock of the run (the engine accepts an
 //! observation only inside its own round and close to the block time: rules C2c), and therefore the signatures.
-//! One tape step is played per oracle round (3 s of real time); `--speed K` plays every K-th step.
+//! One tape step is played per oracle round (3 s of real time); `--speed K` plays every K-th step. The first
+//! signed round is the one AFTER the round the process starts in (R432-2: no equivocation across restarts).
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -137,7 +138,10 @@ pub fn run(
     log: &mut dyn Write,
 ) -> Result<Summary, String> {
     let mut sum = Summary::default();
-    let mut last_round = 0u64;
+    // R432-2: a process never signs for the round it starts in. An earlier instance (a restart, a second feed
+    // started by mistake) may already have signed for it, and two different observations of one signer for one
+    // round are equivocation. No state file is needed: an instance only ever signs for the current round.
+    let mut last_round = round_of(clock.now_ms());
     let mut k = 0u64;
     while let Some(i) = index_at(steps.len(), opt.speed, opt.looped, k) {
         if opt.max_rounds.is_some_and(|m| k >= m) {
