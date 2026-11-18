@@ -249,6 +249,28 @@
   pointer-events: none;
 }
 
+/* R395-32: levels that could not be placed (non-finite price). Above the candle notice, in the danger colour. */
+.pc-undrawn {
+  position: absolute;
+  left: var(--s-2);
+  bottom: 58px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: calc(100% - 2 * var(--s-2));
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--danger);
+  font-size: var(--text-micro);
+  pointer-events: none;
+}
+
+.pc-undrawn span {
+  color: var(--text);
+}
+
 .pc-sr {
   position: absolute;
   width: 1px;
