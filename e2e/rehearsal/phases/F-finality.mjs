@@ -39,7 +39,7 @@ export default async function (ctx) {
   });
   await ctx.check('F-03', 'independent replay: the engine CLI (a separate binary) replays the published log from genesis and reproduces the state root and log hash of every block', async () => {
     const signers = stack.oracleCommittee ?? nodeDevCommittee(stack.seed, 'oracle', 7).map((k) => k.address);
-    const out = JSON.parse(await ctx.host('replay-check.sh', stack.label, stack.hostApi, stack.vault, signers.join(','), stack.oracleQuorum ?? 5));
+    const out = JSON.parse(await ctx.host('replay-check.sh', stack.label, stack.hostApi, stack.vault, signers.join(','), stack.oracleQuorum ?? 5, stack.fundingIntervalMs ?? 0));
     expect(out.ok, JSON.stringify(out));
     expect(out.lastHeight >= C.height, `replayed to ${out.lastHeight}, checkpoint at ${C.height}`);
     return out;

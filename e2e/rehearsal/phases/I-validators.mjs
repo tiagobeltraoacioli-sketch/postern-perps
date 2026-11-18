@@ -33,9 +33,14 @@ export default async function (ctx) {
     expect(again.digest === C.digest && again.signatures.every((s) => s.signature !== hex(sign(unhex(d), rogue.key))), 'the published checkpoint changed');
     return { rogue: rogue.address, http: r.status, error: r.body?.error, height: C.height };
   });
+  const remoteIdx = Array.from({ length: 7 - stack.localValidators }, (_, k) => stack.localValidators + k);
+  const fin = async () => (await status(api)).latestFinalized?.height ?? 0;
+  const finalityMoves = async (above, ms = 60000) => api.until(async () => { await tick(); const f = await fin(); return f > above ? f : null; }, { ms, every: 1000, what: `a checkpoint above ${above}` });
   await ctx.check('I-03', 'with 3 of 7 validators stopped nothing new becomes final while blocks continue; finality resumes when one returns', async () => {
-    blockedIf(!remote, 'all 7 validators run inside the sequencer process in this stack (needs 431\'s --local-validators and separate validator processes)');
-    for (const i of [4, 5, 6]) await ctx.host('svc.sh', 'stop', `validator-${i}`, 'TERM');
+    blockedIf(remoteIdx.length < 3, 'fewer than 3 validators run as separate processes in this stack (up.sh --local-validators 4 or less)');
+    const down = remoteIdx.slice(-3);
+    for (const i of down) await ctx.host('svc.sh', 'stop', `validator-${i}`, 'TERM');
+    ctx.state.validatorsDown = down;
     const s0 = await status(api);
     for (let i = 0; i < 25; i++) { await tick(); await sleep(400); }
     const s1 = await status(api);
@@ -45,21 +50,32 @@ export default async function (ctx) {
     for (let i = 0; i < 25; i++) { await tick(); await sleep(400); }
     const s2 = await status(api);
     expect((s2.latestFinalized?.height ?? 0) === stalledAt, `finality moved with 4 validators: ${stalledAt} -> ${s2.latestFinalized?.height}`);
-    await ctx.host('validator-start.sh', '--again', 4);
-    const s3 = await api.until(async () => { await tick(); const x = await status(api); return (x.latestFinalized?.height ?? 0) > stalledAt ? x : null; }, { ms: 60000, every: 1000, what: 'finality with 5 validators' });
-    ctx.state.validatorsDown = [5, 6];
-    return { blocksWhileDown: s2.latestBlock.height - s0.latestBlock.height, finalStalledAt: stalledAt, finalAfterReturn: s3.latestFinalized.height };
+    await ctx.host('validator-start.sh', '--again', down[0]);
+    const after = await finalityMoves(stalledAt);
+    ctx.state.validatorsDown = down.slice(1);
+    return { stopped: down, blocksWhileDown: s2.latestBlock.height - s0.latestBlock.height, finalStalledAt: stalledAt, finalAfterOneReturned: after };
   });
-  await ctx.check('I-04', 'validators restarted mid-run catch up from the published log and sign again (7 of 7 online)', async () => {
-    blockedIf(!remote, 'all 7 validators run inside the sequencer process in this stack');
+  await ctx.check('I-04', 'each validator restarted mid-run catches up from the published log and signs again: finality continues with exactly 5 running when it is one of the 5', async () => {
+    blockedIf(remoteIdx.length < 3, 'fewer than 3 validators run as separate processes in this stack');
     for (const i of ctx.state.validatorsDown ?? []) await ctx.host('validator-start.sh', '--again', i);
-    const n = await api.until(async () => {
-      await tick();
-      const [s, node] = [await status(api), await api.json('/v1/node')];
-      const up = node.validators.filter((v) => v.height >= s.latestBlock.height - 2 && v.latched === null);
-      return up.length === 7 ? { height: s.latestBlock.height, validators: node.validators.map((v) => ({ address: v.address, height: v.height, signed: v.signed })) } : null;
-    }, { ms: 90000, every: 1500, what: '7 validators at the head' });
-    return n;
+    ctx.state.validatorsDown = [];
+    const restarted = remoteIdx.slice(-3);
+    const out = {};
+    for (const i of restarted) {
+      // exactly 5 of 7 run, the restarted validator i among them: a new final checkpoint needs ITS signature
+      const others = remoteIdx.filter((x) => x !== i).slice(-2);
+      for (const o of others) await ctx.host('svc.sh', 'stop', `validator-${o}`, 'TERM');
+      try {
+        const f0 = await fin();
+        await sleep(1500);   // a checkpoint already signed by the two just stopped may still complete
+        const f1 = await fin();
+        const f2 = await finalityMoves(Math.max(f0, f1) + 10, 90000);   // two checkpoint intervals later
+        out[`validator-${i}`] = { runningWith: `5 of 7 (stopped ${others.join(', ')})`, finalBefore: f1, finalAfter: f2 };
+      } finally {
+        for (const o of others) await ctx.host('validator-start.sh', '--again', o);
+      }
+    }
+    return out;
   });
   for (const [id, sig, how] of [['I-05', 'INT', 'stopped cleanly'], ['I-06', 'KILL', 'killed (SIGKILL, no shutdown)']]) {
     await ctx.check(id, `the sequencer is ${how} and restarted mid-run: it recovers the same chain, the log verifies, trading and finality continue`, async () => {

@@ -27,3 +27,38 @@ export async function totalBalances(api, CAST) {
   for (const a of [...CAST.map((c) => [c.label, c.address]), ...Object.entries(SYSTEM)]) { per[a[0]] = await bal(api, a[1]); t += per[a[0]]; }
   return { total: t, per: Object.fromEntries(Object.entries(per).map(([k, v]) => [k, fmtUsdc(v)])) };
 }
+
+/** Sum of the deposits the ENGINE credited, read from the API for every rehearsal account and the system accounts
+ *  (never from the rehearsal's own memory, so a phase run alone still checks against what really happened). */
+export async function creditedDeposits(api, CAST) {
+  let t = 0n;
+  for (const a of [...CAST.map((c) => c.address), ...Object.values(SYSTEM)]) {
+    for (const d of (await api.json(`/v1/accounts/${a}/deposits`)).deposits) if (d.status === 'credited') t += usdc(d.amount);
+  }
+  return t;
+}
+/** Sum of the net amounts of every withdrawal record of the rehearsal's accounts plus the flat fees they paid
+ *  (gross = what left the balances). */
+export async function withdrawnGross(api, CAST) {
+  let t = 0n;
+  for (const a of [...CAST.map((c) => c.address), ...Object.values(SYSTEM)]) {
+    for (const w of (await api.json(`/v1/accounts/${a}/withdrawals`)).withdrawals) if (w.status !== 'rejected') t += usdc(w.amount) + (a === SYSTEM.fee ? 0n : usdc(w.fee));
+  }
+  return t;
+}
+/** Exact funding payment of SPEC S-7.3 in USDC units for a position (decimal strings from the API):
+ *  f = size * mark * rate / 1e9 (notional units) / 1e10; a payer's amount is rounded UP, a receiver's DOWN. */
+export function fundingPayment(size, mark, rate) {
+  const n = sz(size) * px(mark) * scale9(rate);          // signed: size and rate carry the signs
+  const d = 10n ** 19n;
+  const pays = n > 0n;                                    // long with positive rate, or short with negative rate
+  const abs = n < 0n ? -n : n;
+  return pays ? -((abs + d - 1n) / d) : abs / d;
+}
+function scale9(s) {
+  const neg = s.startsWith('-');
+  const [i, f = ''] = (neg ? s.slice(1) : s).split('.');
+  if (f.length > 9) throw new Error(`rate ${s} has more than 9 decimals`);
+  const v = BigInt(i + f.padEnd(9, '0'));
+  return neg ? -v : v;
+}

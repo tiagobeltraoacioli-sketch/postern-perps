@@ -1493,6 +1493,44 @@
    ],
    "additionalProperties": false
   },
+  "SDecInt": {
+   "type": "string",
+   "pattern": "^-?(0|[1-9][0-9]*)$",
+   "description": "signed integer as a decimal string (USDC units)"
+  },
+  "AccountLeaf": {
+   "type": "object",
+   "properties": {
+    "account": {
+     "$ref": "#/$defs/Address"
+    },
+    "index": {
+     "$ref": "#/$defs/Int"
+    },
+    "balance": {
+     "$ref": "#/$defs/SDecInt"
+    },
+    "escapeValue": {
+     "$ref": "#/$defs/U64"
+    },
+    "positionsHash": {
+     "$ref": "#/$defs/Hash"
+    },
+    "encoded": {
+     "type": "string",
+     "pattern": "^0x[0-9a-f]{176}$"
+    }
+   },
+   "required": [
+    "account",
+    "index",
+    "balance",
+    "escapeValue",
+    "positionsHash",
+    "encoded"
+   ],
+   "additionalProperties": false
+  },
   "AccountProof": {
    "type": "object",
    "properties": {
@@ -1506,13 +1544,15 @@
      "$ref": "#/$defs/Hash"
     },
     "leafData": {
-     "type": "object"
+     "$ref": "#/$defs/AccountLeaf"
     },
     "proof": {
      "type": "array",
      "items": {
       "$ref": "#/$defs/Hash"
-     }
+     },
+     "minItems": 32,
+     "maxItems": 32
     },
     "index": {
      "$ref": "#/$defs/U64"
@@ -1525,6 +1565,210 @@
     "leafData",
     "proof",
     "index"
+   ],
+   "additionalProperties": false
+  },
+  "WithdrawalRecord": {
+   "type": "object"
+  },
+  "WithdrawalProof": {
+   "type": "object",
+   "properties": {
+    "withdrawalId": {
+     "$ref": "#/$defs/U64"
+    },
+    "count": {
+     "$ref": "#/$defs/U64"
+    },
+    "checkpointHeight": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Int"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "withdrawalsRoot": {
+     "$ref": "#/$defs/Hash"
+    },
+    "record": {
+     "$ref": "#/$defs/WithdrawalRecord"
+    },
+    "leaf": {
+     "$ref": "#/$defs/Hash"
+    },
+    "siblings": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Hash"
+     },
+     "minItems": 32,
+     "maxItems": 32
+    }
+   },
+   "required": [
+    "withdrawalId",
+    "count",
+    "checkpointHeight",
+    "withdrawalsRoot",
+    "record",
+    "leaf",
+    "siblings"
+   ],
+   "additionalProperties": false
+  },
+  "OracleIngestAck": {
+   "type": "object",
+   "properties": {
+    "round": {
+     "$ref": "#/$defs/U64"
+    },
+    "signer": {
+     "$ref": "#/$defs/Int"
+    },
+    "held": {
+     "$ref": "#/$defs/Int"
+    },
+    "quorum": {
+     "$ref": "#/$defs/Int"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "held",
+      "ready"
+     ]
+    },
+    "observations": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    }
+   },
+   "required": [
+    "round",
+    "held",
+    "quorum",
+    "status"
+   ],
+   "additionalProperties": false
+  },
+  "OracleRoundSigners": {
+   "type": "object",
+   "properties": {
+    "round": {
+     "$ref": "#/$defs/U64"
+    },
+    "signers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Int"
+     }
+    }
+   },
+   "required": [
+    "round",
+    "signers"
+   ],
+   "additionalProperties": false
+  },
+  "OracleRounds": {
+   "type": "object",
+   "properties": {
+    "enabled": {
+     "type": "boolean"
+    },
+    "quorum": {
+     "$ref": "#/$defs/Int"
+    },
+    "signers": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Address"
+     }
+    },
+    "gatherMs": {
+     "$ref": "#/$defs/Int"
+    },
+    "accepted": {
+     "$ref": "#/$defs/Int"
+    },
+    "refused": {
+     "$ref": "#/$defs/Int"
+    },
+    "conflicts": {
+     "$ref": "#/$defs/Int"
+    },
+    "roundsBuilt": {
+     "$ref": "#/$defs/Int"
+    },
+    "lastBuilt": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/OracleRoundSigners"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "lastAcceptedRound": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/U64"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "held": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "round": {
+        "$ref": "#/$defs/U64"
+       },
+       "signers": {
+        "type": "array",
+        "items": {
+         "$ref": "#/$defs/Int"
+        }
+       },
+       "quorumAtMs": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/Ms"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "required": [
+       "round",
+       "signers",
+       "quorumAtMs"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "required": [
+    "enabled",
+    "quorum",
+    "signers",
+    "gatherMs",
+    "accepted",
+    "refused",
+    "conflicts",
+    "roundsBuilt",
+    "held"
    ],
    "additionalProperties": false
   },
@@ -1747,6 +1991,33 @@
      ]
     },
     "includedHeight": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Int"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "arg": {
+     "$ref": "#/$defs/U64"
+    },
+    "outcome": {
+     "enum": [
+      "served",
+      "rejected",
+      "pending",
+      null
+     ]
+    },
+    "reason": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "processedHeight": {
      "anyOf": [
       {
        "$ref": "#/$defs/Int"

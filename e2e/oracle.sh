@@ -7,7 +7,8 @@ case $1 in
   prepare)
     ORACLE_LIST=$(e2e_ssh "$S/bin/oracle-prepare.sh $LABEL $KEEP") || { echo "oracle committee generation failed" >&2; exit 1; }
     case "$ORACLE_LIST" in 0x*,0x*) ;; *) echo "unexpected committee list from the host: $ORACLE_LIST" >&2; exit 1 ;; esac
-    NODE_ARGS="$NODE_ARGS --oracle-committee $ORACLE_LIST --oracle-quorum 5 --oracle-token-file \$HOME/$E2E_SCRATCH/run/oracle-token"
+    GEN="$GEN --oracle-committee $ORACLE_LIST --oracle-quorum 5"
+    NODE_ARGS="$NODE_ARGS --oracle-token-file \$HOME/$E2E_SCRATCH/run/oracle-token"
     ;;
   start)
     printf '%s\n' '{"p":{"1":"67250","2":"3480","3":"182.4"},"repeat":1000}' | e2e_ssh "$S/bin/feeder-start.sh $LABEL base --vault $VAULT --node http://127.0.0.1:$H_API --loop"

@@ -69,13 +69,25 @@ D["Fill"]=obj({"fillId":R("U64"),"tradeId":R("U64"),"orderId":R("U64"),"account"
  "liquidity":enum("maker","taker"),"realizedPnl":R("Dec"),"liquidation":{"type":"boolean"},"time":R("Ms"),"height":R("Int")})
 D["FundingPayment"]=obj({"symbol":R("Symbol"),"time":R("Ms"),"rate":R("Dec"),"positionSize":R("Dec"),"markPrice":R("UDec"),"payment":R("Dec")})
 D["Agent"]=obj({"agent":R("Address"),"name":{"type":"string","maxLength":64},"approvedAt":R("Ms"),"expiresAt":R("Ms"),"height":R("Int")})
-D["AccountProof"]=obj({"address":R("Address"),"checkpoint":R("Checkpoint"),"leaf":R("Hash"),"leafData":{"type":"object"},"proof":arr(R("Hash")),"index":R("U64")})
+# API 0.3 (431 b897344): leafData = the vault's Account struct fields (VAULT.md claimEscape) + the 88 leaf bytes; the proof is
+# exactly the 32 siblings of the depth-32 account tree. A looser shape here would let a node serve a proof the vault refuses.
+D["SDecInt"]={"type":"string","pattern":r"^-?(0|[1-9][0-9]*)$","description":"signed integer as a decimal string (USDC units)"}
+D["AccountLeaf"]=obj({"account":R("Address"),"index":R("Int"),"balance":R("SDecInt"),"escapeValue":R("U64"),"positionsHash":R("Hash"),"encoded":{"type":"string","pattern":r"^0x[0-9a-f]{176}$"}})
+D["AccountProof"]=obj({"address":R("Address"),"checkpoint":R("Checkpoint"),"leaf":R("Hash"),"leafData":R("AccountLeaf"),"proof":arr(R("Hash"),minItems=32,maxItems=32),"index":R("U64")})
+D["WithdrawalRecord"]={"type":"object"}
+D["WithdrawalProof"]=obj({"withdrawalId":R("U64"),"count":R("U64"),"checkpointHeight":nul(R("Int")),"withdrawalsRoot":R("Hash"),"record":R("WithdrawalRecord"),"leaf":R("Hash"),"siblings":arr(R("Hash"),minItems=32,maxItems=32)})
+D["OracleIngestAck"]={"type":"object","properties":{"round":R("U64"),"signer":R("Int"),"held":R("Int"),"quorum":R("Int"),"status":enum("held","ready"),"observations":arr({"type":"object"})},"required":["round","held","quorum","status"],"additionalProperties":False}
+D["OracleRoundSigners"]=obj({"round":R("U64"),"signers":arr(R("Int"))})
+D["OracleRounds"]=obj({"enabled":{"type":"boolean"},"quorum":R("Int"),"signers":arr(R("Address")),"gatherMs":R("Int"),"accepted":R("Int"),"refused":R("Int"),"conflicts":R("Int"),"roundsBuilt":R("Int"),
+ "lastBuilt":nul(R("OracleRoundSigners")),"lastAcceptedRound":nul(R("U64")),"held":arr(obj({"round":R("U64"),"signers":arr(R("Int")),"quorumAtMs":nul(R("Ms"))}))},opt=("lastBuilt","lastAcceptedRound"))
 D["Deposit"]=obj({"depositId":R("U64"),"account":R("Address"),"amount":R("UDec"),"l2TxHash":R("Hash"),"logIndex":R("Int"),"l2Block":R("Int"),"status":enum("seen","l2Finalized","credited"),"creditedHeight":nul(R("Int")),"time":R("Ms")})
 D["WithdrawalCertificate"]=obj({"digest":R("Hash"),"record":{"type":"object"},"checkpoint":R("Checkpoint"),"proof":arr(R("Hash")),"signatures":arr(R("CheckpointSig"))})
 D["Withdrawal"]=obj({"withdrawalId":R("U64"),"account":R("Address"),"recipient":R("Address"),"amount":R("UDec"),"fee":R("UDec"),
  "status":enum("requested","included","finalized","certified","submitted","delayed","paid","rejected"),"requestedHeight":R("Int"),"checkpointHeight":nul(R("Int")),
  "certificate":nul(R("WithdrawalCertificate")),"l2TxHash":nul(R("Hash")),"availableAt":nul(R("Ms")),"time":R("Ms")})
-D["ForcedAction"]=obj({"forcedId":R("U64"),"account":R("Address"),"kind":enum("cancelAll","close","withdraw"),"l2TxHash":R("Hash"),"l2Block":R("Int"),"deadlineTime":R("Ms"),"status":enum("queued","included","expired"),"includedHeight":nul(R("Int"))})
+D["ForcedAction"]=obj({"forcedId":R("U64"),"account":R("Address"),"kind":enum("cancelAll","close","withdraw"),"l2TxHash":R("Hash"),"l2Block":R("Int"),"deadlineTime":R("Ms"),"status":enum("queued","included","expired"),"includedHeight":nul(R("Int")),
+ # API 0.3 additions (optional: 0.2 servers omit them): the engine's verdict on the request (SPEC 14)
+ "arg":R("U64"),"outcome":{"enum":["served","rejected","pending",None]},"reason":{"type":["string","null"]},"processedHeight":nul(R("Int"))},opt=("arg","outcome","reason","processedHeight"))
 D["TypedField"]=obj({"name":{"type":"string","pattern":"^[a-zA-Z][a-zA-Z0-9]*$"},"type":{"type":"string","pattern":r"^(address|bool|string|bytes32|u?int(8|16|32|64|128|256))$"}})
 D["Domain"]=obj({"name":{"const":"PosternPerps"},"version":{"const":"1"},"chainId":{"const":700770},"verifyingContract":R("Address")})
 D["Eip712"]={"type":"object","properties":{"domain":R("Domain"),"scales":obj({"price":{"const":8},"size":{"const":8},"usdc":{"const":6}}),

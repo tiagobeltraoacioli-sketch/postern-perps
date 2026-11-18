@@ -1,17 +1,19 @@
 #!/bin/bash
 # Starts the local PosternDEX Perpetuals stack. UNAUDITED prototype: local processes, loopback only, throwaway keys.
 #
-#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--frontend] [--keep]
+#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--funding-ms MS] [--frontend] [--keep]
 #
 # Build host (loopback): L2 (anvil chain 700770 + the pass-through proxy as second endpoint), the node
 # (sequencer; validators in process and/or as separate processes), the oracle feeder. Mac: one ssh tunnel, the
 # frontend dev server. Everything started is recorded by PID (Mac: e2e/.run/*.pid; host: run/*.pid) and stopped by
 # e2e/down.sh. The tree <label> must have been built first: e2e/build.sh <label> [git-ref].
 # --tree is the Mac checkout of the same tree (contracts, frontend, mock); default the integration worktree.
+# --funding-ms: the dev genesis funding interval (default 60000 = one minute, so several intervals pass in one
+#   rehearsal; production is 3600000; 0 keeps the compliance value). A dev override of the node, shown in /v1/markets.
 # --keep restarts the node on its existing data directory (recovery) instead of a fresh one.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/config.sh"
-LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh
+LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000
 TREE=$HOME/worktrees/perps-e2e-r2-int-20261118; [ -d "$TREE" ] || TREE=$(cd "$HERE/.." && pwd)
 while [ $# -gt 0 ]; do
   case $1 in
@@ -22,6 +24,7 @@ while [ $# -gt 0 ]; do
     --frontend) FRONTEND=1; shift ;;
     --keep) KEEP=keep; shift ;;
     --tree) TREE=$2; shift 2 ;;
+    --funding-ms) FUNDING_MS=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -50,7 +53,11 @@ mac_start tunnel ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAl
 sleep 2; mac_alive tunnel || { echo "tunnel failed:" >&2; tail -3 "$RUN/tunnel.log" >&2; exit 1; }
 say "tunnel up: API http://127.0.0.1:$M_API, L2 http://127.0.0.1:$M_ANVIL"
 
-NODE_ARGS="--listen 127.0.0.1:$H_API --seed $E2E_SEED --block-ms 200 --checkpoint-interval 10 --dev-default-country ZZ"
+# GENESIS flags: every process of the deployment (sequencer, validators) gets the same ones or logHash(0) differs
+GEN="--seed $E2E_SEED --checkpoint-interval 10"
+[ "$FUNDING_MS" != 0 ] && GEN="$GEN --dev-funding-interval-ms $FUNDING_MS"
+NODE_ARGS="--listen 127.0.0.1:$H_API --block-ms 200 --dev-default-country ZZ"
+L2_ARGS=
 PROFILE=release
 VAULT=; TOKEN=
 
@@ -60,9 +67,10 @@ if [ "$L2" = anvil ]; then
   e2e_ssh "$S/bin/svc.sh start anvil \$HOME/.foundry/bin/anvil --host 127.0.0.1 --port $H_ANVIL --chain-id $E2E_CHAIN_ID --block-time 1 --slots-in-an-epoch 4 --silent && $S/bin/svc.sh start proxy python3 $S/bin/rpc-proxy.py http://127.0.0.1:$H_ANVIL $H_PROXY"
   wait_http "http://127.0.0.1:$M_PROXY/__fault" 20 "L2 proxy"
   . "$HERE/deploy.sh"   # sets VAULT, TOKEN; writes .run/deployment.json
-  NODE_ARGS="$NODE_ARGS --l2 http://127.0.0.1:$H_ANVIL,http://127.0.0.1:$H_PROXY --vault $VAULT --token $TOKEN"
+  GEN="$GEN --vault $VAULT"; NODE_ARGS="$NODE_ARGS --token $TOKEN"
+  L2_ARGS="--l2 http://127.0.0.1:$H_ANVIL,http://127.0.0.1:$H_PROXY --l2-poll-ms 1000"
 else
-  NODE_ARGS="$NODE_ARGS --l2 http://127.0.0.1:53512,http://127.0.0.1:53513"
+  L2_ARGS="--l2 http://127.0.0.1:53512,http://127.0.0.1:53513"
 fi
 
 # ---- oracle ----
@@ -72,6 +80,7 @@ else
   . "$HERE/oracle.sh" prepare   # token file + committee on the host; appends to NODE_ARGS
 fi
 [ "$LOCALV" != 7 ] && NODE_ARGS="$NODE_ARGS --local-validators $LOCALV"
+NODE_ARGS="$NODE_ARGS $GEN $L2_ARGS"
 
 # ---- node ----
 e2e_ssh "$S/bin/node-start.sh $LABEL $PROFILE $KEEP $NODE_ARGS"
@@ -94,7 +103,7 @@ fi
 # ---- separate validator processes (indices LOCALV..6) ----
 if [ "$LOCALV" != 7 ]; then
   for i in $(seq "$LOCALV" 6); do
-    e2e_ssh "$S/bin/validator-start.sh $LABEL $PROFILE $i fresh --seed $E2E_SEED --sequencer http://127.0.0.1:$H_API ${VAULT:+--vault $VAULT} $( [ "$L2" = anvil ] && echo --l2 http://127.0.0.1:$H_ANVIL,http://127.0.0.1:$H_PROXY || echo --l2 http://127.0.0.1:53512,http://127.0.0.1:53513 )"
+    e2e_ssh "$S/bin/validator-start.sh $LABEL $PROFILE $i fresh $GEN --sequencer http://127.0.0.1:$H_API $L2_ARGS"
   done
 fi
 
@@ -103,7 +112,7 @@ if [ "$FRONTEND" = 1 ]; then . "$HERE/frontend.sh"; fi
 
 cat > "$RUN/stack.json" <<JSON
 {"label": "$LABEL", "tree": "$TREE", "commit": "$(e2e_ssh "cat $S/src-$LABEL/.commit")", "l2": "$L2", "oracle": "$ORACLE", "localValidators": $LOCALV,
- "seed": "$E2E_SEED", "api": "http://127.0.0.1:$M_API", "l2Rpc": "http://127.0.0.1:$M_ANVIL", "l2Proxy": "http://127.0.0.1:$M_PROXY",
+ "seed": "$E2E_SEED", "genesisFlags": "$GEN", "fundingIntervalMs": $FUNDING_MS, "profile": "$PROFILE", "api": "http://127.0.0.1:$M_API", "l2Rpc": "http://127.0.0.1:$M_ANVIL", "l2Proxy": "http://127.0.0.1:$M_PROXY",
  "hostApi": "http://127.0.0.1:$H_API", "vault": "$VAULT", "token": "$TOKEN", "frontend": $( [ "$FRONTEND" = 1 ] && echo "\"http://127.0.0.1:$M_FRONTEND\"" || echo null ),
  "oracleCommittee": $( [ -n "${ORACLE_LIST:-}" ] && printf '["%s"]' "$(printf '%s' "$ORACLE_LIST" | sed 's/,/","/g')" || echo null ), "oracleQuorum": 5,
  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}

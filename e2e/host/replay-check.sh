@@ -1,22 +1,27 @@
 #!/bin/bash
-# Host side. usage: replay-check.sh <label> <node-url> <vault> <oracle-signers-csv> <quorum> [genesis-json-file]
+# Host side. usage: replay-check.sh <label> <node-url> <vault> <oracle-signers-csv> <quorum> <funding-ms|0> [genesis-json-file]
 # Independent replay: downloads the node's published input log, rebuilds the engine genesis from the compliance
-# files with the engine CLI (dev overrides: launch seeds 0, as node/src/engine/real.rs states), replays every block
+# files with the engine CLI (dev overrides, as node/src/engine/real.rs states them: launch seeds 0 and, when the stack
+# was started with one, the funding interval), replays every block
 # with the engine CLI (a separate binary from the node) and compares the state root and log hash of EVERY height
 # with what the node published. Prints one JSON line. UNAUDITED prototype.
 D=$HOME/l2dexbridge-20261030/perps-r2-e2e
-L=$1; URL=$2; VAULT=$3; SIGNERS=$4; Q=$5; GEN=${6:-}
+L=$1; URL=$2; VAULT=$3; SIGNERS=$4; Q=$5; FMS=${6:-0}; GEN=${7:-}
 W=$D/run/replay; rm -rf $W; mkdir -p $W
 E=$D/target-$L/release/engine
 [ -x $E ] || { echo '{"ok":false,"error":"no engine CLI built for this label"}'; exit 1; }
 curl -fsS -m 120 "$URL/v1/blocks/stream?from=1" > $W/blocks.ndjson || { echo '{"ok":false,"error":"cannot download the block stream"}'; exit 1; }
 if [ -n "$GEN" ]; then cp "$GEN" $W/genesis.json; else
   $E genesis $D/src-$L/compliance/markets.json $D/src-$L/compliance/risk.json --vault $VAULT --oracle-signers $SIGNERS --quorum $Q --backstop-seed 0 > $W/genesis.raw 2> $W/genesis.err || { echo "{\"ok\":false,\"error\":\"engine genesis failed: $(head -c 200 $W/genesis.err | tr -d '\"\n')\"}"; exit 1; }
-  python3 - $W <<'PY'
+  python3 - $W $FMS <<'PY'
 import json, sys
-w = sys.argv[1]
+w, fms = sys.argv[1], int(sys.argv[2])
 g = json.load(open(w + "/genesis.raw"))
 g["launchInsuranceMin"] = "0"; g["launchBackstopMin"] = "0"
+if fms:
+    for m in g["markets"]:
+        assert "fundingIntervalMs" in m
+        m["fundingIntervalMs"] = str(fms)
 json.dump(g, open(w + "/genesis.json", "w"), separators=(",", ":"))
 PY
 fi
