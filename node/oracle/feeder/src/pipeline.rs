@@ -40,6 +40,16 @@ pub enum ConfigError {
 }
 
 impl FeederConfig {
+    /// One Kraken request per round for all configured Kraken pairs (see [`crate::venues::batch_kraken`]).
+    pub fn with_kraken_batch(mut self) -> Self {
+        let mut all: Vec<&mut Source> = self.usdt_sources.iter_mut().collect();
+        for m in self.markets.iter_mut() {
+            all.extend(m.sources.iter_mut());
+        }
+        crate::venues::batch_kraken(&mut all);
+        self
+    }
+
     /// F1: one reading per operator per pair; enough configured sources to reach `min_sources`.
     pub fn validate(&self) -> Result<(), ConfigError> {
         for (i, m) in self.markets.iter().enumerate() {
@@ -73,22 +83,27 @@ fn check_sources(name: &str, s: &[Source], min: u8) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// The launch markets with the provisional scales of `node/fixtures/markets.json` (389) and the parameters of
-/// README section 8, until 392's `markets.json` and 388's SPEC fix them.
+/// Fraction digits of the engine's price scale: `PRICE_SCALE = 10^8` for EVERY market (`docs/SPEC.md` section 1).
+/// A market's `priceDecimals` in `compliance/markets.json` is display precision only and is never used here.
+pub const ENGINE_PRICE_DECIMALS: u8 = 8;
+
+/// The launch markets (`compliance/markets.json`: BTC-USD 1, ETH-USD 2, SOL-USD 3) with the parameters of README
+/// section 8. Prices are signed at the engine's price scale (R432-1: round 1 used the display decimals 1, 2, 3,
+/// which the engine would have read 10^7, 10^6 and 10^5 times too small).
 pub fn default_config() -> FeederConfig {
-    let m = |id, sym: &str, base, dec| MarketConfig {
+    let m = |id, sym: &str, base| MarketConfig {
         market_id: id,
         symbol: sym.into(),
-        price_decimals: dec,
+        price_decimals: ENGINE_PRICE_DECIMALS,
         min_sources: 3,
         max_source_deviation_bps: 200,
         sources: default_sources(base),
     };
     FeederConfig {
         markets: vec![
-            m(1, "BTC-USD", "BTC", 1),
-            m(2, "ETH-USD", "ETH", 2),
-            m(3, "SOL-USD", "SOL", 3),
+            m(1, "BTC-USD", "BTC"),
+            m(2, "ETH-USD", "ETH"),
+            m(3, "SOL-USD", "SOL"),
         ],
         usdt_sources: default_sources("USDT"),
         usdt_min_sources: 3,
