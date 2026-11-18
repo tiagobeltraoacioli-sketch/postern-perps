@@ -386,3 +386,28 @@ fn check_r436_funding_rate_and_payments_equal_a_hand_computation() {
     // the residual goes to dust, and whole units of dust are swept into INSURANCE in the same block (SPEC 8)
     assert_eq!(r.e.dust - dust0 + (r.ins() - ins0) * 10_000_000_000, (pays - gets) * 10_000_000_000, "the residual went to dust / insurance (I-2)");
 }
+
+/// R436-13 (Low). A stop-limit (or take-profit-limit) order signed with `timeInForce = IOC` is accepted, and when
+/// its trigger fires it is entered as GTC (engine.rs:1479: `tif = if is_market { IOC } else { GTC }`; the stored
+/// order keeps no time in force): the unfilled remainder RESTS on the book although the user signed
+/// immediate-or-cancel. S-0.4: a value is honoured or refused, never coerced (SPEC S-4.6 says types 3 and 5 enter
+/// as limit GTC, so the IOC value must be MALFORMED at placement, or be kept and honoured).
+#[test]
+fn r436_13_stop_limit_signed_ioc_rests_as_gtc_when_it_fires() {
+    let mut r = Rig::new();
+    let k = key(4411);
+    let a = addr(&k);
+    let d = r.dep(a, usdc(50_000));
+    all_ok(&r.block(P, vec![d]));
+    let n = r.n();
+    // stop-limit BUY, IOC, trigger already met (mark >= trigger), limit 5 USD below the mark, empty book
+    let o = r.act(&k, Action::PlaceOrder(PlaceOrder { account: a, nonce: n, market_id: BTC, is_buy: true, order_type: ORDER_STOP_LIMIT, time_in_force: TIF_IOC, price: P - 50 * TICK, size: ONE / 10, reduce_only: false, trigger_price: P - 10 * TICK, client_order_id: [0u8; 32] }));
+    let out = r.block(P, vec![o]);
+    all_ok(&out);
+    assert!(out.events.iter().any(|e| matches!(e, Event::Triggered { .. })), "the trigger fired in the same block");
+    let rested = out.events.iter().any(|e| matches!(e, Event::Rested { .. }));
+    let ai = r.e.by_addr[&a];
+    println!("signed IOC; after the trigger fired: Rested event = {rested}, orders of the account on the book = {}", r.e.accounts[ai as usize].orders.len());
+    assert!(rested && r.e.accounts[ai as usize].orders.len() == 1, "the IOC order rests as GTC");
+    assert_eq!(r.e.markets[&BTC].book.best_bid(), Some(P - 50 * TICK));
+}
