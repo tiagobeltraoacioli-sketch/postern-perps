@@ -52,6 +52,12 @@ pub struct App {
     pub block_interval_ms: u64,
     pub started_ms: u64,
     pub l2_configured: bool,
+    /// The collateral token (bUSDC) address of the deployment (display only; zero when not configured).
+    pub collateral_token: crate::util::Address,
+    /// Bearer token of the oracle ingest paths (`--oracle-token-file`); `None` = ingest disabled.
+    pub oracle_token: Option<Vec<u8>>,
+    /// The checkpoint relayer's view of the vault (`crate::relayer`). Lock order: `seq` before `relay`.
+    pub relay: Mutex<crate::relayer::RelayState>,
 }
 
 pub fn now_ms() -> u64 {
@@ -70,8 +76,16 @@ pub fn ip_key(ip: IpAddr) -> [u8; 20] {
 
 impl App {
     pub fn new(g: Arc<Genesis>, seq: Sequencer, geo: GeoPolicy, mode: Mode, view: SharedView, block_interval_ms: u64, l2_configured: bool) -> Arc<App> {
+        Self::with(g, seq, geo, mode, view, block_interval_ms, l2_configured, [0u8; 20], None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with(g: Arc<Genesis>, seq: Sequencer, geo: GeoPolicy, mode: Mode, view: SharedView, block_interval_ms: u64, l2_configured: bool, collateral_token: crate::util::Address, oracle_token: Option<Vec<u8>>) -> Arc<App> {
         let (tx, _) = broadcast::channel(4096);
         Arc::new(App {
+            collateral_token,
+            oracle_token,
+            relay: Mutex::new(crate::relayer::RelayState::default()),
             g,
             seq: Mutex::new(seq),
             geo,

@@ -18,6 +18,7 @@
 
 pub mod real;
 pub mod stub;
+pub mod view;
 
 use crate::types::Input;
 use crate::util::{keccak_parts, Address, H256};
@@ -36,6 +37,9 @@ pub struct BlockOutcome {
     pub events: Vec<serde_json::Value>,
     /// Withdrawal ids created by this block.
     pub withdrawals: Vec<u64>,
+    /// The real engine's typed events of this block, in execution order (empty for the stub). Read by the
+    /// market-data index (`crate::index`); never by consensus code.
+    pub typed: Vec<postern_perps_engine::Event>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -210,6 +214,10 @@ pub trait Engine: Send + Sync {
     fn agents_json(&self, a: &Address) -> serde_json::Value;
     fn name(&self) -> &'static str;
     fn clone_box(&self) -> Box<dyn Engine>;
+    /// The real engine behind this adapter (`None` for the stub): read-only access for the API views and the index.
+    fn real(&self) -> Option<&postern_perps_engine::Engine> {
+        None
+    }
     /// The market table the engine ENFORCES, as API `Market` objects (R393-N1: the API publishes exactly this).
     fn market_table(&self, _g: &crate::genesis::Genesis) -> Option<Vec<serde_json::Value>> {
         None

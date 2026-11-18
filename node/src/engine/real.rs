@@ -73,6 +73,7 @@ impl Engine for RealEngine {
             }
             bo.events.push(serde_json::Value::String(format!("{ev:?}")));
         }
+        bo.typed = out.events;
         Ok(bo)
     }
     fn state_root(&self) -> H256 {
@@ -194,6 +195,9 @@ impl Engine for RealEngine {
     fn name(&self) -> &'static str {
         "postern-perps-engine"
     }
+    fn real(&self) -> Option<&pe::Engine> {
+        Some(&self.e)
+    }
     fn market_table(&self, g: &Genesis) -> Option<Vec<serde_json::Value>> {
         use crate::util::scaled_to_decimal as d;
         let frac = |ppm: u32| d(ppm as u128, 6);
@@ -275,10 +279,19 @@ pub fn trim(s: String) -> String {
 /// (single source for the table the engine enforces and the API publishes, R393-N1), bound to the node's
 /// committee and vault. Dev overrides, stated: backstop seed 0 and launch insurance minimum 0 (the real values are
 /// owner inputs; with them nothing trades until the funds are seeded).
-pub fn dev_engine_genesis_compliance(g: &Genesis, markets: &serde_json::Value, risk: &serde_json::Value) -> Result<pe::genesis::Checked, String> {
+pub fn dev_engine_genesis_compliance(g: &Genesis, markets: &serde_json::Value, risk: &serde_json::Value, funding_interval_ms: Option<u64>) -> Result<pe::genesis::Checked, String> {
     let signers = g.oracle_committee.iter().map(|a| to_hex(a)).collect();
     let mut eg = pe::genesis::from_compliance(markets, risk, &to_hex(&g.vault), signers, g.oracle_quorum as u8, "0", 250_000)?;
     eg.launch_insurance_min = 0;
     eg.launch_backstop_min = 0;
+    // DEV override (stated in `dev::DevOptions`): a shorter funding interval for rehearsals; part of the genesis hash
+    if let Some(iv) = funding_interval_ms {
+        if iv < 10_000 {
+            return Err("dev funding interval below 10 s refused".into());
+        }
+        for m in eg.markets.iter_mut() {
+            m.funding_interval_ms = iv;
+        }
+    }
     eg.check()
 }

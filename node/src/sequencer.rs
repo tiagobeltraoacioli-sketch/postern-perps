@@ -18,6 +18,8 @@ use crate::actions::{parse_request, verify_signed_action, ActionError};
 use crate::checkpoint::{verify_checkpoint_json, Aggregator, CheckpointBody};
 use crate::engine::{AuthorityError, BlockOutcome, Engine};
 use crate::genesis::Genesis;
+use crate::index::{IndexDelta, Indexer, PreInfo};
+use crate::oracle_pool::OraclePool;
 use crate::log::{block_digest, list_snapshots, read_snapshot, write_snapshot, InputLog, SnapshotMeta};
 use crate::sig::{key_address, sign};
 use crate::types::{decode_inputs, encode_inputs, log_hash, Block, BlockHeader, Input, OracleUpdate, SignedAction};
@@ -25,7 +27,7 @@ use crate::util::{to_hex, Address, H256};
 use crate::validator::{checkpoint_body, is_checkpoint_height};
 use crate::watcher::SharedView;
 use k256::ecdsa::SigningKey;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -111,7 +113,15 @@ pub struct BlockInfo {
     pub outcome: BlockOutcome,
     /// API `BookDelta` objects of this block, one per market whose book changed
     pub book_deltas: Vec<serde_json::Value>,
+    /// What the block changed in the market-data index (`None` with the stub engine)
+    pub delta: Option<IndexDelta>,
 }
+
+/// Checkpoint heights whose engine state is kept for account proofs: at most this many FINAL ones (the newest),
+/// every pinned one (checkpoints the relayer submitted to the vault), and at most `FRAMES_UNFINAL_KEEP` not yet
+/// final ones above the latest final.
+pub const FRAMES_FINAL_KEEP: usize = 8;
+pub const FRAMES_UNFINAL_KEEP: usize = 32;
 
 /// Per market: (seq, bids, asks) of the last published book, engine units.
 pub type BookState = (u64, Vec<(u64, u64)>, Vec<(u64, u64)>);
@@ -152,6 +162,14 @@ pub struct Sequencer {
     checkpoints_file: PathBuf,
     pub halted: Option<String>,
     pub books: BTreeMap<u32, BookState>,
+    /// The market-data index (real engine only): orders, fills, trades, candles, funding. Not consensus.
+    pub index: Option<Indexer>,
+    /// Oracle observations gathered per round (`crate::oracle_pool`)
+    pub oracle_pool: OraclePool,
+    /// checkpoint height -> the real engine's state after that block (account proofs, `?finalized=true` reads)
+    pub frames: BTreeMap<u64, Arc<postern_perps_engine::Engine>>,
+    /// checkpoint heights never pruned from `frames` (submitted to the vault)
+    pub pinned_frames: BTreeSet<u64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -228,15 +246,30 @@ impl Sequencer {
             recovered,
             halted: None,
             books: BTreeMap::new(),
+            index: None,
+            oracle_pool: OraclePool::default(),
+            frames: BTreeMap::new(),
+            pinned_frames: BTreeSet::new(),
         };
+        s.pinned_frames = read_pinned(&s.data_dir);
+        if let Some(e) = s.engine.real() {
+            let mut ix = Indexer::new(&g);
+            if start > 0 {
+                // recovered from a snapshot: the index covers the blocks after it (history before it is not served)
+                ix.from_height = start + 1;
+                ix.resync_shadow(e);
+            }
+            s.index = Some(ix);
+        }
         for h in (start + 1)..=s.log.last_height {
             let b = s.log.read(h)?.ok_or("log read")?;
             let inputs = decode_inputs(&g.types, &b.inputs_encoded)?;
+            let pre = s.engine.real().map(PreInfo::of);
             let out = s.engine.apply_block(h, b.header.time, &inputs).map_err(|e| format!("replay of block {h} refused: {e}"))?;
             if s.engine.state_root() != b.header.state_root {
                 return Err(format!("replay of block {h}: state root differs from the logged one: refusing to start"));
             }
-            s.after_apply(&b, &inputs, &out);
+            s.after_apply(&b, &inputs, &out, pre.as_ref());
             s.recovered.replayed_blocks += 1;
         }
         // reload final checkpoints, each re-verified and matched to the log
@@ -260,11 +293,16 @@ impl Sequencer {
                 s.recovered.checkpoints_loaded += 1;
             }
         }
+        s.prune_frames();
         Ok(s)
     }
 
-    fn after_apply(&mut self, b: &Block, inputs: &[Input], out: &BlockOutcome) {
+    fn after_apply(&mut self, b: &Block, inputs: &[Input], out: &BlockOutcome, pre: Option<&PreInfo>) {
         let h = b.header.height;
+        let delta = match (self.index.as_mut(), pre, self.engine.real()) {
+            (Some(ix), Some(pre), Some(post)) => Some(ix.apply(&self.g, pre, post, h, b.header.time, inputs, &out.outcomes, &out.typed)),
+            _ => None,
+        };
         for w in &out.withdrawals {
             self.withdrawal_heights.insert(*w, h);
         }
@@ -285,6 +323,10 @@ impl Sequencer {
                 Ok(body) => {
                     drop(v);
                     self.aggregator.expect(&self.g, body);
+                    if let Some(e) = self.engine.real() {
+                        self.frames.insert(h, Arc::new(e.clone()));
+                        self.prune_frames();
+                    }
                 }
                 Err(e) => eprintln!("checkpoint body at {h} not built: {e}"),
             }
@@ -293,7 +335,7 @@ impl Sequencer {
             if let (Input::Action(_), Some(ah)) = (inp, o.action_hash) {
                 let mut result = serde_json::json!({"ok": o.ok, "error": o.error});
                 for k in ["orderId", "orderStatus", "filledSize", "withdrawalId"] {
-                    if let Some(v) = o.result.get(k) {
+                    if let Some(v) = o.result.get(k).or_else(|| delta.as_ref().and_then(|d| d.results.get(&i)).and_then(|r| r.get(k))) {
                         result[k] = v.clone();
                     }
                 }
@@ -325,7 +367,7 @@ impl Sequencer {
                 "bids": levels_json(&db, m.price_decimals, m.size_decimals), "asks": levels_json(&da, m.price_decimals, m.size_decimals)}));
             self.books.insert(m.market_id, (seq, bids, asks));
         }
-        let info = Arc::new(BlockInfo { block: Arc::new(b.clone()), outcome: out.clone(), book_deltas });
+        let info = Arc::new(BlockInfo { block: Arc::new(b.clone()), outcome: out.clone(), book_deltas, delta });
         self.recent.push_back(info);
         while self.recent.len() > self.recent_keep {
             self.recent.pop_front();
@@ -402,8 +444,14 @@ impl Sequencer {
         let mut inputs = Vec::new();
         let last_round = self.engine.last_oracle_round();
         self.pending_oracle.retain(|r, _| *r > last_round);
-        if let Some((_, u)) = self.pending_oracle.iter().next_back() {
-            inputs.push(Input::Oracle(u.clone()));
+        // the newest round on offer: a whole update queued by `submit_oracle` (dev oracle, tests) or the newest
+        // READY round of the ingest pool (every observation held for it)
+        let pooled = self.oracle_pool.take_ready(&self.g, last_round, now_ms);
+        let queued = self.pending_oracle.iter().next_back().map(|(_, u)| u.clone());
+        match (pooled, queued) {
+            (Some(p), Some(q)) => inputs.push(Input::Oracle(if p.round >= q.round { p } else { q })),
+            (Some(u), None) | (None, Some(u)) => inputs.push(Input::Oracle(u)),
+            (None, None) => {}
         }
         {
             let v = self.view.lock().unwrap();
@@ -450,6 +498,7 @@ impl Sequencer {
             self.halted = Some(format!("log append failed: {e}"));
             return Err(self.halted.clone().unwrap());
         }
+        let pre = self.engine.real().map(PreInfo::of);
         self.engine = next;
         // pending nonces that are now in the engine can be forgotten
         for (a, _) in &actions {
@@ -462,7 +511,7 @@ impl Sequencer {
                 }
             }
         }
-        self.after_apply(&b, &inputs, &out);
+        self.after_apply(&b, &inputs, &out, pre.as_ref());
         if self.snapshot_every > 0 && height % self.snapshot_every == 0 && !self.engine.snapshot().is_empty() {
             let meta = SnapshotMeta { height, time, log_hash: lh, state_root: b.header.state_root };
             if let Err(e) = write_snapshot(&self.data_dir, &meta, self.engine.name(), &self.engine.snapshot(), 2) {
@@ -481,6 +530,7 @@ impl Sequencer {
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&self.checkpoints_file).map_err(|e| e.to_string())?;
             writeln!(f, "{line}").map_err(|e| e.to_string())?;
             f.sync_data().map_err(|e| e.to_string())?;
+            self.prune_frames();
             return Ok(true);
         }
         Ok(false)
@@ -542,4 +592,181 @@ impl Sequencer {
     pub fn mempool_len(&self) -> usize {
         self.mempool.len()
     }
+
+    fn is_final(&self, h: u64) -> bool {
+        self.aggregator.by_height.get(&h).is_some_and(|c| c.sigs.len() >= self.g.threshold)
+    }
+
+    /// Frame retention (see `FRAMES_FINAL_KEEP`): pinned heights, the newest final ones, and the not yet final
+    /// ones above the latest final.
+    fn prune_frames(&mut self) {
+        let lf = self.aggregator.latest_final.unwrap_or(0);
+        let finals: Vec<u64> = self.frames.keys().copied().filter(|h| *h <= lf && self.is_final(*h)).collect();
+        let keep_final: BTreeSet<u64> = finals.iter().rev().take(FRAMES_FINAL_KEEP).copied().collect();
+        let unfinal: Vec<u64> = self.frames.keys().copied().filter(|h| *h > lf).collect();
+        let keep_unfinal: BTreeSet<u64> = unfinal.iter().rev().take(FRAMES_UNFINAL_KEEP).copied().collect();
+        let pinned = self.pinned_frames.clone();
+        self.frames.retain(|h, _| keep_final.contains(h) || keep_unfinal.contains(h) || pinned.contains(h));
+    }
+
+    /// Pins the frame of a checkpoint height (the relayer calls this for every checkpoint the vault accepted); the
+    /// newest `keep` pins stay. Persisted, so a restart rebuilds exactly these frames during replay.
+    pub fn pin_frame(&mut self, height: u64, keep: usize) {
+        self.pinned_frames.insert(height);
+        while self.pinned_frames.len() > keep.max(1) {
+            let k = *self.pinned_frames.iter().next().unwrap();
+            self.pinned_frames.remove(&k);
+        }
+        let v: Vec<u64> = self.pinned_frames.iter().copied().collect();
+        let _ = std::fs::write(self.data_dir.join("pinned-frames.json"), serde_json::json!({"heights": v}).to_string());
+        self.prune_frames();
+    }
+
+    /// The real engine's state at the latest final checkpoint, if its frame is held.
+    pub fn final_frame(&self) -> Option<(u64, Arc<postern_perps_engine::Engine>)> {
+        let h = self.aggregator.latest_final?;
+        self.frames.get(&h).map(|e| (h, e.clone()))
+    }
+
+    /// VAULT.md `claimEscape` input for `addr` against the FINAL checkpoint at `height` (default: the latest
+    /// final): the account leaf fields, its 32 siblings, and the checkpoint with its signatures. Checked here
+    /// before it is served: the leaf and the siblings must reproduce the checkpoint's `accountsRoot`.
+    pub fn account_proof(&self, addr: &Address, height: Option<u64>) -> Result<serde_json::Value, String> {
+        use postern_perps_engine as pe;
+        let h = match height {
+            Some(h) => h,
+            None => self.aggregator.latest_final.ok_or("no final checkpoint yet")?,
+        };
+        if !self.is_final(h) {
+            return Err(format!("no final checkpoint at height {h}"));
+        }
+        let e = self.frames.get(&h).ok_or_else(|| format!("the state at checkpoint {h} is no longer held by this node (held: {:?})", self.frames.keys().collect::<Vec<_>>()))?;
+        let c = self.aggregator.by_height.get(&h).ok_or("checkpoint vanished")?;
+        let (data, index, siblings) = e.account_proof(addr).ok_or("the account does not exist at this checkpoint")?;
+        let leaf = pe::merkle::leaf_hash(&data);
+        // recompute the root from the leaf and the siblings exactly as the vault does (VAULT.md 5.5)
+        let mut node = leaf;
+        for (i, s) in siblings.iter().enumerate() {
+            node = if (index >> i) & 1 == 1 { crate::util::keccak_parts(&[&[0x01], s, &node]) } else { crate::util::keccak_parts(&[&[0x01], &node, s]) };
+        }
+        if siblings.len() != pe::engine::ACCOUNT_DEPTH || node != c.body.accounts_root {
+            return Err("internal: the proof does not reproduce the checkpoint's accountsRoot (not served)".into());
+        }
+        let a = &e.accounts[index as usize];
+        let escape = e.escape_value(index);
+        // data = "PPv1acct" || account:20 || be32 index || be128 balance || be64 escapeValue || positionsHash:32
+        let positions_hash = &data[data.len() - 32..];
+        let bh = self.block(h).ok().flatten().map(|b| b.header.log_hash);
+        Ok(serde_json::json!({
+            "address": to_hex(addr), "checkpoint": self.aggregator.checkpoint_json(&self.g, h, bh),
+            "leaf": to_hex(&leaf),
+            "leafData": {"account": to_hex(&a.address), "index": index, "balance": a.balance.to_string(), "escapeValue": escape.to_string(),
+                "positionsHash": to_hex(positions_hash), "encoded": to_hex(&data)},
+            "proof": siblings.iter().map(|s| to_hex(s)).collect::<Vec<_>>(), "index": index.to_string(),
+        }))
+    }
+
+    /// VAULT.md `withdraw(seq, w, siblings, want)` input for withdrawal `id` against a tree of the first `count`
+    /// records (`withdrawalCountAt(seq)` of the accepted checkpoint the caller will name), checked against the
+    /// root of that prefix before it is served.
+    pub fn withdrawal_proof(&self, id: u64, count: Option<u64>, height: Option<u64>) -> Result<serde_json::Value, String> {
+        let rec = self.engine.withdrawal(id).ok_or("unknown withdrawal")?;
+        let (count, cp_height) = match (count, height) {
+            (Some(c), _) => (c, None),
+            (None, Some(h)) => {
+                if !self.is_final(h) {
+                    return Err(format!("no final checkpoint at height {h}"));
+                }
+                (self.aggregator.by_height.get(&h).map(|c| c.body.withdrawal_count).ok_or("checkpoint vanished")?, Some(h))
+            }
+            (None, None) => {
+                let h = self.aggregator.latest_final.ok_or("no final checkpoint yet")?;
+                (self.aggregator.by_height.get(&h).map(|c| c.body.withdrawal_count).ok_or("checkpoint vanished")?, Some(h))
+            }
+        };
+        if id >= count {
+            return Err(format!("withdrawal {id} is not in a tree of {count} records (not yet in that checkpoint)"));
+        }
+        let siblings = self.engine.withdrawal_proof(id, count).ok_or("count is above the number of withdrawals")?;
+        let leaf = rec.leaf();
+        let mut node = leaf;
+        for (i, s) in siblings.iter().enumerate() {
+            node = if (id >> i) & 1 == 1 { crate::util::keccak_parts(&[&[0x01], s, &node]) } else { crate::util::keccak_parts(&[&[0x01], &node, s]) };
+        }
+        if let Some(h) = cp_height {
+            if self.aggregator.by_height.get(&h).map(|c| c.body.withdrawals_root) != Some(node) {
+                return Err("internal: the proof does not reproduce the checkpoint's withdrawalsRoot (not served)".into());
+            }
+        }
+        Ok(serde_json::json!({
+            "withdrawalId": id.to_string(), "count": count.to_string(), "checkpointHeight": cp_height, "withdrawalsRoot": to_hex(&node),
+            "record": {"withdrawalId": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient), "amount": rec.amount.to_string(), "height": rec.height.to_string()},
+            "leaf": to_hex(&leaf), "siblings": siblings.iter().map(|s| to_hex(s)).collect::<Vec<_>>(),
+        }))
+    }
+
+    /// API `Ticker` of a market from the engine and the index (`None` with the stub engine).
+    pub fn ticker_json(&self, market_id: u32) -> Option<serde_json::Value> {
+        use crate::engine::view;
+        let e = self.engine.real()?;
+        let ix = self.index.as_ref()?;
+        let m = e.markets.get(&market_id)?;
+        let (rate, next) = view::predicted_funding(e, market_id);
+        let (vol, hi, lo, ago) = ix.stats_24h(market_id, e.time);
+        let last = ix.last_trade(market_id).map(|x| x.0);
+        // change24h = (last - price24hAgo) / price24hAgo, truncated to 6 decimals
+        let change = match (last, ago) {
+            (Some(l), Some(a)) if a > 0 => crate::engine::real::trim(crate::util::scaled_to_decimal_signed((l as i128 - a as i128) * 1_000_000 / a as i128, 6)),
+            _ => "0".to_string(),
+        };
+        let z = || "0".to_string();
+        Some(serde_json::json!({
+            "symbol": m.p.symbol, "markPrice": view::exact8(m.mark), "indexPrice": view::exact8(m.oracle.index),
+            "lastPrice": last.map(view::exact8).unwrap_or_else(z), "fundingRate": view::rate9(rate), "nextFundingTime": next,
+            "openInterest": view::exact8(m.long_oi), "volume24h": view::usdc((vol / postern_perps_engine::num::N_PER_USDC as u128) as i128),
+            "high24h": hi.map(view::exact8).unwrap_or_else(z), "low24h": lo.map(view::exact8).unwrap_or_else(z),
+            "price24hAgo": ago.map(view::exact8).unwrap_or_else(z), "change24h": change, "height": e.height, "time": e.time,
+        }))
+    }
+
+    /// API `Account` from the real engine (`finalized`: at the latest final checkpoint), else the stub's object.
+    pub fn account_view(&self, a: &Address, finalized: bool) -> Result<serde_json::Value, String> {
+        use crate::engine::view;
+        if finalized {
+            let (_, e) = self.final_frame().ok_or("no final checkpoint state is held yet")?;
+            // realised PnL and funding since open are index values of the LATEST state: zero in a finalized read
+            return Ok(view::account_json(&e, a, &|_| view::PositionExtras::default()));
+        }
+        Ok(match (self.engine.real(), self.index.as_ref()) {
+            (Some(e), Some(ix)) => {
+                let ai = e.by_addr.get(a).copied();
+                view::account_json(e, a, &|mid| ai.map(|ai| ix.extras(ai, mid)).unwrap_or_default())
+            }
+            _ => self.engine.account_json(a),
+        })
+    }
+
+    /// API `Agent` objects (approvedAt / height from the index; 0 when the approval predates the index).
+    pub fn agents_view(&self, a: &Address) -> serde_json::Value {
+        let (Some(e), Some(ix)) = (self.engine.real(), self.index.as_ref()) else { return self.engine.agents_json(a) };
+        let Some(ai) = e.by_addr.get(a) else { return serde_json::json!({"agents": []}) };
+        let v: Vec<_> = e.accounts[*ai as usize]
+            .agents
+            .iter()
+            .filter(|(_, x)| x.expires_at > e.time)
+            .map(|(ag, x)| {
+                let (at, h) = ix.agent_meta(a, ag).unwrap_or((0, 0));
+                serde_json::json!({"agent": to_hex(ag), "name": x.name, "approvedAt": at, "expiresAt": x.expires_at, "height": h})
+            })
+            .collect();
+        serde_json::json!({"agents": v})
+    }
+}
+
+fn read_pinned(dir: &std::path::Path) -> BTreeSet<u64> {
+    std::fs::read(dir.join("pinned-frames.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|j| j["heights"].as_array().map(|a| a.iter().filter_map(|x| x.as_u64()).collect()))
+        .unwrap_or_default()
 }
