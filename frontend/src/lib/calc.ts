@@ -1,60 +1,51 @@
 /**
  * Every calculation the interface shows to a user: notional, margin, fees, PnL, liquidation price, funding, account
- * summary, market-order fill estimate, order preview. Integer arithmetic only, rounding stated at each step
- * (requirements round up, what the user receives rounds down), mirroring the engine's rules.
+ * summary, market-order fill estimate, order preview. UNAUDITED prototype.
  *
- * UNAUDITED prototype. The formulas are the brief's (USDC cross margin, isolated as an option, margin tiers by
- * position notional, maker/taker fees, hourly funding). They are a frontend fixture until docs/SPEC.md (agent 350)
- * publishes the canonical rules and worked examples; src/test/calc.test.ts holds the worked examples used here.
- * A figure computed here is always labelled an estimate in the interface: the engine's state is the truth.
+ * Round 2: the arithmetic is the ENGINE's (lib/exact.ts: docs/SPEC.md 0.2.2 formula by formula, pinned by the
+ * engine's 755 worked-example values). This file only adapts it to what the screens need: USDC amounts (requirements
+ * and fees rounded up, values owed to the account rounded down, as docs/API.md 1 "Rounding of displayed values"),
+ * prices put on the tick against the user, and the account-level sums. Round 1's own formulas (whole notional x tier
+ * rate less a deduction; notional floored to USDC before the fee; a funding rate in 1e-8) are gone: they differed
+ * from the engine by a unit in places, and the leverage fraction was not the engine's. Every test of round 1 is kept,
+ * restated in these terms (src/test/lib.test.ts).
+ *
+ * A figure computed here is still labelled an estimate in the interface: it is exact for the inputs the page holds
+ * (a position's open notional is taken as size x entry price, and the API's entry price is truncated to 1e-8), and
+ * the engine's state is the truth.
  */
-import { NOTIONAL_DIV, RATE, abs, max, min, mulDiv, toTick } from './fixed';
+import { NOTIONAL_DIV, abs, max, min, mulDiv, toTick } from './fixed';
+import * as E from './exact';
 
 export type Side = 'long' | 'short';
 export const dir = (side: Side) => (side === 'long' ? 1n : -1n);
 
-/** A margin tier: applies while the position notional is at most `upTo` (USDC units; the last tier has null). */
-export type Tier = {
-  upTo: bigint | null;
-  maxLeverage: number;
-  /** Maintenance margin rate in parts per million of notional. */
-  mmrPpm: bigint;
-  /** Maintenance deduction (USDC units) that makes the requirement continuous across tiers. */
-  deduction: bigint;
-};
+/**
+ * A margin tier as the exchange publishes it (docs/API.md `marginTiers`): it applies to the part of a position's
+ * notional at or above `floor` (USDC units), up to the next tier's floor.
+ */
+export type Tier = E.Tier & { maxLeverage: number };
 
 export type Fees = { takerPpm: bigint; makerPpm: bigint };
 export const BASE_FEES: Fees = { takerPpm: 450n, makerPpm: 150n }; // 4.5 bps and 1.5 bps
 
 const PPM = 1_000_000n;
 
-/** Notional in USDC units of `size` (absolute, size scale) at `px`. */
+/** Notional in USDC units of `size` (absolute, size scale) at `px`, for display (rounded as asked). */
 export function notional(size: bigint, px: bigint, rounding: 'floor' | 'ceil' = 'floor'): bigint {
   return mulDiv(abs(size), px, NOTIONAL_DIV, rounding);
 }
 
+/** The tier that holds the LAST unit of a position of this notional (USDC units): its leverage ceiling applies. */
 export function tierFor(tiers: Tier[], notionalUsdc: bigint): Tier {
-  for (const tier of tiers) if (tier.upTo === null || notionalUsdc <= tier.upTo) return tier;
-  return tiers[tiers.length - 1];
+  let found = tiers[0];
+  for (const tier of tiers) if (notionalUsdc > tier.floor || tier === tiers[0]) found = tier;
+  return found;
 }
 
-/** Builds continuous deductions for a tier table given as (upTo, maxLeverage, mmrPpm). */
-export function withDeductions(rows: { upTo: bigint | null; maxLeverage: number; mmrPpm: bigint }[]): Tier[] {
-  const tiers: Tier[] = [];
-  let deduction = 0n;
-  let previous: { upTo: bigint | null; mmrPpm: bigint } | null = null;
-  for (const row of rows) {
-    if (previous && previous.upTo !== null) deduction += mulDiv(previous.upTo, row.mmrPpm - previous.mmrPpm, PPM, 'floor');
-    tiers.push({ ...row, deduction });
-    previous = row;
-  }
-  return tiers;
-}
-
-/** Maintenance margin of a position of this notional: notional x rate, rounded up, less the tier's deduction. */
-export function maintenanceMargin(tiers: Tier[], notionalUsdc: bigint): bigint {
-  const tier = tierFor(tiers, notionalUsdc);
-  return max(0n, mulDiv(notionalUsdc, tier.mmrPpm, PPM, 'ceil') - tier.deduction);
+/** Maintenance margin (USDC, rounded up) of |size| at `px`: SPEC 6.2 continuous piecewise schedule. */
+export function maintenanceMargin(tiers: Tier[], size: bigint, px: bigint): bigint {
+  return E.usdcCeil(E.maintenanceReq(tiers, E.notionalOf(size, px)));
 }
 
 /** Highest leverage the tiers allow at this notional. */
@@ -62,19 +53,19 @@ export function maxLeverageAt(tiers: Tier[], notionalUsdc: bigint): number {
   return tierFor(tiers, notionalUsdc).maxLeverage;
 }
 
-/** Initial margin: notional / leverage, rounded up. */
-export function initialMargin(notionalUsdc: bigint, leverage: number): bigint {
-  return mulDiv(notionalUsdc, 1n, BigInt(Math.max(1, Math.floor(leverage))), 'ceil');
+/** Initial margin (USDC, rounded up) of |size| at `px` at `leverage`: each tier at max(imf, ceil(10^6 / leverage)). */
+export function initialMargin(tiers: Tier[], size: bigint, px: bigint, leverage: number): bigint {
+  return E.usdcCeil(E.initialReq(tiers, E.notionalOf(size, px), leverage));
 }
 
-/** Trading fee on a fill of this notional, rounded up. */
-export function fee(notionalUsdc: bigint, ratePpm: bigint): bigint {
-  return mulDiv(notionalUsdc, ratePpm, PPM, 'ceil');
+/** Trading fee (USDC, rounded up) on a fill of |size| at `px`. */
+export function fee(size: bigint, px: bigint, ratePpm: bigint): bigint {
+  return E.feeOf(E.notionalOf(size, px), ratePpm);
 }
 
 /** Unrealised PnL in USDC units of a signed position (positive size is long), rounded down. */
 export function pnl(size: bigint, entryPx: bigint, markPx: bigint): bigint {
-  return mulDiv(size, markPx - entryPx, NOTIONAL_DIV, 'floor');
+  return E.usdcFloor(E.unrealisedOf(size, markPx, size * entryPx));
 }
 
 /** Return on the margin put up, in parts per million (PnL / margin). Null without margin. */
@@ -83,49 +74,25 @@ export function roePpm(pnlUsdc: bigint, marginUsdc: bigint): bigint | null {
 }
 
 /**
- * Funding paid (negative) or received (positive) by a signed position for one interval:
- * -(size x oraclePrice x rate). Longs pay when the rate is positive. What is paid rounds up, what is received down.
+ * Funding paid (negative) or received (positive) by a signed position for one interval (S-7.3):
+ * floor(-(size x mark x rate) / 10^19), `rate` in the engine's 1e-9. Longs pay when the rate is positive. What is
+ * paid rounds up, what is received down.
  */
-export function fundingPayment(size: bigint, oraclePx: bigint, rate: bigint): bigint {
-  return mulDiv(-size * oraclePx, rate, NOTIONAL_DIV * RATE, 'floor');
+export function fundingPayment(size: bigint, markPx: bigint, rate: bigint): bigint {
+  return E.fundingCreditOf(size, markPx, rate);
 }
 
 /**
- * Liquidation price of ONE position, everything else in the account held constant.
- *
- * The position is liquidated when the margin that backs it no longer covers its maintenance margin:
- *   backing + size x (p - entry) = |size| x p x mmr - deduction
- * `backing` is the isolated margin of an isolated position; for a cross position it is the account's collateral
- * plus the unrealised PnL of the other cross positions less their maintenance margin.
- * The tier is the one whose notional range contains the answer. Rounded to the tick against the user
- * (up for a long, down for a short). Null when no positive price liquidates the position.
+ * Liquidation price of ONE position backed by `backing` USDC alone (an isolated position's margin, or a cross
+ * account with nothing else in it): the mark at which the engine's test equity < maintenance first holds, found by
+ * exact search (lib/exact.ts), then put on the tick against the user (up for a long, down for a short). Null when
+ * no price liquidates it.
  */
-export function liquidationPrice(args: {
-  size: bigint; // signed
-  entryPx: bigint;
-  backing: bigint; // USDC units
-  tiers: Tier[];
-  tick: bigint;
-}): bigint | null {
+export function liquidationPrice(args: { size: bigint; entryPx: bigint; backing: bigint; tiers: Tier[]; tick: bigint }): bigint | null {
   const { size, entryPx, backing, tiers, tick } = args;
   if (size === 0n) return null;
-  const q = abs(size);
-  const long = size > 0n;
-  let lower = 0n;
-  for (const tier of tiers) {
-    // USDC-unit equation scaled back to price units: multiply USDC amounts by NOTIONAL_DIV.
-    const fixedTerm = (backing + tier.deduction) * NOTIONAL_DIV;
-    const numerator = long ? q * entryPx - fixedTerm : q * entryPx + fixedTerm;
-    const denominator = long ? q * (PPM - tier.mmrPpm) : q * (PPM + tier.mmrPpm);
-    if (numerator > 0n && denominator > 0n) {
-      const p = mulDiv(numerator, PPM, denominator, long ? 'ceil' : 'floor');
-      const n = notional(q, p);
-      const inTier = n > lower - 1n && (tier.upTo === null || n <= tier.upTo);
-      if (inTier || tier.upTo === null) return toTick(p, tick, long ? 'ceil' : 'floor');
-    } else if (tier.upTo === null) return null;
-    lower = tier.upTo === null ? lower : tier.upTo + 1n;
-  }
-  return null;
+  const p = E.liquidationPriceOf(backing, [{ size, mark: entryPx, openNotional: size * entryPx, tiers }], 0);
+  return p === null ? null : toTick(p, tick, size > 0n ? 'ceil' : 'floor');
 }
 
 export type PositionInput = {
@@ -138,7 +105,11 @@ export type PositionInput = {
   isolatedMargin: bigint; // USDC units, zero for cross
   tiers: Tier[];
   tick: bigint;
+  /** Signed open notional (notional units) when the page holds it exactly; otherwise size x entryPx is used. */
+  openNotional?: bigint;
 };
+const openOf = (p: PositionInput) => p.openNotional ?? p.size * p.entryPx;
+const cross = (p: PositionInput): E.CrossPosition => ({ size: p.size, mark: p.markPx, openNotional: openOf(p), tiers: p.tiers });
 
 export type AccountSummary = {
   /** Collateral plus all unrealised PnL (isolated margins are part of collateral here). */
@@ -157,52 +128,63 @@ export type AccountSummary = {
 };
 
 export function accountSummary(collateral: bigint, positions: PositionInput[], orderMargin = 0n): AccountSummary {
-  let unrealised = 0n;
-  let marginUsed = orderMargin;
-  let maintenance = 0n;
-  let crossEquity = collateral;
-  let crossMaintenance = 0n;
-  let crossInitial = orderMargin;
+  // Sums are kept in notional units and rounded once (requirements up, values down), as the engine and the API do.
+  let unrealisedN = 0n;
+  let crossUnrealisedN = 0n;
+  let maintenanceN = 0n;
+  let crossMaintenanceN = 0n;
+  let crossInitialN = 0n;
+  let isolatedMargins = 0n;
   for (const p of positions) {
-    const upnl = pnl(p.size, p.entryPx, p.markPx);
-    const n = notional(p.size, p.markPx);
-    const mm = maintenanceMargin(p.tiers, n);
-    unrealised += upnl;
-    maintenance += mm;
-    if (p.isolated) {
-      marginUsed += p.isolatedMargin;
-      crossEquity -= p.isolatedMargin;
-    } else {
-      const im = initialMargin(n, p.leverage);
-      marginUsed += im;
-      crossInitial += im;
-      crossEquity += upnl;
-      crossMaintenance += mm;
+    const u = E.unrealisedOf(p.size, p.markPx, openOf(p));
+    const n = E.notionalOf(p.size, p.markPx);
+    const mm = E.maintenanceReq(p.tiers, n);
+    unrealisedN += u;
+    maintenanceN += mm;
+    if (p.isolated) isolatedMargins += p.isolatedMargin;
+    else {
+      crossUnrealisedN += u;
+      crossMaintenanceN += mm;
+      crossInitialN += E.initialReq(p.tiers, n, p.leverage);
     }
   }
-  const equity = collateral + unrealised;
+  const unrealised = E.usdcFloor(unrealisedN);
+  const equity = E.usdcFloor(collateral * E.NOTIONAL_PER_USDC + unrealisedN);
+  const maintenance = E.usdcCeil(maintenanceN);
+  const crossEquity = E.usdcFloor((collateral - isolatedMargins) * E.NOTIONAL_PER_USDC + crossUnrealisedN);
+  const crossInitial = E.usdcCeil(crossInitialN) + orderMargin;
   return {
     equity,
     unrealised,
-    marginUsed,
+    marginUsed: crossInitial + isolatedMargins,
     maintenance,
     marginRatioPpm: maintenance > 0n && equity > 0n ? mulDiv(maintenance, PPM, equity, 'ceil') : maintenance > 0n ? PPM : null,
     available: max(0n, crossEquity - crossInitial),
     crossEquity,
-    crossMaintenance,
+    crossMaintenance: E.usdcCeil(crossMaintenanceN),
   };
 }
 
-/** Liquidation price of position `index` inside an account (the others held constant). */
+/**
+ * Liquidation price of position `index` inside an account (the other marks held still): the engine's own test by
+ * exact search, on the tick against the user. A cross position is tested with every cross position of the account
+ * and the cross balance; an isolated one alone with its margin (SPEC 6.2 last bullet).
+ */
 export function positionLiquidationPrice(collateral: bigint, positions: PositionInput[], index: number): bigint | null {
   const p = positions[index];
   if (p.isolated) return liquidationPrice({ size: p.size, entryPx: p.entryPx, backing: p.isolatedMargin, tiers: p.tiers, tick: p.tick });
-  let backing = collateral;
+  let balance = collateral;
+  const crossed: E.CrossPosition[] = [];
+  let at = -1;
   positions.forEach((o, i) => {
-    if (o.isolated) backing -= o.isolatedMargin;
-    else if (i !== index) backing += pnl(o.size, o.entryPx, o.markPx) - maintenanceMargin(o.tiers, notional(o.size, o.markPx));
+    if (o.isolated) balance -= o.isolatedMargin;
+    else {
+      if (i === index) at = crossed.length;
+      crossed.push(cross(o));
+    }
   });
-  return liquidationPrice({ size: p.size, entryPx: p.entryPx, backing, tiers: p.tiers, tick: p.tick });
+  const exact = E.liquidationPriceOf(balance, crossed, at);
+  return exact === null ? null : toTick(exact, p.tick, p.size > 0n ? 'ceil' : 'floor');
 }
 
 export type Level = { px: bigint; size: bigint };
@@ -254,20 +236,31 @@ export function applyFill(position: { size: bigint; entryPx: bigint }, fillSize:
   return { size: total, entryPx: total > 0n === size > 0n ? entryPx : fillPx, realised };
 }
 
-/** Largest order size (size scale, multiple of `step`) whose margin plus taker fee fits in `budget` USDC. */
-export function sizeForBudget(args: { budget: bigint; px: bigint; leverage: number; feePpm: bigint; step: bigint }): bigint {
-  const { budget, px, leverage, feePpm, step } = args;
-  if (budget <= 0n || px <= 0n) return 0n;
-  const lev = BigInt(Math.max(1, Math.floor(leverage)));
-  // budget >= n/lev + n x fee  =>  n <= budget x lev x PPM / (PPM + lev x fee)
-  const n = mulDiv(budget * lev, PPM, PPM + lev * feePpm, 'floor');
+/**
+ * Largest order size (size scale, multiple of `step`) whose initial margin plus taker fee fits in `budget` USDC,
+ * with the engine's own margin and fee (so the answer never exceeds the budget by a rounding unit).
+ */
+export function sizeForBudget(args: { budget: bigint; px: bigint; leverage: number; feePpm: bigint; step: bigint; tiers: Tier[] }): bigint {
+  const { budget, px, leverage, feePpm, step, tiers } = args;
+  if (budget <= 0n || px <= 0n || step <= 0n) return 0n;
+  const cost = (size: bigint) => initialMargin(tiers, size, px, leverage) + fee(size, px, feePpm);
+  // First guess from the leverage fraction alone (budget >= n x f + n x fee), then step down while the exact cost
+  // (tiers can ask for more than the leverage fraction) is above the budget. The cost grows with size, so the first
+  // size that fits is the largest.
+  const fraction = E.leverageFractionPpm(leverage);
+  const n = mulDiv(budget, PPM, fraction + feePpm, 'floor');
   let size = mulDiv(n, NOTIONAL_DIV, px, 'floor');
   size -= size % step;
-  // Rounding up of margin and fee can exceed the budget by a unit: step down until it fits.
-  while (size > 0n) {
-    const nn = notional(size, px, 'ceil');
-    if (initialMargin(nn, leverage) + fee(nn, feePpm) <= budget) break;
-    size -= step;
+  if (size > 0n && cost(size) > budget) {
+    // Binary search for the largest multiple of the step that fits.
+    let lo = 0n;
+    let hi = size / step;
+    while (hi - lo > 1n) {
+      const mid = (lo + hi) / 2n;
+      if (cost(mid * step) <= budget) lo = mid;
+      else hi = mid;
+    }
+    size = lo * step;
   }
   return max(0n, size);
 }
@@ -315,11 +308,11 @@ export function orderPreview(input: OrderPreviewInput): OrderPreview {
   const before = { size: current?.size ?? 0n, entryPx: current?.entryPx ?? 0n };
   const after = applyFill(before, dir(side) * size, px);
   const n = notional(size, px, 'ceil');
-  const f = fee(n, taker ? fees.takerPpm : fees.makerPpm);
+  const f = fee(size, px, taker ? fees.takerPpm : fees.makerPpm);
   const increases = abs(after.size) > abs(before.size);
-  const beforeN = notional(before.size, markPx);
   const afterN = notional(after.size, markPx);
-  const margin = increases ? max(0n, initialMargin(afterN, leverage) - (current ? initialMargin(beforeN, current.leverage) : 0n)) : 0n;
+  // Requirements are measured at the mark (SPEC 6.2), the engine's own schedule for both sizes.
+  const margin = increases ? max(0n, initialMargin(tiers, after.size, markPx, leverage) - (current ? initialMargin(current.tiers, before.size, markPx, current.leverage) : 0n)) : 0n;
   const problems: OrderPreview['problems'] = [];
   const summary = accountSummary(collateral, positions, input.orderMargin);
   if (input.reduceOnly && (increases || before.size === 0n || after.size > 0n !== before.size > 0n && after.size !== 0n)) problems.push('reduce-only-increases');

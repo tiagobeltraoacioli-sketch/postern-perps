@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Wallet, Copy, LogOut, CandlestickChart, PieChart, ArrowLeftRight, KeyRound, Activity, LayoutGrid, History as HistoryIcon, Percent, MoreHorizontal, ScrollText, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { feed, route as routeStore, go, signingDomain, eip712Problem, geo as geoStore, geoRead, startSession, type Route } from './state/session';
 import { ActionProvider, useActions } from './state/actions';
-import { FundsProvider, useFunds } from './state/funds';
+import { deployment, FundsProvider, useFunds, useProofKeeper, useVault } from './state/funds';
 import { useStore } from './lib/store';
 import { shortAddress } from './lib/format';
 import { config, LOCAL_RENDER } from './lib/config';
@@ -75,6 +75,10 @@ function Shell() {
   // exit-only mode (the order form says so and the signing guard refuses everything else).
   const [acknowledged, setAcknowledged] = useState(false);
   useEffect(() => feed.follow(account), [account]);
+  // On every page, while a wallet is connected: keep the account's exit proof for the vault's latest checkpoint on
+  // this device (R436-11 c). A slow read of the vault is enough; the Funds page reads it faster while open.
+  const vault = useVault(deployment ? account : null, 60_000);
+  useProofKeeper(vault.view, account);
   useEffect(() => {
     const titles: Partial<Record<Page, string>> = { markets: 'Markets', portfolio: 'Portfolio', transfers: 'Funds', history: 'History', funding: 'Funding', agents: 'Agent keys', system: 'System', legal: 'Notices', notfound: 'Not found' };
     if (route.page !== 'trade') document.title = `${titles[route.page]} · PosternDEX Perpetuals`;
@@ -144,7 +148,9 @@ function Header({ route }: { route: Route }) {
       </span>
     </button>
   );
-  const inMore = [...SECONDARY, ...MORE].some((n) => n.page === route.page);
+  // "More" is marked current for a page inside it: always for MORE, and for SECONDARY only where those are inside
+  // it (a narrow header; the CSS decides).
+  const moreClass = MORE.some((n) => n.page === route.page) ? 'nav-more-current' : SECONDARY.some((n) => n.page === route.page) ? 'nav-more-current-narrow' : '';
   return (
     <header className="header">
       <button type="button" className="brand" onClick={() => go({ page: 'trade', symbol })} aria-label="PosternDEX Perpetuals, trade">
@@ -156,7 +162,7 @@ function Header({ route }: { route: Route }) {
         {PRIMARY.map((n) => item(n))}
         {SECONDARY.map((n) => item(n, 'nav-wide'))}
         <div className="nav-more" ref={moreRef}>
-          <button type="button" aria-expanded={more} aria-haspopup="menu" aria-label="More pages" className={inMore ? 'nav-more-current' : ''} onClick={() => setMore((o) => !o)}>
+          <button type="button" aria-expanded={more} aria-haspopup="menu" aria-label="More pages" className={moreClass} onClick={() => setMore((o) => !o)}>
             <MoreHorizontal className="nav-icon" size={18} aria-hidden="true" />
             <span className="nav-long">More</span>
             <span className="nav-short" aria-hidden="true">

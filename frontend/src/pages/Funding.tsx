@@ -61,7 +61,7 @@ export function Funding({ symbol }: { symbol: string }) {
   const bars = useMemo(() => (settled ? fundingBars(settled.map((s) => s.rate), 160) : []), [settled]);
   const sum = settled?.reduce((t, s) => t + s.rate, 0n) ?? null;
   // What the position would pay or receive at the next funding time if the rate stayed (SPEC funding formula, calc.ts).
-  const next = position && ticker ? fundingPayment(position.size, ticker.index, ticker.fundingRate) : null;
+  const next = position && ticker ? fundingPayment(position.size, ticker.mark, ticker.fundingRate) : null;
   const shown = hover !== null && settled ? settled[hover] : null;
   if (markets.length && !market)
     return (
@@ -79,7 +79,7 @@ export function Funding({ symbol }: { symbol: string }) {
             Every hour, longs and shorts of a market pay each other so its price stays near the oracle index. A positive rate: longs pay shorts. Negative: shorts pay longs. The exchange takes no part of it.
           </p>
         </div>
-        <label className="field-inline market-select">
+        <label className="field field-inline market-select">
           <span>Market</span>
           <select value={symbol} onChange={(e) => go({ page: 'funding', symbol: e.target.value })}>
             {markets.map((m) => (
@@ -90,7 +90,7 @@ export function Funding({ symbol }: { symbol: string }) {
           </select>
         </label>
       </header>
-      <div className="cards">
+      <div className="cards cards-4">
         <div className="card">
           <span className="card-label">
             <AssetMark asset={market?.base ?? ''} size={18} /> {symbol} rate now (1 h)
@@ -109,8 +109,8 @@ export function Funding({ symbol }: { symbol: string }) {
           <span className="fine">The rate can never exceed this, in either direction.</span>
         </div>
         <div className="card">
-          <span className="card-label">Sum of the last {settled?.length ?? HOURS_SHOWN} h</span>
-          <span className={`card-value num ${sum !== null ? (sum >= 0n ? 'up' : 'down') : ''}`}>{sum !== null ? formatRate(sum) : DASH}</span>
+          <span className="card-label">{settled && settled.length > 0 ? `Sum of the last ${settled.length} settled` : 'Sum of settled rates'}</span>
+          <span className={`card-value num ${sum !== null && sum !== 0n ? (sum > 0n ? 'up' : 'down') : ''}`}>{sum !== null && settled && settled.length > 0 ? formatRate(sum) : DASH}</span>
           <span className="fine">Positive: a long paid this share of its position value over that time. Negative: it received it.</span>
         </div>
       </div>

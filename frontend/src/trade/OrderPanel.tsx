@@ -101,7 +101,7 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
       return;
     }
     const px = built.price ?? ticker.mark;
-    const s = sizeForBudget({ budget: (summary.available * pct) / 100n, px, leverage, feePpm: fees.takerPpm, step: market.step });
+    const s = sizeForBudget({ budget: (summary.available * pct) / 100n, px, leverage, feePpm: fees.takerPpm, step: market.step, tiers: market.tiers });
     setSize(toDecimalString(s / 10n ** BigInt(SZ_DECIMALS - market.sizeDecimals), market.sizeDecimals));
   };
 

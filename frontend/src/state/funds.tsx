@@ -11,7 +11,10 @@ import type { Hex } from 'viem';
 import { config } from '../lib/config';
 import { Store, useStore } from '../lib/store';
 import { L2, L2Error } from '../vault/l2';
-import { buildTx, deploymentOf, describeTx, readVault, sendTx, TxRefused, VaultMismatch, waitReceipt, type Deployment, type Tx, type TxDescription, type TxInput, type VaultView } from '../vault/vault';
+import { buildTx, checkEscapeClaim, deploymentOf, describeTx, readVault, sendTx, TxRefused, VaultMismatch, waitReceipt, type Deployment, type Tx, type TxDescription, type TxInput, type VaultView } from '../vault/vault';
+import { keepProof, keptProofFor, type KeptProof } from '../vault/keeper';
+import { parseAccountProof } from '../vault/wire';
+import { api } from '../lib/api';
 import type { Receipt } from '../vault/l2';
 import { ChainError, ensureChain, sameChain } from '../wallet/chain';
 import { walletError } from '../wallet/wallet';
@@ -54,6 +57,45 @@ export function useVault(account: string | null, everyMs = 12_000): { view: Vaul
   // A view read for another account is not this account's view.
   const mine = view && (view.account?.address ?? null) === (account?.toLowerCase() ?? null) ? view : null;
   return { view: mine, error };
+}
+
+/**
+ * R436-11 (c). Keeps the connected account's exit proof for the vault's latest accepted checkpoint on this device:
+ * asked from the exchange while it is alive, CHECKED against the account root the vault holds, then stored
+ * (vault/keeper.ts). `state`: 'kept' with the proof; 'none' when there is nothing to keep yet (no checkpoint, or an
+ * account that never deposited); 'missing' when the exchange did not give a usable proof for that checkpoint.
+ */
+export type ProofKeeper = { state: 'off' | 'none' | 'kept' | 'missing'; kept: KeptProof | null };
+export function useProofKeeper(view: VaultView | null, account: string | null): ProofKeeper {
+  const [keeper, setKeeper] = useState<ProofKeeper>({ state: 'off', kept: null });
+  const root = view?.latest.accountsRoot ?? null;
+  const height = view?.latest.height ?? null;
+  const eligible = !!view && view.checkpointCount > 0n && !!view.account?.hasDeposited;
+  useEffect(() => {
+    if (!deployment || !account || !view || root === null || height === null) return setKeeper({ state: 'off', kept: null });
+    if (!eligible) return setKeeper({ state: 'none', kept: null });
+    const have = keptProofFor(deployment.vault, account, root);
+    if (have) return setKeeper({ state: 'kept', kept: have.kept });
+    let live = true;
+    const d = deployment;
+    void (async () => {
+      try {
+        const proof = parseAccountProof(await api.get<unknown>(`/v1/accounts/${account}/proof?height=${height}`));
+        checkEscapeClaim(view, proof.leaf, proof.siblings, account);
+        const stored = keepProof({ chainId: d.chainId, vault: d.vault, account: account.toLowerCase() as Hex, height, accountsRoot: root, leaf: proof.leaf, siblings: proof.siblings });
+        const now = stored ? keptProofFor(d.vault, account, root) : null;
+        if (live) setKeeper(now ? { state: 'kept', kept: now.kept } : { state: 'missing', kept: null });
+      } catch {
+        if (live) setKeeper({ state: 'missing', kept: null });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // The proof depends on the checkpoint (root), not on the block the view was read at.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, root, eligible]);
+  return keeper;
 }
 
 export type TxOutcome = { ok: boolean; title: string; text: string; receipt?: Receipt };

@@ -14,7 +14,8 @@ import { feed, go, geo as geoStore, geoRead } from '../state/session';
 import { geoVerdict } from '../compliance/Restricted';
 import { useStore } from '../lib/store';
 import { useActions } from '../state/actions';
-import { deployment, l2, refreshVault, useFunds, useVault } from '../state/funds';
+import { deployment, l2, refreshVault, useFunds, useProofKeeper, useVault } from '../state/funds';
+import { keptProofFor, proofFile } from '../vault/keeper';
 import { api } from '../lib/api';
 import { config } from '../lib/config';
 import { formatDateTime, formatDuration, formatUsd, shortAddress, DASH } from '../lib/format';
@@ -34,11 +35,14 @@ import {
   forcedProblems,
   payoutState,
   phaseOf,
+  readPayouts,
   readRefunded,
+  acceptedCheckpointFor,
   silenceLeft,
   usdc,
   withdrawalKey,
   type ForcedKind,
+  type Payout,
   type VaultDeposit,
   type VaultView,
 } from '../vault/vault';
@@ -53,7 +57,7 @@ export const WITHDRAWAL_STEPS: [WithdrawalStatus, string, string][] = [
   ['requested', 'Requested', 'The exchange accepted your signed request.'],
   ['included', 'Debited', 'The engine took the amount from your trading account.'],
   ['finalized', 'In a final checkpoint', 'Validators replayed the block and its state root is final.'],
-  ['certified', 'Certified', 'Enough validators signed the payment. Anyone may now submit it to the vault; the relayer does by default.'],
+  ['certified', 'Certified', 'Enough validators signed the payment. It can now be collected from the vault: anyone may submit it.'],
   ['submitted', 'Submitted', 'The vault payment transaction is on the Bloch L2.'],
   ['delayed', 'Held by the vault', 'A large amount waits out the vault delay before it is paid.'],
   ['paid', 'Paid', 'The vault paid the recipient on the Bloch L2.'],
@@ -117,14 +121,17 @@ export function Funds({ tab }: { tab: FundsTab }) {
       <div className="tabs funds-tabs" role="tablist" aria-label="Funds">
         {(
           [
-            ['deposit', 'Deposit', ArrowDownToLine],
-            ['withdraw', 'Withdraw', ArrowUpFromLine],
-            ['exit', 'Exit without the exchange', DoorOpen],
+            ['deposit', 'Deposit', 'Deposit', ArrowDownToLine],
+            ['withdraw', 'Withdraw', 'Withdraw', ArrowUpFromLine],
+            ['exit', 'Exit without the exchange', 'Exit', DoorOpen],
           ] as const
-        ).map(([id, label, Icon]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => go({ page: 'transfers', tab: id })}>
+        ).map(([id, label, short, Icon]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} aria-label={label} onClick={() => go({ page: 'transfers', tab: id })}>
             <Icon size={16} aria-hidden="true" />
-            {label}
+            <span className="tab-long">{label}</span>
+            <span className="tab-short" aria-hidden="true">
+              {short}
+            </span>
           </button>
         ))}
       </div>
@@ -360,6 +367,29 @@ function WithdrawTab({ view }: { view: VaultView | null }) {
   const lastFee = state?.withdrawals.find((w) => w.fee > 0n)?.fee ?? null;
   const tooMuch = parsed.value !== null && parsed.value > withdrawable;
   const canWithdraw = !!account && parsed.value !== null && parsed.value > 0n && !tooMuch && recipientOk;
+  // What the VAULT holds for each certified record (registered, held, paid), read from the L2 with the view.
+  const [payouts, setPayouts] = useState<Record<string, Payout>>({});
+  const certified = (state?.withdrawals ?? []).filter((w) => w.certificate !== null && /^\d{1,20}$/.test(w.id));
+  const certifiedKey = certified.map((w) => w.id).join(',');
+  const block = view?.block ?? null;
+  useEffect(() => {
+    if (!deployment || !l2 || block === null || certified.length === 0) return;
+    let live = true;
+    readPayouts(
+      l2,
+      deployment,
+      certified.map((w) => withdrawalKey(BigInt(w.id))),
+      block,
+    )
+      .then((list) => live && setPayouts(Object.fromEntries(certified.map((w, i) => [w.id, list[i]]))))
+      .catch(() => {
+        /* the records stay without the vault's word */
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [certifiedKey, block]);
   return (
     <div className="two-col">
       <section className="panel" aria-label="Withdraw">
@@ -460,7 +490,7 @@ function WithdrawTab({ view }: { view: VaultView | null }) {
                 <span className="num fine">
                   #{w.id} · {formatDateTime(w.time)} · to {shortAddress(w.recipient)} · fee {formatUsd(w.fee)}
                 </span>
-                {deployment && view && account && w.certificate !== null && w.status !== 'paid' && w.status !== 'rejected' && <Collect withdrawal={w} view={view} account={account} />}
+                {deployment && view && account && w.certificate !== null && w.status !== 'rejected' && <Collect withdrawal={w} view={view} account={account} payout={payouts[w.id]} />}
               </li>
             );
           })}
@@ -472,35 +502,63 @@ function WithdrawTab({ view }: { view: VaultView | null }) {
   );
 }
 
-/** Collect a certified withdrawal yourself: the record is checked against the vault before the wallet is asked. */
-function Collect({ withdrawal: w, view, account }: { withdrawal: Withdrawal; view: VaultView; account: string }) {
+/**
+ * Collect a certified withdrawal from the vault. The exchange certifies; the vault pays whoever submits the record
+ * (docs/API.md 4.1: the node's relayer submits checkpoints, not withdrawals). The record and its proof are checked
+ * against the vault before the wallet is asked; the state shown under the record is the VAULT's, read from the L2.
+ */
+function Collect({ withdrawal: w, view, account, payout }: { withdrawal: Withdrawal; view: VaultView; account: string; payout: Payout | undefined }) {
   const { requestTx } = useFunds();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const state = payout ? payoutState(payout, view.now) : 'none';
   const collect = async () => {
     if (!deployment || !l2) return;
     setBusy(true);
     setMessage(null);
+    const expect = { account, recipient: w.recipient, amount: [w.amount, w.amount - w.fee] };
     try {
-      const { record, siblings } = parseWithdrawalCertificate(w.certificate);
-      const claim = await checkWithdrawalClaim(l2, deployment, view, record, siblings, { account, recipient: w.recipient, amount: w.amount });
-      const state = payoutState(claim.payout, view.now);
-      if (state === 'paid') setMessage('The vault has already paid this withdrawal in full.');
-      else if (state === 'waiting') setMessage(`Registered at the vault. A large amount is held until ${l2Time(claim.payout.readyAt)}; collect it then.`);
-      else if (state === 'none') requestTx({ kind: 'withdraw', seq: claim.seq, record, siblings: claim.siblings, want: record.amount });
-      else requestTx({ kind: 'release', key: withdrawalKey(record.withdrawalId), want: claim.payout.total - claim.payout.paid });
+      let parsed = parseWithdrawalCertificate(w.certificate);
+      let claim;
+      try {
+        claim = await checkWithdrawalClaim(l2, deployment, view, parsed.record, parsed.siblings, expect);
+      } catch (first) {
+        // The certificate proves the record against the exchange's newest final checkpoint; the vault may hold an
+        // older one. Ask for the proof against the checkpoint the vault did accept, and check that instead.
+        const accepted = first instanceof ClaimRefused ? await acceptedCheckpointFor(l2, deployment, view, parsed.record.withdrawalId) : null;
+        if (!accepted) throw first;
+        parsed = parseWithdrawalCertificate(await api.get<unknown>(`/v1/withdrawals/${parsed.record.withdrawalId}/proof?count=${accepted.count}`));
+        claim = await checkWithdrawalClaim(l2, deployment, view, parsed.record, parsed.siblings, expect);
+      }
+      const now = payoutState(claim.payout, view.now);
+      if (now === 'paid') setMessage('The vault has already paid this withdrawal in full.');
+      else if (now === 'waiting') setMessage(`Registered at the vault. A large amount is held until ${l2Time(claim.payout.readyAt)}; collect it then.`);
+      else if (now === 'none') requestTx({ kind: 'withdraw', seq: claim.seq, record: parsed.record, siblings: claim.siblings, want: parsed.record.amount });
+      else requestTx({ kind: 'release', key: withdrawalKey(parsed.record.withdrawalId), want: claim.payout.total - claim.payout.paid });
     } catch (e) {
-      setMessage(e instanceof ClaimRefused ? e.message : e instanceof WireError ? `The certificate from the exchange cannot be used: ${e.message}.` : e instanceof L2Error ? e.message : 'The certificate could not be checked.');
+      setMessage(e instanceof ClaimRefused ? e.message : e instanceof WireError ? `The certificate from the exchange cannot be used: ${e.message}.` : e instanceof L2Error ? e.message : 'The proof could not be read from the exchange or checked against the vault.');
     } finally {
       setBusy(false);
     }
   };
   return (
     <div className="rec-action">
-      <button type="button" className="button button-small" onClick={() => void collect()} disabled={busy}>
-        {busy ? 'Checking against the vault…' : 'Check and collect it myself'}
-      </button>
-      <span className="fine">The relayer normally does this for you. Anyone may: the vault pays the recipient in the certified record.</span>
+      {state === 'paid' && payout ? (
+        <span className="fine vault-word">
+          <strong>Paid by the vault:</strong> <span className="num">{usdc(payout.paid)}</span> to <span className="num">{shortAddress(payout.recipient)}</span> (read from the L2).
+        </span>
+      ) : state === 'waiting' && payout ? (
+        <span className="fine vault-word">
+          <strong>Registered at the vault.</strong> A large amount is held until {l2Time(payout.readyAt)} (in {seconds(payout.readyAt - view.now)}); collect it then.
+        </span>
+      ) : (
+        <>
+          <button type="button" className="button button-small button-primary" onClick={() => void collect()} disabled={busy}>
+            {busy ? 'Checking against the vault…' : state === 'partly' || state === 'payable' ? 'Collect the rest from the vault' : 'Collect from the vault'}
+          </button>
+          <span className="fine">One L2 transaction. Anyone may send it: the vault pays the recipient named in the certified record.</span>
+        </>
+      )}
       {message && (
         <p className="msg-warn" role="status">
           {message}
@@ -540,6 +598,7 @@ function ExitTab({ view }: { view: VaultView | null }) {
     <div className="exit">
       <section className="panel exit-panel" aria-label="How the exit works">
         <ExitExplainer view={view} />
+        <KeptProofLine view={view} account={account} />
       </section>
       <div className="two-col">
         <section className="panel" aria-label="Forced request">
@@ -556,6 +615,7 @@ function ExitTab({ view }: { view: VaultView | null }) {
                   The exchange must process it by {l2Time(open.forcedDeadline!)} (in {seconds(open.forcedDeadline! - view!.now)}). If it does not, anyone can start escape mode.
                 </p>
               )}
+              <ForcedWord account={account} index={open.forcedIndex!} />
             </div>
           ) : escaped ? (
             <p className="callout callout-warn">The vault is in escape mode: requests are closed. Claim on the right.</p>
@@ -603,6 +663,67 @@ function ExitTab({ view }: { view: VaultView | null }) {
           {view ? <Escape view={view} account={account} /> : <p className="fine">Reading the vault…</p>}
         </section>
       </div>
+    </div>
+  );
+}
+
+/** What the EXCHANGE says about the open request (docs/API.md 4.1 `ForcedAction`). The deadline above is the vault's. */
+function ForcedWord({ account, index }: { account: string | null; index: bigint }) {
+  const [word, setWord] = useState<string | null>(null);
+  useEffect(() => {
+    if (!account) return;
+    let live = true;
+    api
+      .get<{ forced?: { forcedId?: unknown; status?: unknown; outcome?: unknown; reason?: unknown }[] }>(`/v1/forced?account=${account}`)
+      .then((r) => {
+        const mine = (r.forced ?? []).find((f) => String(f.forcedId) === index.toString());
+        if (!live) return;
+        if (!mine) return setWord('The exchange does not list this request yet (it reads the L2 only from final blocks).');
+        const reason = typeof mine.reason === 'string' && /^[A-Z0-9_]{1,48}$/.test(mine.reason) ? ` (${mine.reason})` : '';
+        if (mine.outcome === 'served') setWord('The exchange reports it served. It counts once a vault checkpoint acknowledges it.');
+        else if (mine.outcome === 'rejected') setWord(`The exchange reports it rejected${reason}: a reason on your side, such as nothing to withdraw. It counts as processed once a vault checkpoint acknowledges it.`);
+        else if (mine.outcome === 'pending') setWord(`The exchange reports it cannot serve it now${reason}, for a reason you do not control. The vault's deadline keeps running.`);
+        else setWord(mine.status === 'expired' ? 'The exchange itself reports the request expired.' : 'The exchange has received it and not yet processed it.');
+      })
+      .catch(() => live && setWord('The exchange API did not answer about this request. The vault\'s deadline does not depend on it.'));
+    return () => {
+      live = false;
+    };
+  }, [account, index]);
+  return word ? <p className="fine">{word}</p> : null;
+}
+
+/** R436-11 (c): the account's own exit proof, kept on this device and offered as a file. */
+function KeptProofLine({ view, account }: { view: VaultView | null; account: string | null }) {
+  const keeper = useProofKeeper(view, account);
+  if (keeper.state === 'off') return null;
+  const save = () => {
+    if (!keeper.kept) return;
+    const file = proofFile(keeper.kept);
+    const url = URL.createObjectURL(new Blob([file.text], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  return (
+    <div className={`proof-line ${keeper.state === 'missing' ? 'proof-missing' : ''}`} role="status">
+      <strong>Your exit proof</strong>
+      {keeper.state === 'kept' && keeper.kept && (
+        <>
+          <span>
+            Saved on this device for the vault's latest checkpoint (exchange height <span className="num">{keeper.kept.height}</span>), checked against the vault. With it you can claim in escape mode even if the exchange's API is gone.
+          </span>
+          <button type="button" className="button button-small" onClick={save}>
+            Save it as a file
+          </button>
+        </>
+      )}
+      {keeper.state === 'none' && <span>Nothing to keep yet: the proof exists once this account has deposited and the vault has accepted a checkpoint.</span>}
+      {keeper.state === 'missing' && <span>The exchange gave no usable proof for the vault's latest checkpoint. Without one, an escape claim needs a proof from a validator or an archive. Reopen this page later; it tries at every checkpoint.</span>}
     </div>
   );
 }
@@ -687,12 +808,13 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
     },
     [view, account],
   );
+  const saved = account && deployment ? keptProofFor(deployment.vault, account, view.latest.accountsRoot) : null;
   const fetchProof = async () => {
     if (!account) return;
     setBusy(true);
     setMessage(null);
     try {
-      accept(parseAccountProof(await api.get<unknown>(`/v1/accounts/${account}/proof`)));
+      accept(parseAccountProof(await api.get<unknown>(`/v1/accounts/${account}/proof?height=${view.latest.height}`)));
     } catch (e) {
       setClaim(null);
       setMessage(e instanceof ClaimRefused ? e.message : e instanceof WireError ? `The proof from the exchange cannot be used: ${e.message}.` : 'The exchange API did not return a proof. If it is down, paste a proof from any validator or archive below.');
@@ -712,7 +834,7 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
     setBusy(true);
     setMessage(null);
     try {
-      const [ins, back] = await Promise.all([api.get<unknown>(`/v1/accounts/${SYSTEM.insurance}/proof`), api.get<unknown>(`/v1/accounts/${SYSTEM.backstop}/proof`)]);
+      const [ins, back] = await Promise.all([api.get<unknown>(`/v1/accounts/${SYSTEM.insurance}/proof?height=${view.latest.height}`), api.get<unknown>(`/v1/accounts/${SYSTEM.backstop}/proof?height=${view.latest.height}`)]);
       const insurance = parseAccountProof(ins);
       const backstop = parseAccountProof(back);
       checkEscapeClaim(view, insurance.leaf, insurance.siblings, SYSTEM.insurance);
@@ -797,6 +919,21 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
           <p className="fine">The claim needs a proof of your account in the last checkpoint the vault accepted. The page checks it against the vault before asking your wallet.</p>
           {!claim && (
             <>
+              {saved && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => {
+                    try {
+                      accept(saved);
+                    } catch (e) {
+                      setMessage(e instanceof ClaimRefused ? e.message : 'The saved proof cannot be used.');
+                    }
+                  }}
+                >
+                  Use the proof saved on this device
+                </button>
+              )}
               <button type="button" className="button" onClick={() => void fetchProof()} disabled={busy || !account}>
                 {busy ? 'Reading the proof…' : 'Get my proof from the exchange API'}
               </button>

@@ -19,6 +19,7 @@ export function TradePage({ symbol }: { symbol: string }) {
   const marketsError = useStore(feed.marketsError);
   const interval = useStore(chartInterval);
   const [phoneTab, setPhoneTab] = useState<PhoneTab>('chart');
+  const [sideTab, setSideTab] = useState<'book' | 'trades'>('book');
   useEffect(() => {
     if (market) feed.select(market.symbol, interval);
   }, [market, interval]);
@@ -55,11 +56,22 @@ export function TradePage({ symbol }: { symbol: string }) {
       <div className="trade-chart">
         <ChartPanel market={market} ticker={ticker} />
       </div>
-      <div className="trade-book">
-        <OrderBook market={market} />
-      </div>
-      <div className="trade-tape">
-        <TradeTape market={market} />
+      {/* On a fitted desktop screen of moderate height the book and the tape share one column behind a switch (the
+          book keeps its full depth); on a tall one, and on every other layout, both are shown. */}
+      <div className="trade-side" data-side-tab={sideTab}>
+        <div className="side-tabs segmented" role="group" aria-label="Book or trades">
+          {(['book', 'trades'] as const).map((t) => (
+            <button key={t} type="button" aria-pressed={sideTab === t} onClick={() => setSideTab(t)}>
+              {t === 'book' ? 'Order book' : 'Trades'}
+            </button>
+          ))}
+        </div>
+        <div className="trade-book">
+          <OrderBook market={market} />
+        </div>
+        <div className="trade-tape">
+          <TradeTape market={market} />
+        </div>
       </div>
       <div className="trade-form">
         <OrderPanel market={market} ticker={ticker} />

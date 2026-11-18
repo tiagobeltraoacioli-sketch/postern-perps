@@ -486,6 +486,27 @@ export async function forcedRequestsOf(l2: L2, d: Deployment, account: Hex, from
   return logs.map((l) => forcedOf(d, l)).filter((x): x is VaultForced => x !== null && x.account === account.toLowerCase());
 }
 
+/** The payouts the vault holds for several keys, read at one block (total 0: not registered). */
+export async function readPayouts(l2: L2, d: Deployment, keys: readonly Hex[], at: bigint | 'latest' = 'latest'): Promise<Payout[]> {
+  if (keys.length === 0) return [];
+  const out = await l2.calls(
+    keys.map((k) => ({ to: d.vault, data: vaultCall('payouts', [k]) })),
+    at,
+  );
+  return out.map((data) => payoutOf(vaultResult('payouts', data)));
+}
+
+/**
+ * The newest checkpoint the vault accepted that covers withdrawal `id`: its sequence and withdrawal count, or null
+ * when no accepted checkpoint holds the record yet. The exchange serves a proof for exactly that count
+ * (docs/API.md 4.1 `GET /v1/withdrawals/{id}/proof?count=N`).
+ */
+export async function acceptedCheckpointFor(l2: L2, d: Deployment, v: VaultView, id: bigint): Promise<{ seq: bigint; count: bigint } | null> {
+  if (v.checkpointCount === 0n) return null;
+  const count = big(vaultResult('withdrawalCountAt', await l2.call({ to: d.vault, data: vaultCall('withdrawalCountAt', [v.checkpointCount]) }, v.block)));
+  return id < count ? { seq: v.checkpointCount, count } : null;
+}
+
 /** Whether each deposit index was already refunded (escape mode), read at one block. */
 export async function readRefunded(l2: L2, d: Deployment, indexes: readonly bigint[], at: bigint | 'latest' = 'latest'): Promise<boolean[]> {
   if (indexes.length === 0) return [];
@@ -507,7 +528,8 @@ export const SEQ_SEARCH = 64n;
  * Checks a withdrawal record and its proof against the VAULT (not the API): the record is hashed here, walked to a
  * root, and that root must be the withdrawals root of an accepted checkpoint that covers the record's id. Returns the
  * checkpoint sequence to claim against and the payout the vault already holds for it (total 0 when unregistered).
- * `expect` binds the record to what the user asked for: account and, when known, recipient and amount.
+ * `expect` binds the record to what the user asked for: account and, when known, recipient and amount (one value,
+ * or the values it may take: the record carries the NET amount, the request the gross one).
  */
 export async function checkWithdrawalClaim(
   l2: L2,
@@ -515,11 +537,11 @@ export async function checkWithdrawalClaim(
   v: VaultView,
   record: WithdrawalRecord,
   siblings: readonly string[],
-  expect: { account: string; recipient?: string; amount?: bigint },
+  expect: { account: string; recipient?: string; amount?: bigint | readonly bigint[] },
 ): Promise<WithdrawalClaim> {
   if (record.account.toLowerCase() !== expect.account.toLowerCase()) throw new ClaimRefused('The record names another account than the connected wallet.');
   if (expect.recipient !== undefined && record.recipient.toLowerCase() !== expect.recipient.toLowerCase()) throw new ClaimRefused('The record pays another recipient than the one you signed.');
-  if (expect.amount !== undefined && record.amount !== expect.amount) throw new ClaimRefused('The record carries another amount than the exchange reported for this withdrawal.');
+  if (expect.amount !== undefined && !(typeof expect.amount === 'bigint' ? [expect.amount] : expect.amount).includes(record.amount)) throw new ClaimRefused('The record carries another amount than the exchange reported for this withdrawal.');
   if (record.amount <= 0n) throw new ClaimRefused('The record carries no amount.');
   let root: Hex;
   try {

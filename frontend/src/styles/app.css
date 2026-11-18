@@ -2214,6 +2214,65 @@ td.strong {
   line-height: 1;
 }
 
+.nav-wide {
+  display: none;
+}
+.tab-short {
+  display: none;
+}
+.cards-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.page-head-row > div:first-child {
+  display: grid;
+  gap: var(--s-2);
+}
+.two-col .panel > .button-block {
+  width: auto;
+}
+.wallet-button {
+  white-space: nowrap;
+}
+.trade-side {
+  display: contents;
+}
+.side-tabs {
+  display: none;
+}
+/* The action of a row stays in sight when a wide table scrolls sideways. */
+.account-tables td.r:last-child:has(.button) {
+  position: sticky;
+  right: 0;
+  background: linear-gradient(to right, transparent, var(--surface) 14px);
+  padding-left: var(--s-5);
+}
+
+.proof-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line));
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--ok) 6%, var(--surface));
+  color: var(--text-2);
+  font-size: var(--text-small);
+}
+.proof-line strong {
+  color: var(--text);
+}
+.proof-line > span {
+  flex: 1 1 320px;
+}
+.proof-missing {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+}
+.vault-word strong {
+  color: var(--text);
+}
+
 /* ---------- Round 2: the trading screen fits the viewport on a desktop ---------- */
 @media (min-width: 1280px) and (min-height: 760px) {
   .app[data-page='trade'] {
@@ -2282,6 +2341,37 @@ td.strong {
     top: 0;
     background: var(--surface);
     z-index: 1;
+  }
+}
+/* Moderate height: one side column, the book or the tape behind a switch. */
+@media (min-width: 1280px) and (min-height: 760px) and (max-height: 1079px) {
+  .trade {
+    grid-template-areas:
+      'bar bar bar'
+      'alert alert alert'
+      'chart side form'
+      'account account form';
+    grid-template-rows: auto auto minmax(0, 1fr) clamp(190px, 25vh, 280px);
+  }
+  .trade-side {
+    grid-area: side;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    min-height: 0;
+  }
+  .side-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .trade-side .trade-book,
+  .trade-side .trade-tape {
+    flex: 1;
+    min-height: 0;
+  }
+  .trade-side[data-side-tab='book'] .trade-tape,
+  .trade-side[data-side-tab='trades'] .trade-book {
+    display: none;
   }
 }
 @media (max-width: 1279px) {
@@ -2413,16 +2503,21 @@ td.strong {
   }
 }
 @media (min-width: 1440px) {
-  .nav-wide {
+  .nav .nav-wide {
     display: inline-block;
   }
 }
 @media (max-width: 1439px) {
-  .nav .nav-wide {
-    display: none;
-  }
   .nav-menu .nav-narrow {
     display: flex !important;
+  }
+  .nav-more-current-narrow {
+    color: var(--text) !important;
+  }
+}
+@media (max-width: 1100px) {
+  .cards-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 899px) {
@@ -2475,7 +2570,26 @@ td.strong {
     padding: var(--s-4);
   }
   .funds-tabs {
-    gap: var(--s-3);
+    gap: var(--s-4);
+  }
+  .tab-long {
+    display: none;
+  }
+  .tab-short {
+    display: inline;
+  }
+  .stat-wide {
+    grid-column: span 2;
+  }
+  .market-stats .stat:last-child,
+  .market-stats .stat:nth-last-child(2):has(+ .stat .badge) {
+    grid-column: span 2;
+  }
+  .wallet-button {
+    padding-inline: var(--s-3);
+  }
+  .wallet-button svg {
+    display: none;
   }
   .page {
     padding: var(--s-5) var(--s-3) var(--s-7);

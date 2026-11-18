@@ -1,5 +1,4 @@
 /** Wire (decimal strings, docs/API.md) to fixed-point integers. The only place where API text becomes numbers. */
-import { withDeductions } from './calc';
 import { PX_DECIMALS, RATE_DECIMALS, SZ_DECIMALS, USDC_DECIMALS, parseFixedLoose as p, toNumber } from './fixed';
 import type * as T from './types';
 
@@ -11,11 +10,12 @@ const fractionPpm = (s: string) => p(s, 6);
 const bpsPpm = (s: string) => p(s, 2);
 
 export function market(w: T.WireMarket): T.Market {
-  const rows = w.marginTiers.map((tier, i) => ({
-    // A tier applies up to the floor of the next one.
-    upTo: i + 1 < w.marginTiers.length ? usd(w.marginTiers[i + 1].notionalFloor) : null,
+  // docs/API.md `marginTiers`: each tier applies from its `notionalFloor`; fractions are exact decimals in ppm.
+  const tiers = w.marginTiers.map((tier) => ({
+    floor: usd(tier.notionalFloor),
+    imfPpm: fractionPpm(tier.initialMarginFraction),
+    mmfPpm: fractionPpm(tier.maintenanceMarginFraction),
     maxLeverage: Number(tier.maxLeverage),
-    mmrPpm: fractionPpm(tier.maintenanceMarginFraction),
   }));
   return {
     symbol: w.symbol,
@@ -30,7 +30,7 @@ export function market(w: T.WireMarket): T.Market {
     minSize: sz(w.minOrderSize),
     maxSize: sz(w.maxOrderSize),
     maxLeverage: Number(w.maxLeverage),
-    tiers: withDeductions(rows),
+    tiers,
     makerPpm: bpsPpm(w.makerFeeBps),
     takerPpm: bpsPpm(w.takerFeeBps),
     liquidationFeePpm: bpsPpm(w.liquidationFeeBps),

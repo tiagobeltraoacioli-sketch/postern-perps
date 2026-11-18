@@ -102,7 +102,7 @@ export function History({ tab }: { tab: HistoryTab }) {
           </div>
           <div className="tabs-tools">
             {tab !== 'transfers' && (
-              <label className="field-inline">
+              <label className="field field-inline">
                 <span className="sr-only">Market</span>
                 <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
                   <option value="">All markets</option>
@@ -131,7 +131,7 @@ export function History({ tab }: { tab: HistoryTab }) {
             </div>
             <div>
               <dt>Realised PnL</dt>
-              <dd className={`num ${fillTotals.realised >= 0n ? 'up' : 'down'}`}>{formatUsd(fillTotals.realised, { sign: 'always' })} USDC</dd>
+              <dd className={`num ${fillTotals.realised > 0n ? 'up' : fillTotals.realised < 0n ? 'down' : ''}`}>{formatUsd(fillTotals.realised, { sign: 'always' })} USDC</dd>
             </div>
           </dl>
         )}
@@ -143,7 +143,7 @@ export function History({ tab }: { tab: HistoryTab }) {
             </div>
             <div>
               <dt>Net funding</dt>
-              <dd className={`num ${fundingTotal >= 0n ? 'up' : 'down'}`}>{formatUsd(fundingTotal, { sign: 'always', dp: 4 })} USDC</dd>
+              <dd className={`num ${fundingTotal > 0n ? 'up' : fundingTotal < 0n ? 'down' : ''}`}>{formatUsd(fundingTotal, { sign: 'always', dp: 4 })} USDC</dd>
             </div>
           </dl>
         )}
