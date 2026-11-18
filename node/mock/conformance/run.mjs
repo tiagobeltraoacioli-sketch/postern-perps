@@ -48,6 +48,12 @@ const be = (v, n) => {
 export function stateRootOfForTest(c) {
   return stateRootOf(c);
 }
+/** VAULT.md 5.2 digest of a checkpoint object as the API serves it, under the vault's own domain (for the e2e rehearsal). */
+export function checkpointDigest(vault, C, chainId = 700770) {
+  const domain = { name: 'PosternPerpsVault', version: '1', chainId, verifyingContract: vault };
+  return hex(typedDataHash(domain, 'Checkpoint', CHECKPOINT_FIELDS, Object.fromEntries(CHECKPOINT_FIELDS.map((f) => [f.name, typeof C[f.name] === 'number' ? String(C[f.name]) : C[f.name]]))));
+}
+export { CHECKPOINT_FIELDS };
 function stateRootOf(c) {
   const sys = keccak256(concat(enc.encode('PPv1sys'), be(c.nextDepositIndex, 8), be(c.nextForcedIndex, 8), be(c.nextOrderId, 8), be(c.totalEscape, 16), be(c.dust, 16), unhex(c.auxHash), be(c.withdrawalCount, 8), be(c.withdrawalsTotal, 8)));
   return hex(keccak256(concat(enc.encode('PosternPerps/state/v1'), be(c.height, 8), be(c.time, 8), unhex(c.accountsRoot), unhex(c.marketsRoot), unhex(c.withdrawalsRoot), sys)));

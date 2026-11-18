@@ -1,16 +1,18 @@
 #!/bin/bash
 # Starts the local PosternDEX Perpetuals stack. UNAUDITED prototype: local processes, loopback only, throwaway keys.
 #
-#   e2e/up.sh [--label L] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--frontend] [--keep]
+#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--frontend] [--keep]
 #
 # Build host (loopback): L2 (anvil chain 700770 + the pass-through proxy as second endpoint), the node
 # (sequencer; validators in process and/or as separate processes), the oracle feeder. Mac: one ssh tunnel, the
 # frontend dev server. Everything started is recorded by PID (Mac: e2e/.run/*.pid; host: run/*.pid) and stopped by
 # e2e/down.sh. The tree <label> must have been built first: e2e/build.sh <label> [git-ref].
+# --tree is the Mac checkout of the same tree (contracts, frontend, mock); default the integration worktree.
 # --keep restarts the node on its existing data directory (recovery) instead of a fresh one.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/config.sh"
 LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh
+TREE=$HOME/worktrees/perps-e2e-r2-int-20261118; [ -d "$TREE" ] || TREE=$(cd "$HERE/.." && pwd)
 while [ $# -gt 0 ]; do
   case $1 in
     --label) LABEL=$2; shift 2 ;;
@@ -19,6 +21,7 @@ while [ $# -gt 0 ]; do
     --local-validators) LOCALV=$2; shift 2 ;;
     --frontend) FRONTEND=1; shift ;;
     --keep) KEEP=keep; shift ;;
+    --tree) TREE=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -74,13 +77,16 @@ fi
 e2e_ssh "$S/bin/node-start.sh $LABEL $PROFILE $KEEP $NODE_ARGS"
 wait_http "http://127.0.0.1:$M_API/v1/status" 60 "node API"
 STATUS=$(curl -fsS "http://127.0.0.1:$M_API/v1/status")
-[ -n "$VAULT" ] || VAULT=$(printf '%s' "$STATUS" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).network.vault))')
+NODE_VAULT=$(printf '%s' "$STATUS" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).network.vault))')
+# the engine's signing domain must be bound to the vault just deployed; a node that ignored --vault is refused here
+if [ -n "$VAULT" ] && [ "$NODE_VAULT" != "$VAULT" ]; then echo "the node's vault $NODE_VAULT is not the deployed vault $VAULT (does this tree's node take --vault?)" >&2; exit 1; fi
+VAULT=$NODE_VAULT
 say "node up (tree $LABEL, $PROFILE, engine vault $VAULT)"
 
 if [ "$L2" = fake ]; then
   DEP=$("$NODE_BIN" "$HERE/rehearsal/accounts.mjs" --fake-l2-args)
-  mac_start fake-l2-a "$NODE_BIN" "$HERE/../node/mock/conformance/fake-l2.mjs" --port 49912 --vault "$VAULT" $DEP
-  mac_start fake-l2-b "$NODE_BIN" "$HERE/../node/mock/conformance/fake-l2.mjs" --port 49913 --vault "$VAULT" $DEP
+  mac_start fake-l2-a "$NODE_BIN" "$TREE/node/mock/conformance/fake-l2.mjs" --port 49912 --vault "$VAULT" $DEP
+  mac_start fake-l2-b "$NODE_BIN" "$TREE/node/mock/conformance/fake-l2.mjs" --port 49913 --vault "$VAULT" $DEP
   say "fake L2 up twice (stand-in: fixed deposits, no vault contract)"
 fi
 [ "$ORACLE" = replay ] && . "$HERE/oracle.sh" start
@@ -96,7 +102,7 @@ fi
 if [ "$FRONTEND" = 1 ]; then . "$HERE/frontend.sh"; fi
 
 cat > "$RUN/stack.json" <<JSON
-{"label": "$LABEL", "commit": "$(e2e_ssh "cat $S/src-$LABEL/.commit")", "l2": "$L2", "oracle": "$ORACLE", "localValidators": $LOCALV,
+{"label": "$LABEL", "tree": "$TREE", "commit": "$(e2e_ssh "cat $S/src-$LABEL/.commit")", "l2": "$L2", "oracle": "$ORACLE", "localValidators": $LOCALV,
  "seed": "$E2E_SEED", "api": "http://127.0.0.1:$M_API", "l2Rpc": "http://127.0.0.1:$M_ANVIL", "l2Proxy": "http://127.0.0.1:$M_PROXY",
  "hostApi": "http://127.0.0.1:$H_API", "vault": "$VAULT", "token": "$TOKEN", "frontend": $( [ "$FRONTEND" = 1 ] && echo "\"http://127.0.0.1:$M_FRONTEND\"" || echo null ),
  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
