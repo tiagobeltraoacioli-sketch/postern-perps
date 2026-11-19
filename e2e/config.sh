@@ -12,10 +12,12 @@ H_API=53500
 H_ANVIL=53510
 H_PROXY=53511
 H_FEEDER=53530
+H_VALIDATOR=53520   # + index: a validator's own read service (blocks, genesis, account proofs)
 # Mac ports (loopback only): 49900-49999
 M_API=49900
 M_ANVIL=49901
 M_PROXY=49902
+M_VALIDATOR=49904   # the read service of the first separate validator
 M_FRONTEND=49920
 M_MOCK=49930
 E2E_SEED=${E2E_SEED:-e2e-r2}

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Starts the local PosternDEX Perpetuals stack. UNAUDITED prototype: local processes, loopback only, throwaway keys.
 #
-#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--funding-ms MS] [--relayer on|off] [--frontend] [--keep]
+#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--funding-ms MS] [--relayer on|off] [--validator-read on|off] [--frontend] [--keep]
 #
 # Build host (loopback): L2 (anvil chain 700770 + the pass-through proxy as second endpoint), the node
 # (sequencer; validators in process and/or as separate processes), the oracle feeder. Mac: one ssh tunnel, the
@@ -12,10 +12,12 @@
 #   rehearsal; production is 3600000; 0 keeps the compliance value). A dev override of the node, shown in /v1/markets.
 # --relayer on (default, anvil only): the node's own checkpoint relayer (the keeper of VAULT.md 8a) with a gas-only
 #   THROWAWAY key generated on the host at run time (file 0600, never printed), funded with anvil_setBalance.
+# --validator-read on (default): every separate validator serves blocks, the genesis and account proofs from its OWN
+#   log on its own port (R436-11: escape proofs without the sequencer); off for a tree whose validator has no --listen.
 # --keep restarts the node on its existing data directory (recovery) instead of a fresh one.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/config.sh"
-LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000; RELAYER=on
+LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000; RELAYER=on; VREAD=on
 TREE=$HOME/worktrees/perps-e2e-r2-int-20261118; [ -d "$TREE" ] || TREE=$(cd "$HERE/.." && pwd)
 while [ $# -gt 0 ]; do
   case $1 in
@@ -28,6 +30,7 @@ while [ $# -gt 0 ]; do
     --tree) TREE=$2; shift 2 ;;
     --funding-ms) FUNDING_MS=$2; shift 2 ;;
     --relayer) RELAYER=$2; shift 2 ;;
+    --validator-read) VREAD=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -51,6 +54,7 @@ tar -C "$HERE/host" -cf - . | e2e_ssh "mkdir -p $S/bin && tar -x -C $S/bin && ch
 
 # ---- tunnel (Mac -> host; and, for the fake L2 only, host -> Mac) ----
 FWD="-L 127.0.0.1:$M_API:127.0.0.1:$H_API -L 127.0.0.1:$M_ANVIL:127.0.0.1:$H_ANVIL -L 127.0.0.1:$M_PROXY:127.0.0.1:$H_PROXY"
+[ "$LOCALV" != 7 ] && [ "$VREAD" = on ] && FWD="$FWD -L 127.0.0.1:$M_VALIDATOR:127.0.0.1:$((H_VALIDATOR + LOCALV))"
 [ "$L2" = fake ] && FWD="$FWD -R 127.0.0.1:53512:127.0.0.1:49912 -R 127.0.0.1:53513:127.0.0.1:49913"
 mac_start tunnel ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -i "$E2E_SSH_KEY" $FWD "$E2E_HOST"
 sleep 2; mac_alive tunnel || { echo "tunnel failed:" >&2; tail -3 "$RUN/tunnel.log" >&2; exit 1; }
@@ -117,7 +121,7 @@ fi
 # ---- separate validator processes (indices LOCALV..6) ----
 if [ "$LOCALV" != 7 ]; then
   for i in $(seq "$LOCALV" 6); do
-    e2e_ssh "$S/bin/validator-start.sh $LABEL $PROFILE $i fresh $GEN --sequencer http://127.0.0.1:$H_API $L2_ARGS"
+    e2e_ssh "$S/bin/validator-start.sh $LABEL $PROFILE $i fresh $GEN --sequencer http://127.0.0.1:$H_API $L2_ARGS $( [ "$VREAD" = on ] && echo --listen 127.0.0.1:$((H_VALIDATOR + i)) )"
   done
 fi
 
@@ -129,6 +133,7 @@ cat > "$RUN/stack.json" <<JSON
  "seed": "$E2E_SEED", "genesisFlags": "$GEN", "fundingIntervalMs": $FUNDING_MS, "profile": "$PROFILE", "api": "http://127.0.0.1:$M_API", "l2Rpc": "http://127.0.0.1:$M_ANVIL", "l2Proxy": "http://127.0.0.1:$M_PROXY",
  "hostApi": "http://127.0.0.1:$H_API", "vault": "$VAULT", "token": "$TOKEN", "frontend": $( [ "$FRONTEND" = 1 ] && echo "\"http://127.0.0.1:$M_FRONTEND\"" || echo null ),
  "oracleCommittee": $( [ -n "${ORACLE_LIST:-}" ] && printf '["%s"]' "$(printf '%s' "$ORACLE_LIST" | sed 's/,/","/g')" || echo null ), "oracleQuorum": 5,
+ "validatorApi": $( [ "$LOCALV" != 7 ] && [ "$VREAD" = on ] && echo "\"http://127.0.0.1:$M_VALIDATOR\"" || echo null ), "validatorApiIndex": $LOCALV,
  "relayer": $( [ -n "${RELAY_ADDR:-}" ] && echo "\"$RELAY_ADDR\"" || echo null ),
  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON

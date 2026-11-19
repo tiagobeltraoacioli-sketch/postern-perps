@@ -48,14 +48,35 @@ export default async function (ctx) {
     return { checkpointHeight: H, accounts: Object.keys(proofs).length, totalEscape: fmtUsdc(totalEscape), escapeValues: Object.fromEntries(Object.entries(proofs).map(([k, p]) => [k, fmtUsdc(BigInt(p.leafData.escapeValue))])) };
   });
 
-  await ctx.check('K-02', 'the committee goes silent: all validators, the sequencer and the oracle feeder are stopped', async () => {
+  await ctx.check('K-02', 'the exchange goes silent: the sequencer (with the validators inside it), the oracle feeder and all separate validators but one are stopped', async () => {
     expect(H, 'K-01 failed');
-    for (let i = stack.localValidators; i < 7; i++) await ctx.host('svc.sh', 'stop', `validator-${i}`, 'TERM');
+    for (let i = stack.localValidators; i < 7; i++) if (!(stack.validatorApi && i === stack.validatorApiIndex)) await ctx.host('svc.sh', 'stop', `validator-${i}`, 'TERM');
     await ctx.host('svc.sh', 'stop', 'feeder', 'TERM');
     await ctx.host('svc.sh', 'stop', 'node', 'INT');
     const down = await api.get('/v1/status').then(() => false, () => true);
     expect(down, 'the API still answers');
     return { hostServices: (await ctx.host('svc.sh', 'status')).split('\n') };
+  });
+  await ctx.check('K-02b', 'WITHOUT the sequencer: one validator\'s own read service (its own log, its own replay) serves every account\'s escape leaf and siblings for the checkpoint the vault holds; they verify against the vault\'s root and equal the ones fetched before (R436-11)', async () => {
+    blockedIf(!stack.validatorApi, 'no validator read service in this stack (up.sh --validator-read off, or all validators inside the sequencer): the proofs used below were fetched from the sequencer before it stopped');
+    const L = await chain.call(stack.vault, LATEST);
+    let n = 0;
+    try {
+      for (const a of all) {
+        if (!proofs[a.label]) continue;
+        const r = await fetch(`${stack.validatorApi}/v1/accounts/${a.address}/proof?height=${H}`);
+        expect(r.status === 200, `${a.label}: validator answered HTTP ${r.status}`);
+        const p = await r.json();
+        const sib = p.proof ?? p.siblings;
+        expect(root32(leafHash(unhex(p.leafData.encoded)), p.index, sib) === L[7], `${a.label}: the validator's siblings do not reach the vault's accountsRoot`);
+        expect(p.leafData.encoded === proofs[a.label].leafData.encoded && JSON.stringify(sib) === JSON.stringify(proofs[a.label].proof), `${a.label}: the validator's proof differs from the sequencer's`);
+        proofs[a.label] = { ...proofs[a.label], leafData: p.leafData, proof: sib, index: p.index, from: 'validator' };   // the claims below use the validator's
+        n++;
+      }
+    } finally {
+      await ctx.host('svc.sh', 'stop', `validator-${stack.validatorApiIndex}`, 'TERM');
+    }
+    return { validator: stack.validatorApiIndex, proofsServedWithoutTheSequencer: n, checkpointHeight: H };
   });
 
   const esc = ctx.who('escapee');
