@@ -1,5 +1,6 @@
 #!/bin/bash
-# usage: e2e/integrate.sh [branch-suffix...]     default: engine node oracle contracts frontend e2e
+# usage: e2e/integrate.sh [suffix | suffix=commit ...]     default: engine node oracle contracts frontend e2e
+# `oracle=c810a47` merges that commit of the area instead of the branch tip (a tip still under review).
 # (Re)creates the LOCAL integration worktree ~/worktrees/perps-e2e-r2-int-20261118 on the local branch `e2e-int-r2`
 # = main + origin's round-2 branch of each suffix (+ this worktree's HEAD for `e2e`). It is the tree the stack is
 # built from before a merge into main, and the tree the whole test set runs on. Never pushed.
@@ -17,7 +18,7 @@ else
   git -C "$REPO" worktree add -q -B e2e-int-r2 "$INT" main
 fi
 for s in "$@"; do
-  if [ "$s" = e2e ]; then ref=$(git -C "$HERE/.." rev-parse HEAD); else ref=origin/codex/perps-$s-r2-20261118; fi
+  case "$s" in *=*) ref=${s#*=}; s=${s%%=*} ;; e2e) ref=$(git -C "$HERE/.." rev-parse HEAD) ;; *) ref=origin/codex/perps-$s-r2-20261118 ;; esac
   git -C "$REPO" rev-parse -q --verify "$ref^{commit}" > /dev/null || { echo "[int] $s: no branch yet, skipped"; continue; }
   if git -C "$INT" merge-base --is-ancestor "$ref" HEAD; then echo "[int] $s: nothing new"; continue; fi
   if git -C "$INT" -c user.name="Postern Labs" -c user.email=noreply@posternlabs.com merge -q --no-ff --no-edit "$ref" > /dev/null 2>&1; then

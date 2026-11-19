@@ -35,12 +35,30 @@ export default async function (ctx) {
     return { entry: ask, openFee: tradeFee(ask, SIZE, 450), t: (await api.json('/v1/status')).time };
   };
   const liquidated = (victim) => api.until(async () => ((await position(victim.address)) === null ? true : null), { ms: 240000, every: 1500, what: `${victim.label} liquidated` });
-  /** deposit - open fee + funding + realized - liquidation fee, every term from published data (USDC units). */
-  const expectedBalance = async (victim, o, exitPrice) => {
+  /**
+   * The victim's ledger from published data: balance = deposit - open fee + funding + realized - liquidation fee.
+   * The liquidation fee itself is NOT published by the API (R435-3: the liquidation fill shows fee 0), and the engine
+   * takes it on |size| x MARK at the liquidation block (engine.rs liquidate, SPEC 6.3 step 4), not on the fill price.
+   * So the check is: the unexplained part of the ledger (a) is exactly what the insurance fund received in the same
+   * window (to the unit, plus at most funding rounding residue), and (b) equals ceil(|size| x M x 0.5%) for a mark M
+   * that lies inside the band of the index path of this liquidation (0.5% around an index between start and end).
+   */
+  const ledger = async (victim, o, exitPrice, path, ins0) => {
     const funding = (await api.json(`/v1/accounts/${victim.address}/funding?limit=50`)).payments.filter((p) => p.time >= o.t).reduce((t, p) => t + usdc(p.payment), 0n);
-    const realized = ((px(exitPrice) - px(o.entry)) * sz(SIZE)) / 10n ** 10n;          // negative; exact (prices on the tick x 0.4)
-    const liqFee = (px(exitPrice) * sz(SIZE) * BigInt(LIQ_FEE_PPM) + 10n ** 16n - 1n) / 10n ** 16n;
-    return { want: usdc(victim.deposit) - o.openFee + funding + realized - liqFee, funding, realized, liqFee };
+    // realized PnL credited to the balance: floor of the exact amount (S-0.3: the user receives at most the exact value)
+    const n = (px(exitPrice) - px(o.entry)) * sz(SIZE), d = 10n ** 10n;
+    const realized = n >= 0n ? n / d : -((-n + d - 1n) / d);
+    const got = await bal(api, victim.address);
+    const liqFee = usdc(victim.deposit) - o.openFee + funding + realized - got;
+    const dIns = (await bal(api, SYSTEM.insurance)) - ins0;
+    expect(liqFee > 0n, `no liquidation fee in the ledger: balance ${fmtUsdc(got)}, funding ${fmtUsdc(funding)}, realized ${fmtUsdc(realized)}`);
+    expect(dIns >= liqFee && dIns <= liqFee + 20n, `the victim's ledger is short by ${fmtUsdc(liqFee)}, the insurance fund received ${fmtUsdc(dIns)} (the difference may only be funding rounding residue)`);
+    // fee = ceil(size * M * ppm / 1e6 / 1e10)  =>  M in ((fee - 1) * 1e16 / (size * ppm), fee * 1e16 / (size * ppm)]
+    const markImplied = Number((liqFee * 10n ** 16n) / (sz(SIZE) * BigInt(LIQ_FEE_PPM))) / 1e8;
+    const lo = Math.min(Number(path.from), Number(path.to)) * 0.995, hi = Math.max(Number(path.from), Number(path.to)) * 1.005;
+    expect(markImplied >= lo && markImplied <= hi, `the fee ${fmtUsdc(liqFee)} is 0.5% of 0.4 BTC at ${markImplied}, outside the mark band of the path [${lo.toFixed(1)}, ${hi.toFixed(1)}]`);
+    expect((await api.account(victim.address)).openOrders === 0, 'orders left');
+    return { balance: fmtUsdc(got), deposit: victim.deposit, openFee: fmtUsdc(o.openFee), funding: fmtUsdc(funding), realized: fmtUsdc(realized), liquidationFee: fmtUsdc(liqFee), markImpliedByTheFee: markImplied, insuranceDelta: fmtUsdc(dIns), realizedUnits: realized };
   };
   const lastFill = async (a) => (await api.json(`/v1/accounts/${a}/fills?limit=1`)).fills[0];
   const lastTradeId = async () => (await api.json('/v1/markets/BTC-USD/trades?limit=1')).trades[0]?.tradeId ?? null;
@@ -75,22 +93,18 @@ export default async function (ctx) {
       expect(tr.tradeId !== tape0 && tr.tradeId === f.tradeId && tr.liquidation === true, `tape ${JSON.stringify(tr)}`);
       return { path, victimFill: f, makerFill: fm };
     });
-    await ctx.check('E-12', 'the victim keeps exactly deposit - open fee + funding + realized loss - liquidation fee (0.5% of the liquidated notional); the insurance fund receives that fee', async () => {
+    await ctx.check('E-12', 'the victim\'s ledger closes to the unit: deposit - open fee + funding + realized loss - liquidation fee, and that fee (0.5% of size x mark) is exactly what the insurance fund received', async () => {
       const f = await lastFill(v.address);
-      const e = await expectedBalance(v, o, f.price);
-      const got = await bal(api, v.address);
-      expect(got === e.want, `balance ${fmtUsdc(got)}, expected ${fmtUsdc(e.want)} (funding ${fmtUsdc(e.funding)}, realized ${fmtUsdc(e.realized)}, liquidation fee ${fmtUsdc(e.liqFee)})`);
-      const dIns = (await bal(api, SYSTEM.insurance)) - ins0;
-      expect(dIns >= e.liqFee && dIns <= e.liqFee + 20n, `insurance +${fmtUsdc(dIns)}, liquidation fee ${fmtUsdc(e.liqFee)} (the rest may only be funding rounding residue)`);
-      expect((await api.account(v.address)).openOrders === 0, 'orders left');
-      return { balance: fmtUsdc(got), openFee: fmtUsdc(o.openFee), funding: fmtUsdc(e.funding), realized: fmtUsdc(e.realized), liquidationFee: fmtUsdc(e.liqFee), insuranceDelta: fmtUsdc(dIns) };
+      const { realizedUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
+      expect(usdc(f.realizedPnl) === realizedUnits, `published realizedPnl ${f.realizedPnl}, exact ${fmtUsdc(realizedUnits)}`);
+      return ev;
     });
   }
 
   // ---------------- E-2x: auto-deleveraging (no bid in reach, backstop without funds) ----------------
   {
     const v = ctx.who('liq-adl');
-    let o, ins0, tape0, m0;
+    let o, ins0, tape0, m0, path;
     await ctx.check('E-20', 'setup: no bid in the book, the backstop has no balance; the victim is long 0.4 BTC at 20x against the maker', async () => {
       await api.cancelAll(maker);
       expect((await position(maker.address)) === null, `maker not flat: ${JSON.stringify(await position(maker.address))}`);
@@ -105,7 +119,7 @@ export default async function (ctx) {
     });
     await ctx.check('E-21', 'the index falls again: with no book and no backstop the position is closed by ADL against the profitable short, outside the book, without fee to either side and never beyond the victim\'s bankruptcy price', async () => {
       expect(o, 'setup failed');
-      const path = await ramp('liq-adl', onTick(btc, (await ticker()).indexPrice, -400), 12);
+      path = await ramp('liq-adl', onTick(btc, (await ticker()).indexPrice, -400), 12);
       await liquidated(v);
       const f = await lastFill(v.address), fm = await lastFill(maker.address);
       expect(f.liquidation === true && f.orderId === '0' && f.side === 'sell' && Number(f.size) === Number(SIZE), `victim fill ${JSON.stringify(f)}`);
@@ -118,24 +132,20 @@ export default async function (ctx) {
       expect(b.positions.length === 0 && usdc(b.collateral) === 0n, 'the unfunded backstop took something');
       return { path, victimFill: f, counterpartyFill: fm, bankruptcyPriceAtOpen: bankruptcy.toFixed(2) };
     });
-    await ctx.check('E-22', 'the victim\'s balance is exact to the unit; the counterparty realized its profit at the ADL price', async () => {
+    await ctx.check('E-22', 'the victim\'s ledger closes to the unit (fee = what the insurance fund received); the counterparty realized exactly the victim\'s loss at the ADL price', async () => {
       const f = await lastFill(v.address);
-      const e = await expectedBalance(v, o, f.price);
-      const got = await bal(api, v.address);
-      expect(got === e.want, `balance ${fmtUsdc(got)}, expected ${fmtUsdc(e.want)} (funding ${fmtUsdc(e.funding)}, realized ${fmtUsdc(e.realized)}, liquidation fee ${fmtUsdc(e.liqFee)})`);
-      const dIns = (await bal(api, SYSTEM.insurance)) - ins0;
-      expect(dIns >= e.liqFee && dIns <= e.liqFee + 20n, `insurance +${fmtUsdc(dIns)}, fee ${fmtUsdc(e.liqFee)}`);
+      const { realizedUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
       const mFund = (await api.json(`/v1/accounts/${maker.address}/funding?limit=50`)).payments.filter((p) => p.time >= o.t).reduce((t, p) => t + usdc(p.payment), 0n);
-      const mWant = m0 + mFund - e.realized;    // the maker sold at the entry and bought back at the ADL price: the victim's loss is its gain
+      const mWant = m0 + mFund - realizedUnits;    // the maker sold at the entry and bought back at the ADL price: the victim's loss is its gain
       expect((await bal(api, maker.address)) === mWant, `maker ${fmtUsdc(await bal(api, maker.address))}, expected ${fmtUsdc(mWant)}`);
-      return { balance: fmtUsdc(got), realized: fmtUsdc(e.realized), liquidationFee: fmtUsdc(e.liqFee), counterpartyGain: fmtUsdc(-e.realized) };
+      return { ...ev, counterpartyGain: fmtUsdc(-realizedUnits) };
     });
   }
 
   // ---------------- E-3x: through the backstop, funded through the vault ----------------
   {
     const v = ctx.who('liq-backstop');
-    let o, ins0, tape0;
+    let o, ins0, tape0, path;
     await ctx.check('E-30', 'the insurance fund (60,000) and the backstop (25,000) are seeded by plain deposits through the vault to the system accounts', async () => {
       blockedIf(!chain, 'fake L2 stand-in: no vault to deposit through');
       const funder = user('treasury').address;
@@ -162,7 +172,7 @@ export default async function (ctx) {
       expect(r.body?.result?.ok, JSON.stringify(r.body));
       o = await open(v, ask);
       ins0 = await bal(api, SYSTEM.insurance); tape0 = await lastTradeId();
-      const path = await ramp('liq-backstop', onTick(btc, (await ticker()).indexPrice, -400), 12);
+      path = await ramp('liq-backstop', onTick(btc, (await ticker()).indexPrice, -400), 12);
       await liquidated(v);
       const f = await lastFill(v.address);
       expect(f.liquidation === true && f.orderId === '0' && f.side === 'sell' && Number(f.size) === Number(SIZE), `victim fill ${JSON.stringify(f)}`);
@@ -174,17 +184,13 @@ export default async function (ctx) {
       await api.cancelAll(maker);
       return { path, entry: o.entry, victimFill: f, backstopPosition: bp, makerPosition: mp.size };
     });
-    await ctx.check('E-32', 'the victim\'s balance is exact to the unit; sizes still sum to zero (maker short, backstop long)', async () => {
+    await ctx.check('E-32', 'the victim\'s ledger closes to the unit (fee = what the insurance fund received); sizes still sum to zero (maker short, backstop long)', async () => {
       const f = await lastFill(v.address);
-      const e = await expectedBalance(v, o, f.price);
-      const got = await bal(api, v.address);
-      expect(got === e.want, `balance ${fmtUsdc(got)}, expected ${fmtUsdc(e.want)} (funding ${fmtUsdc(e.funding)}, realized ${fmtUsdc(e.realized)}, liquidation fee ${fmtUsdc(e.liqFee)})`);
-      const dIns = (await bal(api, SYSTEM.insurance)) - ins0;
-      expect(dIns >= e.liqFee && dIns <= e.liqFee + 20n, `insurance +${fmtUsdc(dIns)}, fee ${fmtUsdc(e.liqFee)}`);
+      const { realizedUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
       let sum = 0n;
       for (const a of [...ctx.CAST.map((c) => c.address), ...Object.values(SYSTEM)]) { const p = await position(a); if (p) sum += sz(p.size.replace('-', '')) * (p.size.startsWith('-') ? -1n : 1n); }
       expect(sum === 0n, `BTC sizes sum to ${sum}`);
-      return { balance: fmtUsdc(got), realized: fmtUsdc(e.realized), liquidationFee: fmtUsdc(e.liqFee), insuranceDelta: fmtUsdc(dIns) };
+      return ev;
     });
   }
 }
