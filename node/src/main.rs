@@ -55,7 +55,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--oracle-token-file F] [--oracle-gather-ms 500] [--geoblock FILE] [--ip-rate 50] [--account-rate 20] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A[,http://B] --relay-key-file F [--relay-poll-ms 2000]] [--geoblock FILE] [--ip-rate 50] [--account-rate 20] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -298,9 +298,32 @@ async fn dev(a: HashMap<String, String>) {
     eprintln!("recovered: {:?}", seq.recovered);
     let app = App::with(g.clone(), seq, geo, Mode::Dev, seq_view, get(&a, "block-ms", 200), l2.is_some(), token, oracle_token);
     *app.ip_rate.lock().unwrap() = RateLimit::new(get(&a, "ip-rate", 50.0), get(&a, "ip-rate", 50.0) * 2.0);
+    if let Some(o) = a.get("cors-origin") {
+        *app.cors_origin.lock().unwrap() = o.clone();
+    }
     let engines: Vec<Box<dyn Engine>> = (0..local).map(|_| mk_engine(&g)).collect();
     spawn_local_validators(&app, keys.validators.iter().take(local).cloned().collect(), engines, val_views, &stop_rx).expect("validators");
     tokio::spawn(run_producer(app.clone(), stop_rx.clone()));
+    // the checkpoint relayer (VAULT.md 8a): a gas-only hot key from a FILE (never a flag value), dev: a throwaway key
+    if let Some(eps) = a.get("relay-rpc") {
+        let key = match a.get("relay-key-file").map(|p| perps_node::relayer::read_key_file(std::path::Path::new(p))) {
+            Some(Ok(k)) => k,
+            Some(Err(e)) => die(e),
+            None => die("--relay-rpc needs --relay-key-file F (a gas-only key; chmod 600)".into()),
+        };
+        let cfg = perps_node::relayer::RelayConfig {
+            endpoints: eps.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+            key,
+            vault: g.vault,
+            poll_ms: get(&a, "relay-poll-ms", 2000u64).max(100),
+            receipt_timeout_ms: get(&a, "relay-receipt-timeout-ms", 30_000u64),
+        };
+        if cfg.endpoints.is_empty() {
+            die("--relay-rpc: at least one endpoint".into());
+        }
+        eprintln!("checkpoint relayer {} -> vault {}", perps_node::util::to_hex(&perps_node::sig::key_address(&cfg.key)), perps_node::util::to_hex(&g.vault));
+        tokio::spawn(perps_node::relayer::run(app.clone(), cfg, stop_rx.clone()));
+    }
     if a.contains_key("dev-oracle") {
         #[cfg(feature = "dev-oracle")]
         {

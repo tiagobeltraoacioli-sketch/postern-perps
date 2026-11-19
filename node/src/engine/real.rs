@@ -201,6 +201,9 @@ impl Engine for RealEngine {
     fn block_limits(&self) -> (usize, usize) {
         (pe::engine::MAX_INPUTS, pe::engine::MAX_BLOCK_BYTES)
     }
+    fn genesis_document(&self) -> Option<Vec<u8>> {
+        Some(self.e.g.g.encoding().into())
+    }
     fn oracle_time_bounds(&self) -> (u64, u64) {
         (self.e.g.g.oracle_max_future_ms, self.e.g.g.oracle_max_age_ms)
     }

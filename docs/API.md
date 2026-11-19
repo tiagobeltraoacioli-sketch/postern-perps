@@ -50,8 +50,10 @@ Canonical data rules (action types, EIP-712 typed data, numeric scales, state ro
   orders (open orders are never dropped). The index is rebuilt from the input log at start, so a restarted node
   serves the same history.
 - **Rate limits.** Per IP and per account; `429 RATE_LIMITED` with `Retry-After` (seconds). Defaults in section 8.
-- **CORS.** `Access-Control-Allow-Origin` is the configured frontend origin (`*` in mock mode). No cookies, no
-  sessions: authority comes only from EIP-712 signatures.
+- **CORS.** `Access-Control-Allow-Origin` is the configured frontend origin (`--cors-origin`; `*` in mock mode and
+  by default in dev mode). A preflight (`OPTIONS`) is answered `204` with `GET, POST, OPTIONS` and the headers
+  `content-type, x-postern-geo, x-postern-geo-mac, x-mock-country`. No cookies, no sessions: authority comes only
+  from EIP-712 signatures.
 
 ## 2. Market data (public, not geoblocked)
 
@@ -192,7 +194,8 @@ node RELAYS them; the ENGINE verifies and decides (oracle/README rules C1 to C5)
 
 `mode`: `mock`, `dev` (single process, throwaway keys), `live`. `sequencer.state`: `running`, `recovering`,
 `halted`. `vaultMode`: `normal`, `paused`, `escape`, `unknown` (what the node's checkpoint relayer last read from
-the vault; `unknown` without a relayer). `network.collateralToken` is the address given with `--token` (zero when
+the vault; `unknown` without a relayer: the relayer is the keeper of `docs/VAULT.md` 8a, started with
+`--relay-rpc` and `--relay-key-file`, and it submits CHECKPOINTS only). `network.collateralToken` is the address given with `--token` (zero when
 not given). `GET /v1/node` holds diagnostics outside this schema (engine, validators, L2 watcher, recovery, the
 index's cross-check counters, the oracle ingest pool, proof frames, the relayer).
 
@@ -235,6 +238,10 @@ checkpoint from `GET /v1/committee` plus this object without trusting the API ho
  "inputsEncoded":"0x…","sequencerSignature":"0x…"}
 ```
 
+`GET /v1/genesis` returns the ENGINE's genesis document, byte for byte what `logHash(0)` commits to
+(`logHash(0) = keccak256("PosternPerps/genesis/v1" || document)`; R435-1): with it and `/v1/blocks/stream` anyone
+replays the exchange with the engine CLI (`engine replay <genesis.json> <log.jsonl>`) from published data only.
+
 `inputsEncoded` is the canonical byte encoding of the block's inputs as `docs/SPEC.md` defines it (what the engine
 consumes and what `logHash` commits to: `logHash = keccak256(prevLogHash || height || time || keccak256(inputsEncoded))`);
 `inputs` is the same content decoded for people. Heights with no input do not exist (empty blocks are skipped), so
@@ -268,6 +275,7 @@ consumes and what `logHash` commits to: `logHash = keccak256(prevLogHash || heig
  "positions":[Position],"openOrders":2}
 ```
 
+`collateral` is the engine's balance of the account (signed: a negative balance is recorded bad debt).
 `marginRatio` = maintenanceMargin / equity (liquidation at 1 or above; `"0"` without a requirement; the cap
 `"1000000"` when equity is not positive). An unknown address returns a zero account, not 404. `freeCollateral` and
 `withdrawable` are the engine's own `free_collateral` (SPEC S-9.2: what a `Withdraw` may take now). `feeTier.volume30d`
@@ -283,7 +291,9 @@ keeps its v0.1 name and holds the volume the ENGINE uses for fee tiers, which is
  "initialMargin":"3362.560000","maintenanceMargin":"336.256000","fundingSinceOpen":"-1.220000"}
 ```
 
-`liquidationPrice` is the mark of this market at which the engine's test `equity < maintenance` first holds with
+`openNotional` (v0.3 addition) is the engine's own integer for the position: the signed sum of size x price of the
+open part in notional units (1e-16 USD) as a decimal string; clients that compute exactly use it instead of
+`size x entryPrice` (`entryPrice` is truncated). `liquidationPrice` is the mark of this market at which the engine's test `equity < maintenance` first holds with
 every other mark held still (for a long the highest such price, for a short the lowest), found by exact integer
 search; `null` when no price does. `entryPrice` = open notional / size. `realizedPnl` and `fundingSinceOpen` are
 the sums credited to the balance since the position last opened or flipped. `marginMode` is always `cross` and
@@ -383,7 +393,8 @@ it only when the siblings rebuild that checkpoint's `withdrawalsRoot`).
 `status`: `requested` (action accepted), `included` (debited by the engine), `finalized` (in a finalized
 checkpoint), `certified` (k-of-n signatures collected: anyone may now submit the certificate to the vault),
 `submitted` (L2 transaction seen), `delayed` (the vault holds a large amount until `availableAt`), `paid`,
-`rejected`. v0.3 reports `included` and `certified` only: the node does not watch the vault's payout events, and
+`rejected`. `amount` is the NET amount the vault pays (the gross amount of the `Withdraw` action minus `fee`), in
+the object and in the certificate's record alike. v0.3 reports `included` and `certified` only: the node does not watch the vault's payout events, and
 its relayer submits checkpoints, not withdrawals (the user or the frontend calls `withdraw`). `time` is the engine
 time of the block that created the record. `certificate` is null before `certified`; its `record`, `digest` and `proof`
 are exactly the vault's input (`docs/VAULT.md`), so a user can submit it without any relayer.
@@ -642,6 +653,7 @@ version; clients must ignore unknown fields. Anything else raises the major vers
   rule fails is counted in `GET /v1/node` (`index.mismatches`, zero in every test).
 - `Withdrawal.status` stops at `certified`; `Deposit.status` never shows `seen`; `OracleStatus.sources` is empty.
 - `feeTier.volume30d` is a 14-day volume (name kept from v0.1); a `volume14d` field needs a schema change.
+- `Position.openNotional` is new in v0.3 and not yet in the draft schema.
 - `?finalized=true` exists for `GET /v1/accounts/{address}` only (not for market reads), and its positions carry
   zero `realizedPnl` / `fundingSinceOpen`.
 - The machine-readable schema is still the draft `node/mock/schema/api.schema.json` (agent 435): the v0.3

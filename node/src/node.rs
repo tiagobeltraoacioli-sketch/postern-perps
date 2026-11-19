@@ -56,6 +56,9 @@ pub struct App {
     pub collateral_token: crate::util::Address,
     /// Bearer token of the oracle ingest paths (`--oracle-token-file`); `None` = ingest disabled.
     pub oracle_token: Option<Vec<u8>>,
+    /// `Access-Control-Allow-Origin` of every response (`--cors-origin`; dev default `*`: no cookies, no
+    /// sessions, authority comes only from signatures).
+    pub cors_origin: Mutex<String>,
     /// The checkpoint relayer's view of the vault (`crate::relayer`). Lock order: `seq` before `relay`.
     pub relay: Mutex<crate::relayer::RelayState>,
 }
@@ -86,6 +89,7 @@ impl App {
             collateral_token,
             oracle_token,
             relay: Mutex::new(crate::relayer::RelayState::default()),
+            cors_origin: Mutex::new("*".into()),
             g,
             seq: Mutex::new(seq),
             geo,

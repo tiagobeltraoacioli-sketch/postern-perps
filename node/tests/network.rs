@@ -678,6 +678,17 @@ async fn real_engine_oracle_ingest_market_data_and_websocket_channels() {
     let (_, ni) = get_json(&format!("{base}/v1/node")).await;
     assert_eq!((ni["index"]["mismatches"].as_u64(), ni["oracleIngest"]["enabled"].as_bool()), (Some(0), Some(true)), "{ni}");
 
+    // R435-1: the published genesis document is what logHash(0) commits to; with /v1/blocks/stream it replays
+    let (st, doc) = http_call("GET", &format!("{base}/v1/genesis"), None, &[]).await.unwrap();
+    assert_eq!(st, 200);
+    assert_eq!(to_hex(&perps_node::util::keccak_parts(&[b"PosternPerps/genesis/v1", &doc])), ni["genesisLogHash"].as_str().unwrap(), "keccak(prefix || document) = logHash(0)");
+    let parsed = postern_perps_engine::genesis::Genesis::from_json(std::str::from_utf8(&doc).unwrap()).expect("the engine CLI's own parser reads it");
+    assert_eq!(parsed.g.markets.len(), 3);
+    // CORS preflight is answered by the node (API.md section 1)
+    let (st, _) = http_call("OPTIONS", &format!("{base}/v1/actions"), None, &[("Origin", "http://127.0.0.1:49920"), ("Access-Control-Request-Method", "POST")]).await.unwrap();
+    assert_eq!(st, 204);
+    assert_eq!(acc["positions"][0]["openNotional"], "94150000000000000000", "0.14 BTC x 67,250 in 1e-16 USD");
+
     // the account proof against the latest final checkpoint (the validators sign in real time)
     let mut proof = serde_json::Value::Null;
     for _ in 0..80 {

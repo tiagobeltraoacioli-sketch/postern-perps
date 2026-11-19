@@ -227,6 +227,10 @@ pub trait Engine: Send + Sync {
     fn oracle_time_bounds(&self) -> (u64, u64) {
         (u64::MAX, u64::MAX)
     }
+    /// The engine's genesis document: the exact bytes whose hash is `logHash(0)` (R435-1), `None` for the stub.
+    fn genesis_document(&self) -> Option<Vec<u8>> {
+        None
+    }
     /// The real engine behind this adapter (`None` for the stub): read-only access for the API views and the index.
     fn real(&self) -> Option<&postern_perps_engine::Engine> {
         None

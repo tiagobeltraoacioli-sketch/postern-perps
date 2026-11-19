@@ -51,6 +51,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/status", get(status))
         .route("/v1/node", get(node_info))
         .route("/v1/eip712", get(eip712))
+        .route("/v1/genesis", get(genesis_doc))
         .route("/v1/markets", get(markets))
         .route("/v1/markets/{symbol}", get(market))
         .route("/v1/tickers", get(tickers))
@@ -90,6 +91,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/oracle/{symbol}", get(oracle_status))
         .fallback(|| async { not_found("unknown endpoint") })
         .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(axum::middleware::from_fn_with_state(app.clone(), cors))
         .with_state(app)
 }
 
@@ -146,6 +148,36 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
         "committeeSetHash": to_hex(&app.g.committee_set_hash()),
     }))
     .into_response()
+}
+
+/// CORS (API.md section 1): every response carries the configured origin; a preflight is answered here. The API
+/// has no cookies and no sessions, so the header grants nothing a non-browser client does not already have.
+async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let origin = app.cors_origin.lock().unwrap().clone();
+    let preflight = req.method() == axum::http::Method::OPTIONS;
+    let mut resp = if preflight { StatusCode::NO_CONTENT.into_response() } else { next.run(req).await };
+    let h = resp.headers_mut();
+    if let Ok(v) = HeaderValue::from_str(&origin) {
+        h.insert("access-control-allow-origin", v);
+    }
+    h.insert("vary", HeaderValue::from_static("origin"));
+    if preflight {
+        h.insert("access-control-allow-methods", HeaderValue::from_static("GET, POST, OPTIONS"));
+        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country"));
+        h.insert("access-control-max-age", HeaderValue::from_static("600"));
+    }
+    resp
+}
+
+/// R435-1: the engine's genesis document, byte for byte what `logHash(0)` commits to
+/// (`keccak256("PosternPerps/genesis/v1" || document)`), so anyone can replay `/v1/blocks/stream` with the engine
+/// CLI from published data only.
+async fn genesis_doc(State(app): State<Arc<App>>) -> Response {
+    let doc = app.seq.lock().unwrap().engine.genesis_document();
+    match doc {
+        Some(d) => ([("content-type", "application/json")], d).into_response(),
+        None => not_found("the stub engine has no genesis document"),
+    }
 }
 
 async fn eip712(State(app): State<Arc<App>>) -> Response {

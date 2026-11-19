@@ -290,6 +290,9 @@ pub fn positions_json(e: &pe::Engine, ai: u32, extras: &dyn Fn(u32) -> PositionE
         let x = extras(*mid);
         out.push(serde_json::json!({
             "symbol": m.p.symbol, "size": exact8_signed(pos.size), "entryPrice": exact8(entry), "markPrice": exact8(m.mark),
+            // the engine's own integer (signed sum of size x price of the open part, 1e-16 USD): exact where
+            // entryPrice is truncated
+            "openNotional": pos.open_notional.to_string(),
             "notional": usdc(n_floor(abs * m.mark as i128)), "unrealizedPnl": usdc(n_floor(upnl)),
             "realizedPnl": usdc(x.realized_pnl),
             "liquidationPrice": liquidation_price(e, ai, *mid).map(exact8),
