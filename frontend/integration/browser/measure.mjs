@@ -50,6 +50,11 @@ const initScript = String.raw`
   } catch {}
 })();`;
 
+const eligibility = readFileSync(new URL('../../src/compliance/eligibility.ts', import.meta.url), 'utf8');
+const constant = (name) => new RegExp(`${name} = '([^']+)'`).exec(eligibility)[1];
+const ATTESTATION_KEY = constant('KEY');
+const ATTESTATION = JSON.stringify([{ message: { account: '0x1111111111111111111111111111111111111111', statementId: constant('STATEMENT_ID'), statementHash: constant('STATEMENT_HASH'), residenceCountry: 'PT', issuedAt: String(Date.now()), expiresAt: String(Date.now() + 86_400_000) }, signature: '0x' }]);
+
 const quantile = (list, q) => {
   if (!list.length) return null;
   const s = [...list].sort((a, b) => a - b);
@@ -95,16 +100,32 @@ try {
     for (const theme of ['dark', 'light']) {
       await page.goto(APP);
       await page.evaluate(`localStorage.setItem('postern.theme.v1', ${JSON.stringify(theme)})`);
-      for (const route of ROUTES) {
-        await page.goto(`${APP}${route}`);
-        await page.reload();
-        await connect();
-        await delay(2500);
+      const check = async (route) => {
         await page.evaluate(axeSource);
         const r = JSON.parse(
           await page.evaluate(`axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] }, resultTypes: ['violations', 'incomplete'] }).then((r) => JSON.stringify({ version: axe.version, passes: r.passes.length, violations: r.violations.map((v) => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.slice(0, 6).map((n) => ({ target: n.target.join(' '), summary: (n.failureSummary || '').slice(0, 220) })), count: v.nodes.length })), incomplete: r.incomplete.map((v) => ({ id: v.id, count: v.nodes.length })) }))`),
         );
         runs.push({ theme, route, ...r });
+      };
+      for (const route of ROUTES) {
+        await page.evaluate(`localStorage.removeItem(${JSON.stringify(ATTESTATION_KEY)})`);
+        await page.goto(`${APP}${route}`);
+        await page.reload();
+        await connect();
+        await delay(2500);
+        await check(route);
+        if (!route.startsWith('#/trade')) continue;
+        // The terminal again with the order form drawn (a display-only attestation record: nothing can be signed with
+        // it) and then with the depth view and the moving averages on.
+        await page.evaluate(`localStorage.setItem(${JSON.stringify(ATTESTATION_KEY)}, ${JSON.stringify(ATTESTATION)})`);
+        await page.reload();
+        await connect();
+        await delay(2500);
+        await check(`${route} (order form)`);
+        await page.evaluate(`(() => { document.querySelector('.side-tabs [data-tab=depth]')?.click(); const m = document.querySelector('.pc-ma-toggle'); if (m && m.getAttribute('aria-pressed') !== 'true') m.click(); })()`);
+        await delay(800);
+        await check(`${route} (depth view, averages on)`);
+        await page.evaluate(`(() => { const m = document.querySelector('.pc-ma-toggle'); if (m && m.getAttribute('aria-pressed') === 'true') m.click(); })()`);
       }
     }
     result.accessibility = { tool: 'axe-core', version: runs[0]?.version, licence: 'MPL-2.0 (run from a scratch copy; not a dependency, not bundled)', rules: 'wcag2a, wcag2aa, wcag21a, wcag21aa, best-practice', pages: runs.length, violations: runs.reduce((s, r) => s + r.violations.reduce((t, v) => t + v.count, 0), 0), runs };

@@ -4138,7 +4138,7 @@ td.strong {
     width: 100%;
     min-width: 0;
     padding-left: var(--s-2);
-    font-size: var(--text-small);
+    font-size: var(--text-micro);
   }
   .options .check {
     font-size: var(--text-small);

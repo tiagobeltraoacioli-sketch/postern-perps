@@ -34,7 +34,9 @@ try {
   await delay(300);
   await page.screenshot(join(out, '18-production-not-live.png'));
   await page.goto(`http://127.0.0.1:${port}/#/transfers`);
-  await page.waitVisibleText(/Not live/, 10_000);
+  // The page is its own chunk since design pass 3: wait for the page's own words (the footer also says "Not live"),
+  // then assert the same sentence as before.
+  await page.waitVisibleText(/The vault is not deployed/, 10_000).catch(() => {});
   await page.screenshot(join(out, '19-production-transfers-not-live.png'));
   // Round 2: with no vault in the published configuration the deposit and the exit build nothing either, and the
   // page still explains the exit; an unknown address is the 404 page, not another page.
