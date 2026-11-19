@@ -48,6 +48,7 @@ export default async function (ctx) {
     // realized PnL credited to the balance: floor of the exact amount (S-0.3: the user receives at most the exact value)
     const n = (px(exitPrice) - px(o.entry)) * sz(SIZE), d = 10n ** 10n;
     const realized = n >= 0n ? n / d : -((-n + d - 1n) / d);
+    const counterGain = n >= 0n ? -((n + d - 1n) / d) : (-n) / d;   // the other side of the same transfer, also rounded against the user
     const got = await bal(api, victim.address);
     const liqFee = usdc(victim.deposit) - o.openFee + funding + realized - got;
     const dIns = (await bal(api, SYSTEM.insurance)) - ins0;
@@ -58,7 +59,7 @@ export default async function (ctx) {
     const lo = Math.min(Number(path.from), Number(path.to)) * 0.995, hi = Math.max(Number(path.from), Number(path.to)) * 1.005;
     expect(markImplied >= lo && markImplied <= hi, `the fee ${fmtUsdc(liqFee)} is 0.5% of 0.4 BTC at ${markImplied}, outside the mark band of the path [${lo.toFixed(1)}, ${hi.toFixed(1)}]`);
     expect((await api.account(victim.address)).openOrders === 0, 'orders left');
-    return { balance: fmtUsdc(got), deposit: victim.deposit, openFee: fmtUsdc(o.openFee), funding: fmtUsdc(funding), realized: fmtUsdc(realized), liquidationFee: fmtUsdc(liqFee), markImpliedByTheFee: markImplied, insuranceDelta: fmtUsdc(dIns), realizedUnits: realized };
+    return { balance: fmtUsdc(got), deposit: victim.deposit, openFee: fmtUsdc(o.openFee), funding: fmtUsdc(funding), realized: fmtUsdc(realized), liquidationFee: fmtUsdc(liqFee), markImpliedByTheFee: markImplied, insuranceDelta: fmtUsdc(dIns), realizedUnits: realized, counterGainUnits: counterGain };
   };
   const lastFill = async (a) => (await api.json(`/v1/accounts/${a}/fills?limit=1`)).fills[0];
   const lastTradeId = async () => (await api.json('/v1/markets/BTC-USD/trades?limit=1')).trades[0]?.tradeId ?? null;
@@ -95,7 +96,7 @@ export default async function (ctx) {
     });
     await ctx.check('E-12', 'the victim\'s ledger closes to the unit: deposit - open fee + funding + realized loss - liquidation fee, and that fee (0.5% of size x mark) is exactly what the insurance fund received', async () => {
       const f = await lastFill(v.address);
-      const { realizedUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
+      const { realizedUnits, counterGainUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
       expect(usdc(f.realizedPnl) === realizedUnits, `published realizedPnl ${f.realizedPnl}, exact ${fmtUsdc(realizedUnits)}`);
       return ev;
     });
@@ -134,11 +135,14 @@ export default async function (ctx) {
     });
     await ctx.check('E-22', 'the victim\'s ledger closes to the unit (fee = what the insurance fund received); the counterparty realized exactly the victim\'s loss at the ADL price', async () => {
       const f = await lastFill(v.address);
-      const { realizedUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
+      const { realizedUnits, counterGainUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
       const mFund = (await api.json(`/v1/accounts/${maker.address}/funding?limit=50`)).payments.filter((p) => p.time >= o.t).reduce((t, p) => t + usdc(p.payment), 0n);
-      const mWant = m0 + mFund - realizedUnits;    // the maker sold at the entry and bought back at the ADL price: the victim's loss is its gain
+      // the maker sold at the entry and bought back at the ADL price: its gain is the victim's loss, each side rounded
+      // against the user (the loss up, the gain down: S-0.3); the at most one unit between them goes to the dust
+      const mWant = m0 + mFund + counterGainUnits;
       expect((await bal(api, maker.address)) === mWant, `maker ${fmtUsdc(await bal(api, maker.address))}, expected ${fmtUsdc(mWant)}`);
-      return { ...ev, counterpartyGain: fmtUsdc(-realizedUnits) };
+      expect(-realizedUnits - counterGainUnits >= 0n && -realizedUnits - counterGainUnits <= 1n, 'loss and gain differ by more than the rounding unit');
+      return { ...ev, counterpartyGain: fmtUsdc(counterGainUnits), roundingResidueUnits: String(-realizedUnits - counterGainUnits) };
     });
   }
 
@@ -186,7 +190,7 @@ export default async function (ctx) {
     });
     await ctx.check('E-32', 'the victim\'s ledger closes to the unit (fee = what the insurance fund received); sizes still sum to zero (maker short, backstop long)', async () => {
       const f = await lastFill(v.address);
-      const { realizedUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
+      const { realizedUnits, counterGainUnits, ...ev } = await ledger(v, o, f.price, path, ins0);
       let sum = 0n;
       for (const a of [...ctx.CAST.map((c) => c.address), ...Object.values(SYSTEM)]) { const p = await position(a); if (p) sum += sz(p.size.replace('-', '')) * (p.size.startsWith('-') ? -1n : 1n); }
       expect(sum === 0n, `BTC sizes sum to ${sum}`);
