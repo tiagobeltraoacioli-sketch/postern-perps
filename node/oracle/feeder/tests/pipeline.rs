@@ -12,11 +12,24 @@ use perps_oracle::types::{round_of, OracleUpdate, SignedObservation};
 use perps_oracle::{eip712, encoding, sig, ROUND_MS};
 use perps_oracle_feeder::json;
 use perps_oracle_feeder::keyfile::dev_key;
-use perps_oracle_feeder::pipeline::{default_config, Feeder, Response};
+use perps_oracle_feeder::pipeline::{Feeder, FeederConfig, Response};
 use perps_oracle_feeder::venues::default_sources;
 use serde_json::Value;
 
 const VAULT: [u8; 20] = [0xdb; 20];
+
+/// Round 2 (R432-1): the crate's default configuration now signs at the engine's price scale (1e-8 USD). Every
+/// test of this file was written in round 1 with expected prices at the display decimals (BTC 1, ETH 2, SOL 3) and
+/// keeps them unchanged through this configuration: the rules under test (F1 to F6, C1 to C5, H1 to H3) do not
+/// depend on the scale. The engine-scale configuration is tested in `tests/r2.rs`, including the equality of the
+/// two golden files up to rounding.
+fn default_config() -> FeederConfig {
+    let mut c = perps_oracle_feeder::pipeline::default_config();
+    for (m, d) in c.markets.iter_mut().zip([1u8, 2, 3]) {
+        m.price_decimals = d;
+    }
+    c
+}
 
 fn mp(id: u32, jump: u32) -> MarketParams {
     MarketParams {

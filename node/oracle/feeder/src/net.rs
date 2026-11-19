@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,9 +12,11 @@ use perps_oracle::types::round_of;
 use perps_oracle::{eip712, sig, ROUND_MS};
 use serde_json::json;
 
+use crate::health::{classify, Health};
 use crate::json;
 use crate::keyfile;
 use crate::pipeline::{default_config, Feeder, FeederConfig, Response};
+use crate::recording::{round_line, Fetch};
 use crate::venues::Source;
 
 pub const FETCH_TIMEOUT_MS: u64 = 1500;
@@ -35,62 +37,74 @@ fn all_sources(c: &FeederConfig) -> Vec<Source> {
     v
 }
 
-/// One fetch per source, concurrently. Returns the responses and each response's HTTP `Date` (ms) if present.
-pub fn fetch_all(sources: &[Source]) -> Vec<(Response, Option<u64>, String)> {
+/// The generic client name sent to the venues (nothing identifying an operator or a project).
+pub const USER_AGENT: &str = "ticker-client/1.0";
+
+/// The requests of one round: one per distinct URL (a batched request serves several sources), in first-use order.
+pub fn fetch_units(sources: &[Source]) -> Vec<(String, Vec<String>)> {
+    let mut units: Vec<(String, Vec<String>)> = Vec::new();
+    for s in sources {
+        match units.iter_mut().find(|(u, _)| *u == s.url) {
+            Some((_, names)) => {
+                if !names.contains(&s.name) {
+                    names.push(s.name.clone());
+                }
+            }
+            None => units.push((s.url.clone(), vec![s.name.clone()])),
+        }
+    }
+    units
+}
+
+/// One GET per unit, concurrently. A unit for which `skip` is true is not requested (drop rule D2).
+pub fn fetch_all(units: &[(String, Vec<String>)], skip: &dyn Fn(&str) -> bool) -> Vec<Fetch> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_millis(FETCH_TIMEOUT_MS)))
-        .user_agent("perps-oracle/0.1")
+        .user_agent(USER_AGENT)
+        .http_status_as_error(false)
         .build()
         .into();
-    let handles: Vec<_> = sources
+    let handles: Vec<_> = units
         .iter()
-        .map(|s| {
+        .map(|(url, names)| {
             let a = agent.clone();
-            let (name, url) = (s.name.clone(), s.url.clone());
+            let (url, sources) = (url.clone(), names.clone());
+            let dropped = skip(&url);
             thread::spawn(move || {
+                let mut f = Fetch {
+                    url: url.clone(),
+                    sources,
+                    status: 0,
+                    received_ms: 0,
+                    http_date_ms: None,
+                    error: None,
+                    body: None,
+                    dropped,
+                };
+                if dropped {
+                    return f;
+                }
                 let res = a.get(&url).call();
-                let received = now_ms();
+                f.received_ms = now_ms();
                 match res {
                     Ok(mut r) => {
-                        let date = r
+                        f.status = r.status().as_u16();
+                        f.http_date_ms = r
                             .headers()
                             .get("date")
                             .and_then(|d| d.to_str().ok())
                             .and_then(parse_http_date_ms);
                         match r.body_mut().with_config().limit(64 * 1024).read_to_string() {
-                            Ok(b) => (
-                                Response {
-                                    source: name,
-                                    body: Some(b),
-                                    received_ms: received,
-                                    error: None,
-                                },
-                                date,
-                                url,
-                            ),
-                            Err(e) => (
-                                Response {
-                                    source: name,
-                                    body: None,
-                                    received_ms: received,
-                                    error: Some(e.to_string()),
-                                },
-                                date,
-                                url,
-                            ),
+                            Ok(b) => f.body = Some(b),
+                            Err(e) => f.error = Some(e.to_string()),
+                        }
+                        if f.status != 200 && f.error.is_none() {
+                            f.error = Some(format!("http-status-{}", f.status));
                         }
                     }
-                    Err(e) => (
-                        Response {
-                            source: name,
-                            body: None,
-                            received_ms: received,
-                            error: Some(e.to_string()),
-                        },
-                        None,
-                        url,
-                    ),
+                    Err(e) => f.error = Some(e.to_string()),
                 }
+                f
             })
         })
         .collect();
@@ -168,75 +182,201 @@ fn one<'a>(m: &'a BTreeMap<String, Vec<String>>, k: &str) -> Result<&'a str, Str
     }
 }
 
-/// `record --out DIR [--rounds N]`: writes `DIR/round-<r>/<source>.json` in the fixture format.
+/// Per-unit health (drop rule D1 to D3) across the rounds of one run.
+#[derive(Default)]
+pub struct Healths(pub BTreeMap<String, Health>);
+
+impl Healths {
+    fn skip(&self, round: u64) -> impl Fn(&str) -> bool + '_ {
+        move |url| self.0.get(url).is_some_and(|h| !h.should_fetch(round))
+    }
+
+    /// D1: a unit is OK when it answered 200 and at least one of its sources got a reading out of the body.
+    fn record(
+        &mut self,
+        round: u64,
+        fetches: &[Fetch],
+        rep: &crate::pipeline::RoundReport,
+    ) -> Vec<serde_json::Value> {
+        let parsed = |name: &str| {
+            rep.usdt_sources
+                .iter()
+                .chain(rep.markets.iter().flat_map(|m| m.sources.iter()))
+                .any(|s| {
+                    s.name == name
+                        && !s.reason.as_deref().is_some_and(|r| {
+                            r.starts_with("parse")
+                                || r.starts_with("fetch-failed")
+                                || r == "no-response"
+                        })
+                })
+        };
+        let mut events = Vec::new();
+        for f in fetches.iter().filter(|f| !f.dropped) {
+            let any = f.sources.iter().any(|n| parsed(n));
+            let h = self.0.entry(f.url.clone()).or_default();
+            if let Some(resume) = h.record(round, classify(f.status, any)) {
+                events.push(json!({"dropped": f.url, "status": f.status, "error": f.error, "resumeRound": resume}));
+            }
+        }
+        events
+    }
+}
+
+fn open_append(path: &str) -> Result<fs::File, String> {
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("{path}: {e}"))
+}
+
+/// `record --out FILE.jsonl [--rounds N]`: appends one line per round in the line form of [`crate::recording`]
+/// (raw venue responses, Kraken batched, drop rule applied).
 pub fn record(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
-    let out = PathBuf::from(one(m, "out")?);
-    let sources = all_sources(&default_config());
+    let mut out = open_append(one(m, "out")?)?;
+    let mut feeder =
+        Feeder::new(default_config().with_kraken_batch()).map_err(|e| format!("{e:?}"))?;
+    let units = fetch_units(&all_sources(&feeder.config));
+    let mut health = Healths::default();
     for _ in 0..rounds_arg(m)? {
         let sent = wait_for_round_start();
-        let dir = out.join(format!("round-{}", round_of(sent)));
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        for (r, date, url) in fetch_all(&sources) {
-            let v = json!({"venue": r.source, "url": url, "sentMs": sent, "receivedMs": r.received_ms,
-                           "httpDateMs": date, "error": r.error, "body": r.body.unwrap_or_default()});
-            fs::write(
-                dir.join(format!("{}.json", v["venue"].as_str().unwrap())),
-                serde_json::to_string(&v).unwrap(),
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        eprintln!("recorded {}", dir.display());
+        let round = round_of(sent);
+        let fetches = fetch_all(&units, &health.skip(round));
+        let resp: Vec<Response> = fetches.iter().flat_map(|f| f.responses(sent)).collect();
+        let (_, rep) = feeder.observe(round, sent, &resp);
+        health.record(round, &fetches, &rep);
+        writeln!(out, "{}", round_line(round, sent, &fetches)).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// `run --signer I --key-file F --out JSONL [--rounds N]`: the live feeder. Each round: fetch, clock check,
-/// observe, sign, append `{observation, report}`. Submission to the sequencer is not built yet (389's ingest
-/// endpoint is not fixed); the JSONL is the hand-off.
+/// `run`: the live feeder. Each round: fetch (one request per unit, drop rule), clock check, observe, sign,
+/// append `{observation(s), report, events}` to `--out`; with `--record` the raw responses too; with `--node` the
+/// signed round is posted to the node's ingest (loopback only, see [`crate::submit`]).
+///
+/// Signing: `--signer I --key-file F` (one validator's feeder: posts its observation to
+/// `/v1/oracle/observations`), or `--key-dir DIR` (a dev committee in one process, development only: posts the
+/// whole update to `/v1/oracle/updates`).
 pub fn run_live(m: &BTreeMap<String, Vec<String>>) -> Result<(), String> {
-    let signer: u8 = one(m, "signer")?.parse().map_err(|_| "--signer: 0..255")?;
-    let key = keyfile::read_key(Path::new(one(m, "key-file")?))?;
     let vault = json::hex_bytes::<20>(&one(m, "vault")?.to_lowercase(), "--vault")?;
     if vault == [0u8; 20] {
         return Err("--vault: the zero address".into());
     }
+    let keys: Vec<(u8, k256::ecdsa::SigningKey)> = if m.contains_key("key-dir") {
+        keyfile::DevCommittee::read_dir(Path::new(one(m, "key-dir")?))?
+            .keys
+            .into_iter()
+            .enumerate()
+            .map(|(i, k)| (i as u8, k))
+            .collect()
+    } else {
+        let signer: u8 = one(m, "signer")?.parse().map_err(|_| "--signer: 0..255")?;
+        vec![(signer, keyfile::read_key(Path::new(one(m, "key-file")?))?)]
+    };
+    let committee_mode = m.contains_key("key-dir");
+    let node = match m.get("node") {
+        None => None,
+        Some(_) => {
+            let token = match m.get("token-file") {
+                Some(_) => Some(crate::submit::read_token(Path::new(one(m, "token-file")?))?),
+                None => None,
+            };
+            Some(crate::submit::NodeClient::new(one(m, "node")?, token)?)
+        }
+    };
     let domain = eip712::domain_separator(&vault);
-    let mut out = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(one(m, "out")?)
-        .map_err(|e| e.to_string())?;
-    let mut feeder = Feeder::new(default_config()).map_err(|e| format!("{e:?}"))?;
-    let sources = all_sources(&feeder.config);
+    let mut out = open_append(one(m, "out")?)?;
+    let mut rec = match m.get("record") {
+        Some(_) => Some(open_append(one(m, "record")?)?),
+        None => None,
+    };
+    let mut feeder =
+        Feeder::new(default_config().with_kraken_batch()).map_err(|e| format!("{e:?}"))?;
+    let units = fetch_units(&all_sources(&feeder.config));
+    let mut health = Healths::default();
     for _ in 0..rounds_arg(m)? {
         let t0 = wait_for_round_start();
-        let fetched = fetch_all(&sources);
-        let dates: Vec<(u64, u64)> = fetched
+        let round = round_of(t0);
+        let fetches = fetch_all(&units, &health.skip(round));
+        let dates: Vec<(u64, u64)> = fetches
             .iter()
-            .filter_map(|(r, d, _)| d.map(|d| (d, r.received_ms)))
+            .filter_map(|f| f.http_date_ms.map(|d| (d, f.received_ms)))
             .collect();
-        let resp: Vec<Response> = fetched.into_iter().map(|(r, _, _)| r).collect();
-        let (obs, rep) = feeder.observe(round_of(t0), t0, &resp);
+        let resp: Vec<Response> = fetches.iter().flat_map(|f| f.responses(t0)).collect();
+        let (obs, rep) = feeder.observe(round, t0, &resp);
+        let events = health.record(round, &fetches, &rep);
+        if let Some(r) = rec.as_mut() {
+            writeln!(r, "{}", round_line(round, t0, &fetches)).map_err(|e| e.to_string())?;
+        }
+        let fetch_ms: Vec<serde_json::Value> = fetches
+            .iter()
+            .filter(|f| !f.dropped)
+            .map(|f| json!({"url": f.url, "status": f.status, "ms": f.received_ms.saturating_sub(t0), "error": f.error}))
+            .collect();
+        let report = json::round_report_to_json(&rep);
         let line = match (clock_ok(&dates), obs) {
             (Err(e), _) => {
-                json!({"round": round_of(t0), "refused": e, "report": json::round_report_to_json(&rep)})
+                json!({"round": round, "refused": e, "report": report, "events": events, "fetches": fetch_ms})
             }
             (Ok(()), None) => {
-                json!({"round": round_of(t0), "observation": null, "report": json::round_report_to_json(&rep)})
+                json!({"round": round, "observation": null, "report": report, "events": events, "fetches": fetch_ms})
             }
             (Ok(()), Some(o)) => {
-                let s = sig::sign(&key, &eip712::digest(&domain, &o));
-                let so = perps_oracle::types::SignedObservation {
-                    signer,
-                    time_ms: o.time_ms,
-                    prices: o.prices.clone(),
-                    signature: s,
-                };
-                json!({"observation": json::signed_to_json(&so, o.round), "report": json::round_report_to_json(&rep)})
+                let d = eip712::digest(&domain, &o);
+                let signed: Vec<perps_oracle::types::SignedObservation> = keys
+                    .iter()
+                    .map(|(signer, key)| perps_oracle::types::SignedObservation {
+                        signer: *signer,
+                        time_ms: o.time_ms,
+                        prices: o.prices.clone(),
+                        signature: sig::sign(key, &d),
+                    })
+                    .collect();
+                let mut posts = Vec::new();
+                if let Some(n) = &node {
+                    let bodies: Vec<(&str, String)> = if committee_mode {
+                        let u = perps_oracle::types::OracleUpdate {
+                            round: o.round,
+                            observations: signed.clone(),
+                        };
+                        vec![(
+                            crate::submit::UPDATES_PATH,
+                            json::update_to_json(&u).to_string(),
+                        )]
+                    } else {
+                        signed
+                            .iter()
+                            .map(|s| {
+                                let mut ob = json::signed_to_json(s, o.round);
+                                ob.as_object_mut().unwrap().remove("round");
+                                (
+                                    crate::submit::OBSERVATIONS_PATH,
+                                    json!({"round": o.round, "observation": ob}).to_string(),
+                                )
+                            })
+                            .collect()
+                    };
+                    for (path, body) in bodies {
+                        posts.push(match n.post_json(path, &body) {
+                            Ok((status, reply)) => json!({"status": status, "reply": reply}),
+                            Err(e) => json!({"error": e}),
+                        });
+                    }
+                }
+                json!({"observation": json::signed_to_json(&signed[0], o.round),
+                       "signers": signed.iter().map(|s| s.signer).collect::<Vec<_>>(),
+                       "posts": posts, "report": report, "events": events, "fetches": fetch_ms})
             }
         };
         writeln!(out, "{}", serde_json::to_string(&line).unwrap()).map_err(|e| e.to_string())?;
     }
+    let h: Vec<serde_json::Value> = health
+        .0
+        .iter()
+        .map(|(u, h)| json!({"url": u, "ok": h.successes, "failed": h.failures, "drops": h.drops}))
+        .collect();
+    writeln!(out, "{}", json!({"health": h})).map_err(|e| e.to_string())?;
     Ok(())
 }
 
