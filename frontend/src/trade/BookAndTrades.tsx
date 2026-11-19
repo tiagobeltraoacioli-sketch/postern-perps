@@ -15,6 +15,12 @@ import { pricePick } from './hooks';
 /** Levels per side where the panel's height is not constrained (phone, stacked layouts). */
 const ROWS_DEFAULT = 11;
 const ROWS_MAX = 40;
+/**
+ * Share of the row a full depth bar takes: the size and total columns, less the row's padding. Both sides grow from
+ * the right edge toward the prices and stop before them, so a price is always written on the plain ground and the
+ * two halves make one shape hinged on the spread.
+ */
+export const BAR_SHARE = 0.62;
 
 export function aggregate(levels: Level[], group: bigint, bids: boolean): Level[] {
   if (group <= 0n) return levels;
@@ -186,7 +192,7 @@ const BookSide = memo(function BookSide({ levels, max, side, market, onPick, uni
         const key = String(l.px);
         const flash = flashes.get(key);
         const [n, nCum] = usd.get(key)!;
-        const width = Math.min(100, (toNumber(bars === 'total' ? l.cum : l.size, SZ_DECIMALS) / Math.max(1e-12, maxN)) * 100);
+        const width = Math.min(100, (toNumber(bars === 'total' ? l.cum : l.size, SZ_DECIMALS) / Math.max(1e-12, maxN)) * 100) * BAR_SHARE;
         return (
           <li key={key}>
             <button
@@ -197,7 +203,7 @@ const BookSide = memo(function BookSide({ levels, max, side, market, onPick, uni
               onClick={() => onPick(l.px)}
               aria-label={`${side === 'ask' ? 'Ask' : 'Bid'} ${formatPx(l.px, market.priceDecimals)}, size ${formatSize(l.size, market.sizeDecimals)}: use as limit price`}
             >
-              <span className="book-depth" style={{ width: `${width}%` }} />
+              <span className="book-depth" style={{ width: `${width.toFixed(2)}%` }} />
               <span className="num book-px">{formatPx(l.px, market.priceDecimals)}</span>
               <span className="num">{unit === 'base' ? formatSize(l.size, market.sizeDecimals) : formatUsd(n, { dp: 0 })}</span>
               <span className="num book-cum">{unit === 'base' ? formatSize(l.cum, market.sizeDecimals) : formatUsd(nCum, { dp: 0 })}</span>

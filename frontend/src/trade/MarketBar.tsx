@@ -25,7 +25,7 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
           <dt>Mark</dt>
           <dd className="num">{ticker ? formatPx(ticker.mark, dp) : DASH}</dd>
         </div>
-        <div className="stat">
+        <div className="stat stat-index">
           <dt>Oracle index</dt>
           <dd className="num">{ticker ? formatPx(ticker.index, dp) : DASH}</dd>
         </div>
@@ -37,11 +37,11 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
           <dt>24 h high / low</dt>
           <dd className="num">{ticker ? `${formatPx(ticker.high24h, dp)} / ${formatPx(ticker.low24h, dp)}` : DASH}</dd>
         </div>
-        <div className="stat">
+        <div className="stat stat-volume">
           <dt>24 h volume</dt>
           <dd className="num">{ticker ? `$${formatCompactUsd(ticker.volume24h)}` : DASH}</dd>
         </div>
-        <div className="stat">
+        <div className="stat stat-oi">
           <dt>Open interest</dt>
           <dd className="num" title={ticker && market ? `${formatSize(ticker.openInterest, market.sizeDecimals)} ${market.base}` : undefined}>
             {ticker && market ? `$${formatCompactUsd(notional(ticker.openInterest, ticker.mark))}` : DASH}

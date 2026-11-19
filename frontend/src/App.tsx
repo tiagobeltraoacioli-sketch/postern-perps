@@ -1,5 +1,5 @@
 /** The application shell: header, banners that must be seen, the page, the footer, the two review sheets. */
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Wallet, Copy, LogOut, CandlestickChart, PieChart, ArrowLeftRight, KeyRound, Activity, LayoutGrid, History as HistoryIcon, Percent, MoreHorizontal, ScrollText, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { feed, route as routeStore, go, signingDomain, eip712Problem, geo as geoStore, geoRead, startSession, type Route } from './state/session';
 import { ActionProvider, useActions } from './state/actions';
@@ -13,18 +13,23 @@ import { ReviewSheet } from './ui/ReviewSheet';
 import { TxSheet } from './ui/TxSheet';
 import { Modal } from './ui/Modal';
 import { Toaster } from './ui/toasts';
-import { TradePage } from './trade/TradePage';
 import { Home } from './pages/Home';
-import { Markets } from './pages/Markets';
-import { Portfolio } from './pages/Portfolio';
-import { Funds } from './pages/Funds';
-import { History } from './pages/History';
-import { Funding } from './pages/Funding';
-import { Agents } from './pages/Agents';
-import { System } from './pages/System';
-import { Legal } from './pages/Legal';
 import { NotFound } from './pages/NotFound';
+
+// Route-level code splitting: the home page and the shell are the entry; every other page is its own chunk, loaded
+// from this origin when its address is opened (CSP script-src 'self' holds: no inline script, no other origin).
+const loadTrade = () => import('./trade/TradePage');
+const TradePage = lazy(() => loadTrade().then((m) => ({ default: m.TradePage })));
+const Markets = lazy(() => import('./pages/Markets').then((m) => ({ default: m.Markets })));
+const Portfolio = lazy(() => import('./pages/Portfolio').then((m) => ({ default: m.Portfolio })));
+const Funds = lazy(() => import('./pages/Funds').then((m) => ({ default: m.Funds })));
+const History = lazy(() => import('./pages/History').then((m) => ({ default: m.History })));
+const Funding = lazy(() => import('./pages/Funding').then((m) => ({ default: m.Funding })));
+const Agents = lazy(() => import('./pages/Agents').then((m) => ({ default: m.Agents })));
+const System = lazy(() => import('./pages/System').then((m) => ({ default: m.System })));
+const Legal = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Legal })));
 import { OPERATOR_LINE, PROTOTYPE_LINE, restrictedText } from './compliance/notices';
+import { notePublishedMarkets } from './lib/exit-band';
 import { geoVerdict, RestrictedScreen } from './compliance/Restricted';
 
 type Page = Route['page'];
@@ -58,6 +63,11 @@ function routeFor(page: Page, symbol: string): Route {
 
 export function App() {
   useEffect(() => startSession(), []);
+  // The terminal is fetched in the background once the first page has settled, so "Launch app" does not wait for it.
+  useEffect(() => {
+    const id = setTimeout(() => void loadTrade().catch(() => {}), 1500);
+    return () => clearTimeout(id);
+  }, []);
   return (
     <ActionProvider>
       <FundsProvider>
@@ -77,6 +87,9 @@ function Shell() {
   // exit-only mode (the order form says so and the signing guard refuses everything else).
   const [acknowledged, setAcknowledged] = useState(false);
   useEffect(() => feed.follow(account), [account]);
+  // The exit bands the exchange publishes with its markets (F434-6) reach every screen that states them.
+  const publishedMarkets = useStore(feed.markets);
+  notePublishedMarkets(publishedMarkets);
   // On every page, while a wallet is connected: keep the account's exit proof for the vault's latest checkpoint on
   // this device (R436-11 c). A slow read of the vault is enough; the Funds page reads it faster while open.
   const vault = useVault(deployment ? account : null, 60_000);
@@ -94,6 +107,14 @@ function Shell() {
       <Header route={route} />
       <Banners quiet={blocked} />
       <main id="main-content" tabIndex={-1}>
+        <Suspense
+          fallback={
+            <div className="page-message page-loading" role="status">
+              <span className="skeleton" aria-hidden="true" />
+              <span className="sr-only">Loading the page…</span>
+            </div>
+          }
+        >
         {blocked ? (
           <RestrictedScreen verdict={verdict as 'restricted' | 'unknown' | 'sanctioned'} country={geo?.country ?? null} onContinue={verdict === 'sanctioned' ? undefined : () => setAcknowledged(true)} />
         ) : (
@@ -111,6 +132,7 @@ function Shell() {
         {route.page === 'system' && <System />}
         {route.page === 'legal' && <Legal />}
         {route.page === 'notfound' && <NotFound path={route.path} />}
+        </Suspense>
       </main>
       <footer className="footer">
         <span>{OPERATOR_LINE}</span>

@@ -148,7 +148,7 @@ export function Markets() {
       </header>
       {error && <p className="callout callout-danger">{error}</p>}
       <section className="panel" aria-label="Markets">
-        <header className="panel-head">
+        <header className="panel-head markets-head">
           <label className="search">
             <Search size={16} aria-hidden="true" />
             <span className="sr-only">Search markets</span>
@@ -171,8 +171,10 @@ export function Markets() {
                 <button key={m.symbol} type="button" className="market-card" onClick={() => go({ page: 'trade', symbol: m.symbol })} aria-label={`Trade ${m.symbol}`}>
                   <span className="market-card-head">
                     <AssetMark asset={m.base} size={28} />
-                    <strong>{m.symbol}</strong>
-                    <span className="sub">Perp · {m.maxLeverage}x</span>
+                    <span className="market-card-name">
+                      <strong>{m.symbol}</strong>
+                      <span className="sub">Perp · {m.maxLeverage}x</span>
+                    </span>
                     <span className={`badge ${m.status === 'active' ? 'status-credited' : m.status === 'halted' ? 'badge-danger' : 'badge-warn'}`}>{STATUS_WORDS[m.status]}</span>
                   </span>
                   <span className="market-card-px">

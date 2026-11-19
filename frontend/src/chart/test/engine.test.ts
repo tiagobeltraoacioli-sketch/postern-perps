@@ -3,9 +3,11 @@ import { ChartEngine, chartStats, resetChartStats, type EngineData, type EngineH
 import type { ChartCandle, ChartLevel } from '../types';
 import { FakeCtx, asCtx } from './fake-canvas';
 import { walk } from './fixtures';
-import { priceY, slotX } from '../scale';
+import { DEFAULT_SPACING, priceY, RIGHT_MARGIN_SLOTS, rightRoomPx, slotX } from '../scale';
 
 const M15 = 900_000;
+/** `right` of the default view over 300 candles (newest slot 299) without levels. */
+const LATEST = 299 + Math.max(RIGHT_MARGIN_SLOTS, Math.ceil(rightRoomPx(900 - 72, false) / DEFAULT_SPACING));
 const T0 = Date.UTC(2026, 10, 10);
 
 function setup(hooks: EngineHooks = {}, w = 900, h = 420) {
@@ -160,17 +162,69 @@ describe('it draws the data given and nothing else', () => {
     expect(displaced.length).toBeGreaterThan(0);
     const ends = base.ops('lineTo').map((c) => c.args[1] as number);
     for (const t of displaced) expect(ends.some((y) => Math.abs(y - t.priceY) < 1e-6)).toBe(true);
-    // The leaders turn at one common column (they cannot cross): every segment ending on a displaced level's line
-    // in the left half starts at the same x.
+    // The leaders turn at one common column (they cannot cross): every leader segment ending on a displaced
+    // level's line starts at the same x. Pass 3: the labels stand in the breathing room at the RIGHT when they fit
+    // (here they do), so the column is looked for on the side where the labels are, not only in the left half; the
+    // short stubs from the axis tags (which start at the plot's edge) are not label leaders.
     const starts = new Set<number>();
     base.calls.forEach((c, i) => {
       if (c.op !== 'lineTo') return;
       const [x, y] = c.args as [number, number];
-      if (x > s.plotW / 2 || !displaced.some((t) => Math.abs(t.priceY - y) < 1e-6)) return;
+      if (x >= s.plotW - 1 || !displaced.some((t) => Math.abs(t.priceY - y) < 1e-6)) return;
       const m = base.calls[i - 1];
-      if (m.op === 'moveTo') starts.add(Math.round((m.args[0] as number) * 1000));
+      if (m.op === 'moveTo' && (m.args[0] as number) < s.plotW - 7) starts.add(Math.round((m.args[0] as number) * 1000));
     });
     expect(starts.size).toBe(1);
+  });
+  it('pass 3: level labels stand right of the newest candle and cover none; on a narrow plot they stand at the left', () => {
+    const wide = setup();
+    const cs = walk(100, T0, M15);
+    const last = cs[99].c;
+    const levels: ChartLevel[] = [
+      { id: 'pos', kind: 'position', side: 'buy', price: last - 30, priceText: 'E', label: 'Long 0.5000 BTC', detail: '+225.60 USDC', detailTone: 'up' },
+      { id: 'ord', kind: 'order', side: 'buy', price: last - 60, priceText: 'O', label: 'Buy 0.2500' },
+    ];
+    wide.engine.setData(data(cs, { levels }));
+    wide.run();
+    const s = wide.engine.getScene()!;
+    const newestRight = slotX(s.series.slots[s.series.slots.length - 1], s.view, s.plotW) + s.view.spacing / 2;
+    expect(s.labelRoom).toBeGreaterThan(120);
+    // Every label (its first run of text) starts right of the newest candle.
+    const labelTexts = wide.base.ops('fillText').filter((c) => ['Long ', 'Buy '].includes(String(c.args[0])) && (c.args[1] as number) < s.plotW);
+    expect(labelTexts.length).toBeGreaterThan(0);
+    for (const t of labelTexts) expect(t.args[1] as number).toBeGreaterThan(newestRight);
+    expect(wide.base.lines().some((l) => l.includes('Long 0.5000 BTC'))).toBe(true);
+
+    const narrow = setup({}, 340, 420);
+    narrow.engine.setData(data(cs, { levels }));
+    narrow.run();
+    const n = narrow.engine.getScene()!;
+    const left = narrow.base.ops('fillText').filter((c) => ['Long ', 'Buy '].includes(String(c.args[0])) && (c.args[1] as number) < n.plotW);
+    expect(left.length).toBeGreaterThan(0);
+    for (const t of left) expect(t.args[1] as number).toBeLessThan(40);
+  });
+  it('pass 3: the names of the live prices stand in the breathing room, clear of the newest candle', () => {
+    const { engine, run, base } = setup();
+    const cs = walk(100, T0, M15);
+    engine.setData(data(cs, { mark: { price: cs[99].c, text: 'MARK-TEXT' }, index: { price: cs[99].c - 3, text: 'INDEX-TEXT' } }));
+    run();
+    const s = engine.getScene()!;
+    const newestRight = slotX(s.series.slots[s.series.slots.length - 1], s.view, s.plotW) + s.view.spacing / 2;
+    // fillTabular right-aligns a name ending at plotW - 7: its first glyph is the leftmost x of that text.
+    const firstGlyph = (word: string) => Math.min(...base.ops('fillText').filter((c) => word.includes(String(c.args[0])) && (c.args[1] as number) > s.plotW - 60 && (c.args[1] as number) < s.plotW).map((c) => c.args[1] as number));
+    expect(firstGlyph('Mark')).toBeGreaterThan(newestRight);
+    expect(firstGlyph('Index')).toBeGreaterThan(newestRight);
+  });
+  it('pass 3: tags and pinned labels stop at the top of the volume lane', () => {
+    const { engine, run } = setup();
+    const cs = walk(100, T0, M15);
+    const levels: ChartLevel[] = [{ id: 'liq', kind: 'liquidation', side: 'buy', price: 1000, priceText: 'LIQ', label: 'Liquidation' }];
+    engine.setData(data(cs, { levels }));
+    run();
+    const s = engine.getScene()!;
+    const liq = s.tags.find((t) => t.id === 'liq')!;
+    expect(liq.pinned).toBe('below');
+    expect(liq.y + s.tagH / 2).toBeLessThanOrEqual(s.plotH * 0.8 + 1e-6);
   });
   it('fill markers are drawn under the level labels', () => {
     const { engine, run, base } = setup();
@@ -301,7 +355,9 @@ describe('view', () => {
     a.engine.reducedMotion = true;
     a.engine.goToLatest();
     a.run();
-    expect(a.engine.getView().right).toBe(303);
+    // Pass 3: the default view keeps the breathing room right of the newest candle (scale.ts rightRoomPx: 72 px
+    // without levels = 9 slots of 8 px; it was a fixed 4 slots). Slot of the newest candle: 299.
+    expect(a.engine.getView().right).toBe(LATEST);
     const b = setup();
     b.engine.reducedMotion = false;
     b.engine.setData(data(walk(300, T0, M15)));
@@ -312,9 +368,9 @@ describe('view', () => {
     b.run(100);
     const mid = b.engine.getView().right;
     expect(mid).toBeGreaterThan(203);
-    expect(mid).toBeLessThan(303);
+    expect(mid).toBeLessThan(LATEST);
     for (let i = 0; i < 30; i++) b.run(16);
-    expect(b.engine.getView().right).toBe(303);
+    expect(b.engine.getView().right).toBe(LATEST);
   });
 });
 
