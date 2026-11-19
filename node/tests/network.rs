@@ -890,14 +890,25 @@ async fn attestation_records_are_verified_stored_and_enforced_when_required() {
     // although its IP country (PA) is allowed, and with the requirement off as well
     let (s, st) = post_json(&format!("{base}/v1/attestations"), &attestation(&g, &w, &statements, "BR", t - 1000, t + 86_400_000), &[]).await;
     assert_eq!((s, st["status"].as_str()), (200, Some("valid")));
-    for required in [true, false] {
+    // R435-5: every action of this signer gets its own nonce from ONE base and a fixed offset per iteration. The
+    // first version took `now() + 10 + required` in each iteration: when the two iterations ran 1 ms apart (the
+    // usual case in a release build) both withdrawals had the same nonce, i.e. were the SAME signed action, and the
+    // node rightly refused the second as a replay (NONCE_USED): 14 failures of 20 release runs. The node was
+    // right; the test was wrong. The replay refusal is now asserted on purpose below.
+    let base_nonce = now();
+    let mut last_withdrawal = serde_json::Value::Null;
+    for (k, required) in [true, false].into_iter().enumerate() {
         n.app.attestations.lock().unwrap().required = required;
-        let nonce = now() + 10 + required as u64;
+        let nonce = base_nonce + 10 + 2 * k as u64;
         let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &place_order(&g, &w, wa, nonce, 1, 672_505, 2_500, false)), &pa).await;
         assert_eq!((s, e["error"]["code"].as_str(), e["error"]["details"]["reason"].as_str()), (451, Some("GEO_RESTRICTED"), Some("RESIDENCE_DECLARED_RESTRICTED")), "required={required}: {e}");
-        let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &withdraw(&g, &w, wa, nonce + 100, 1_000_000_000, wa)), &pa).await;
+        last_withdrawal = request(&g, &withdraw(&g, &w, wa, nonce + 1, 1_000_000_000, wa));
+        let (s, e) = post_json(&format!("{base}/v1/actions"), &last_withdrawal, &pa).await;
         assert_eq!(s, 200, "the exit stays open: {e}");
     }
+    // the same signed withdrawal again is a replay: refused, whatever the attestation state
+    let (s, e) = post_json(&format!("{base}/v1/actions"), &last_withdrawal, &pa).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("NONCE_USED")), "{e}");
     // an expired record is `expired`, and with the requirement on it does not admit
     let short = attestation(&g, &user(82), &statements, "PA", now() - 1000, now() + 400);
     let (s, _) = post_json(&format!("{base}/v1/attestations"), &short, &[]).await;
