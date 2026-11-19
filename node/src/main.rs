@@ -63,7 +63,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--operator-token-file F] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN]... [--edge-client-header NAME] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--operator-token-file F] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -355,6 +355,17 @@ async fn dev(a: HashMap<String, String>) {
             die("--operator-token-file: the token must be at least 16 bytes".into());
         }
         *app.operator_token.lock().unwrap() = Some(t);
+    }
+    // R436-14 residue: the header in which the edge names the client (believed only with a valid edge assertion)
+    if let Some(h) = a.get("edge-client-header") {
+        let h = h.to_ascii_lowercase();
+        if axum::http::HeaderName::from_bytes(h.as_bytes()).is_err() {
+            die(format!("--edge-client-header {h:?}: not a header name"));
+        }
+        if app.geo.edge.is_none() {
+            die("--edge-client-header needs the edge assertion secret: without a verifier the header would be believed from anyone".into());
+        }
+        *app.edge_client_header.lock().unwrap() = Some(h);
     }
     // F434-2: the allowlist of browser origins; empty unless given. A value that is not an exact origin stops the
     // node (a typing mistake must not quietly become "no page can connect" or, worse, something wider).

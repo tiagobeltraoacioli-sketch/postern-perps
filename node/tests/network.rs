@@ -836,13 +836,16 @@ async fn r436_11_account_proof_at_an_old_final_checkpoint_is_rebuilt_from_the_lo
 }
 
 /// The headers with which an account reads its own attestation record (R436-17).
-fn read_auth(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, t: u64) -> (String, String) {
-    (t.to_string(), to_hex(&perps_node::sig::sign(key, &perps_node::attest::read_digest(g, &key_address(key), t))))
+/// (time, nonce, signature); every call takes a new nonce (R436-17 residue: one signature, one read).
+fn read_auth(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, t: u64) -> (String, String, String) {
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let n = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    (t.to_string(), n.to_string(), to_hex(&perps_node::sig::sign(key, &perps_node::attest::read_digest(g, &key_address(key), t, n))))
 }
 
 async fn get_own_attestation(base: &str, g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey) -> (u16, serde_json::Value) {
-    let (t, sig) = read_auth(g, key, now());
-    let (s, b) = http_call("GET", &format!("{base}/v1/attestations/{}", to_hex(&key_address(key))), None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Signature", &sig)]).await.unwrap();
+    let (t, nonce, sig) = read_auth(g, key, now());
+    let (s, b) = http_call("GET", &format!("{base}/v1/attestations/{}", to_hex(&key_address(key))), None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Nonce", &nonce), ("X-Postern-Read-Signature", &sig)]).await.unwrap();
     (s, serde_json::from_slice(&b).unwrap_or(serde_json::Value::Null))
 }
 
@@ -999,23 +1002,23 @@ async fn r436_17_attestation_records_are_read_only_by_the_account_or_the_operato
     assert_eq!((s, st["status"].as_str(), st["residenceCountry"].as_str(), st["record"]["signature"].as_str()), (200, Some("valid"), Some("PA"), rec["signature"].as_str()), "{st}");
     // refused: another key's signature for this address, a signature for another address, a stale or future time,
     // a time that is not the signed one, one header missing
-    let get_with = |t: String, sig: String| {
+    let get_with = |t: String, nonce: String, sig: String| {
         let url = url.clone();
-        async move { http_call("GET", &url, None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Signature", &sig)]).await.unwrap().0 }
+        async move { http_call("GET", &url, None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Nonce", &nonce), ("X-Postern-Read-Signature", &sig)]).await.unwrap().0 }
     };
     let now_t = now();
     let other = user(86);
-    let by_other = to_hex(&perps_node::sig::sign(&other, &perps_node::attest::read_digest(&g, &ua, now_t)));
-    assert_eq!(get_with(now_t.to_string(), by_other).await, 401, "another key");
-    let (t2, sig_for_other_addr) = read_auth(&g, &other, now_t);
-    assert_eq!(get_with(t2, sig_for_other_addr).await, 401, "a signature over another address");
+    let by_other = to_hex(&perps_node::sig::sign(&other, &perps_node::attest::read_digest(&g, &ua, now_t, 900_001)));
+    assert_eq!(get_with(now_t.to_string(), "900001".into(), by_other).await, 401, "another key");
+    let (t2, n2, sig_for_other_addr) = read_auth(&g, &other, now_t);
+    assert_eq!(get_with(t2, n2, sig_for_other_addr).await, 401, "a signature over another address");
     for skew in [-61_000i64, 61_000] {
         let ts = (now() as i64 + skew) as u64;
-        let (t3, s3) = read_auth(&g, &u, ts);
-        assert_eq!(get_with(t3, s3).await, 401, "outside the 60 s window: {skew}");
+        let (t3, n3, s3) = read_auth(&g, &u, ts);
+        assert_eq!(get_with(t3, n3, s3).await, 401, "outside the 60 s window: {skew}");
     }
-    let (_, s4) = read_auth(&g, &u, now_t);
-    assert_eq!(get_with((now_t + 1).to_string(), s4.clone()).await, 401, "the time is part of what is signed");
+    let (_, n4, s4) = read_auth(&g, &u, now_t);
+    assert_eq!(get_with((now_t + 1).to_string(), n4, s4.clone()).await, 401, "the time is part of what is signed");
     assert_eq!(http_call("GET", &url, None, &[("X-Postern-Read-Signature", &s4)]).await.unwrap().0, 401);
     // the operator: no path without a configured token; with it, the token and nothing else
     let bearer = "Bearer operator-token-0123456789abcdef";
@@ -1135,14 +1138,15 @@ async fn r436_14_block_streams_are_bounded_backpressured_and_slow_consumers_cut(
     assert_eq!(std::str::from_utf8(&head).unwrap(), "HTTP/1.1 429", "four streams at once is the limit");
     // the silent consumers are cut once they have not taken a chunk for the slow-consumer time (600 ms here):
     // their slots come back without anyone reading a byte
+    // (restated for the residue of R436-14: the limits are one table now, `in_use` counts what the semaphore and
+    // the address set counted)
     for _ in 0..300 {
-        if n.app.streams.slots.available_permits() == perps_node::api::STREAM_SLOTS {
+        if n.app.streams.in_use() == 0 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(n.app.streams.slots.available_permits(), perps_node::api::STREAM_SLOTS, "every slot was given back");
-    assert!(n.app.streams.ips.lock().unwrap().is_empty());
+    assert_eq!(n.app.streams.in_use(), 0, "every slot was given back");
     // a consumer that reads gets every block, in order
     let (s, body) = http_call("GET", &format!("{base}{path}"), None, &[]).await.unwrap();
     assert_eq!(s, 200);
@@ -1307,4 +1311,302 @@ async fn f434_2_cors_is_an_exact_allowlist_with_preflight_and_a_websocket_origin
         assert!(perps_node::api::parse_origin(bad).is_err(), "{bad:?} is not an origin");
     }
     n.stop.send(true).unwrap();
+}
+
+/// Residue (a) of R436-17 (436's re-check of 531750e): the read signature bound account and time only, so a
+/// captured header set read the record again for 60 s. It now binds method, path and a nonce and is spent once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn r436_17_residue_a_read_signature_is_for_one_request_and_is_spent_once() {
+    use perps_node::attest::{read_digest, ReadOnce, ReadReplay, READ_WINDOW_MS};
+    let n = start_node("readonce").await;
+    let (base, g) = (n.url.clone(), n.g.clone());
+    let u = user(90);
+    let ua = key_address(&u);
+    let url = format!("{base}/v1/attestations/{}", to_hex(&ua));
+    let get = |t: String, nonce: String, sig: String| {
+        let url = url.clone();
+        async move { http_call("GET", &url, None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Nonce", &nonce), ("X-Postern-Read-Signature", &sig)]).await.unwrap().0 }
+    };
+    // one signature, one read: the captured headers read nothing a second time
+    let (t, nonce, sig) = read_auth(&g, &u, now());
+    assert_eq!(get(t.clone(), nonce.clone(), sig.clone()).await, 200);
+    assert_eq!(get(t.clone(), nonce.clone(), sig.clone()).await, 401, "REPLAY of a captured header set");
+    assert_eq!(get(t.clone(), nonce.clone(), sig.clone()).await, 401, "and again");
+    // the nonce is part of what is signed, in one spelling only
+    let (t, nonce, sig) = read_auth(&g, &u, now());
+    let other_nonce = (nonce.parse::<u64>().unwrap() + 1_000_000).to_string();
+    assert_eq!(get(t.clone(), other_nonce, sig.clone()).await, 401, "another nonce than the signed one");
+    assert_eq!(get(t.clone(), format!("0{nonce}"), sig.clone()).await, 401, "a second spelling of the same nonce");
+    assert_eq!(http_call("GET", &url, None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Signature", &sig)]).await.unwrap().0, 401, "no nonce");
+    assert_eq!(get(t.clone(), nonce.clone(), sig.clone()).await, 200, "the refusals above did not spend it");
+    // the signature is for THIS path: the same account, time and nonce signed in the old form (account and time
+    // only) or for another path or method is not a read of this record
+    let t0 = now();
+    let reg = |fields: serde_json::Value| perps_node::eip712::Registry::from_json(&serde_json::json!({"AttestationRead": fields})).unwrap();
+    let sign_with = |r: &perps_node::eip712::Registry, v: perps_node::eip712::Val| to_hex(&perps_node::sig::sign(&u, &perps_node::eip712::digest(&g.engine_domain.separator(), &r.hash_struct("AttestationRead", &v).unwrap())));
+    use perps_node::eip712::Val;
+    let old = sign_with(&reg(serde_json::json!([{"name":"account","type":"address"},{"name":"timestamp","type":"uint64"}])), Val::Struct(vec![Val::Address(ua), Val::Uint(t0 as u128)]));
+    assert_eq!(get(t0.to_string(), "424242".into(), old).await, 401, "the old form, which named no request");
+    let full = reg(serde_json::json!([{"name":"account","type":"address"},{"name":"method","type":"string"},{"name":"path","type":"string"},{"name":"timestamp","type":"uint64"},{"name":"nonce","type":"uint64"}]));
+    let own_path = format!("/v1/attestations/{}", to_hex(&ua));
+    for (method, path, want) in [("GET", "/v1/attestations".to_string(), 401), ("GET", format!("/v1/attestations/{}", to_hex(&key_address(&user(91)))), 401), ("POST", own_path.clone(), 401), ("GET", own_path.clone(), 200)] {
+        let nonce = 500_000 + want as u64 + path.len() as u64 + method.len() as u64;
+        let sig = sign_with(&full, Val::Struct(vec![Val::Address(ua), Val::Str(method.into()), Val::Str(path.clone()), Val::Uint(t0 as u128), Val::Uint(nonce as u128)]));
+        assert_eq!(get(t0.to_string(), nonce.to_string(), sig.clone()).await, want, "{method} {path}");
+        // the node's own digest is exactly that message
+        if want == 200 {
+            assert_eq!(sig, to_hex(&perps_node::sig::sign(&u, &read_digest(&g, &ua, t0, nonce))));
+        }
+    }
+    // bounded per account: beyond it this account waits (429), another account still reads
+    n.app.read_replay.lock().unwrap().max_per_account = 5;
+    let mut codes = Vec::new();
+    for _ in 0..4 {
+        let (t, nonce, sig) = read_auth(&g, &u, now());
+        codes.push(get(t, nonce, sig).await);
+    }
+    assert_eq!(codes, vec![200, 200, 429, 429], "3 reads were remembered already: 2 more, then refused");
+    let v = user(92);
+    let (t, nonce, sig) = read_auth(&g, &v, now());
+    assert_eq!(http_call("GET", &format!("{base}/v1/attestations/{}", to_hex(&key_address(&v))), None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Nonce", &nonce), ("X-Postern-Read-Signature", &sig)]).await.unwrap().0, 200);
+    // bounded in all, and nothing is forgotten while its signature could still be accepted
+    let mut r = ReadReplay::default();
+    r.max = 3;
+    let t = 1_000_000u64;
+    let acct = |i: u8| [i; 20];
+    assert_eq!(r.once(&acct(1), 7, t, t), ReadOnce::Fresh);
+    assert_eq!(r.once(&acct(1), 7, t, t + 1), ReadOnce::Replayed);
+    assert_eq!(r.once(&acct(2), 7, t, t), ReadOnce::Fresh, "the nonce is per account");
+    assert_eq!(r.once(&acct(3), 1, t + READ_WINDOW_MS, t), ReadOnce::Fresh, "a timestamp at the far edge of the window");
+    assert_eq!(r.once(&acct(4), 1, t, t), ReadOnce::Full, "full: refused, not forgotten");
+    assert_eq!(r.once(&acct(1), 7, t, t + READ_WINDOW_MS), ReadOnce::Replayed, "still acceptable by time, still remembered");
+    // once a timestamp can no longer be accepted its entry goes: two of three here
+    assert_eq!(r.once(&acct(4), 1, t + READ_WINDOW_MS + 1, t + READ_WINDOW_MS + 1), ReadOnce::Fresh);
+    assert_eq!(r.len(), 2, "the far-edge entry and the new one");
+    assert_eq!(r.once(&acct(3), 1, t + READ_WINDOW_MS, t + READ_WINDOW_MS + 1), ReadOnce::Replayed);
+    n.stop.send(true).unwrap();
+}
+
+/// Fills the node's log with `deposits` deposits (2,000 per block) and returns the height once all are credited.
+async fn fill_blocks(n: &Running, deposits: u64) -> u64 {
+    {
+        let mut v = n.app.view.lock().unwrap();
+        let a = key_address(&user(70));
+        for i in 0..deposits {
+            v.deposits.insert(i, deposit(i, a, 1_000_000 + i));
+        }
+    }
+    for _ in 0..600 {
+        if n.app.seq.lock().unwrap().engine.next_deposit_index() == deposits {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(n.app.seq.lock().unwrap().engine.next_deposit_index(), deposits);
+    let h = n.app.seq.lock().unwrap().log.last_height;
+    h
+}
+
+/// Residue (b) of R436-14: `GET /v1/blocks` rendered up to 500 blocks (every signer recovered) on the runtime's
+/// own threads. On a ONE-thread runtime the render must run on another thread; the answer stops at a byte bound
+/// and a caller that continues from its last height still gets every block.
+#[tokio::test]
+async fn r436_14_residue_b_blocks_are_rendered_off_the_runtime_up_to_a_byte_bound() {
+    let n = start_node("blocksoff").await;
+    let base = n.url.clone();
+    let height = fill_blocks(&n, 20_000).await;
+    assert!(height >= 10, "{height}");
+    *n.app.read_rate.lock().unwrap() = perps_node::sequencer::RateLimit::new(0.0, 0.0);
+    let heights = |j: &serde_json::Value| j["blocks"].as_array().unwrap().iter().map(|b| b["height"].as_u64().unwrap()).collect::<Vec<_>>();
+    // the whole range in one answer under the default bound, rendered on a thread that is not the runtime's
+    let (s, all) = get_json(&format!("{base}/v1/blocks?from=1&limit=500")).await;
+    assert_eq!((s, heights(&all)), (200, (1..=height).collect::<Vec<_>>()));
+    let rendered_on = *n.app.block_renders.last_thread.lock().unwrap();
+    assert!(rendered_on.is_some(), "the render went through the bounded path");
+    assert_ne!(rendered_on, Some(std::thread::current().id()), "this runtime has ONE thread (this one): the render must not be on it");
+    // a byte bound: an answer holds at least one block and stops once the bound is reached
+    let one = all["blocks"][0].to_string().len();
+    n.app.block_renders.max_bytes.store(1, std::sync::atomic::Ordering::Relaxed);
+    let (_, j) = get_json(&format!("{base}/v1/blocks?from=1&limit=500")).await;
+    assert_eq!(heights(&j), vec![1], "never fewer than one block");
+    n.app.block_renders.max_bytes.store(one * 2 + one / 2, std::sync::atomic::Ordering::Relaxed);
+    let (mut from, mut got, mut calls) = (1u64, Vec::new(), 0);
+    loop {
+        let (s, j) = get_json(&format!("{base}/v1/blocks?from={from}&limit=500&raw=1")).await;
+        assert_eq!(s, 200);
+        let hs = heights(&j);
+        if hs.is_empty() {
+            break;
+        }
+        assert!(hs.len() <= 4, "the bound cut the answer: {} blocks", hs.len());
+        // the raw form still decodes to the block of that height
+        for b in j["blocks"].as_array().unwrap() {
+            let raw = perps_node::util::parse_hex_vec(b["raw"].as_str().unwrap()).unwrap();
+            assert_eq!(perps_node::types::Block::from_bytes(&raw).unwrap().header.height, b["height"].as_u64().unwrap());
+        }
+        from = hs.last().unwrap() + 1;
+        got.extend(hs);
+        calls += 1;
+    }
+    assert_eq!(got, (1..=height).collect::<Vec<_>>(), "continuing from the last height + 1 loses nothing");
+    assert!(calls >= 3, "{calls}");
+    // the answers are the same blocks as the unbounded one
+    n.app.block_renders.max_bytes.store(perps_node::api::BLOCKS_MAX_BYTES, std::sync::atomic::Ordering::Relaxed);
+    let (_, again) = get_json(&format!("{base}/v1/blocks?from=1&limit=500")).await;
+    assert_eq!(again, all);
+    assert_eq!(n.app.block_renders.permits.available_permits(), perps_node::api::BLOCKS_RENDERS, "every render gave its place back");
+    // at most BLOCKS_RENDERS at once: with every place taken a read waits, it is not rendered beside them
+    let held: Vec<_> = (0..perps_node::api::BLOCKS_RENDERS).map(|_| n.app.block_renders.permits.clone().try_acquire_owned().unwrap()).collect();
+    let url = format!("{base}/v1/blocks?from=1&limit=1");
+    let waiting = tokio::spawn(async move { get_json(&url).await.0 });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!waiting.is_finished(), "no place: the read waits");
+    drop(held);
+    assert_eq!(waiting.await.unwrap(), 200);
+    let _ = n.stop.send(true);
+}
+
+/// A raw GET like `raw_get`, with headers; reads nothing.
+async fn raw_get_h(from_ip: &str, url: &str, path: &str, headers: &[(&str, &str)]) -> tokio::net::TcpStream {
+    use tokio::io::AsyncWriteExt;
+    let target: SocketAddr = url.trim_start_matches("http://").parse().unwrap();
+    let sock = tokio::net::TcpSocket::new_v4().unwrap();
+    sock.bind(format!("{from_ip}:0").parse().unwrap()).unwrap();
+    let mut s = sock.connect(target).await.unwrap();
+    let mut req = format!("GET {path} HTTP/1.1\r\nHost: node\r\nConnection: close\r\n");
+    for (k, v) in headers {
+        req += &format!("{k}: {v}\r\n");
+    }
+    req += "\r\n";
+    s.write_all(req.as_bytes()).await.unwrap();
+    s
+}
+
+async fn status_of(s: &mut tokio::net::TcpStream) -> u16 {
+    use tokio::io::AsyncReadExt;
+    let mut head = vec![0u8; 12];
+    tokio::time::timeout(Duration::from_secs(20), s.read_exact(&mut head)).await.expect("a status line").unwrap();
+    std::str::from_utf8(&head).unwrap()[9..12].parse().unwrap()
+}
+
+/// Residue (c) of R436-14: everyone behind one proxy shared ONE stream slot (the limit was keyed by the TCP peer),
+/// and four parties could sit on the four slots for hours by taking a chunk every 9 s. Now: the client is the
+/// address the EDGE names, believed only with a valid edge assertion (a bare header is not believed); an idle
+/// stream gives way to a request that needs its slot; no request holds a slot beyond its deadline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r436_14_residue_c_stream_slots_are_fair_and_only_the_edge_names_the_client() {
+    use std::sync::atomic::Ordering::Relaxed;
+    use tokio::io::AsyncReadExt;
+    let secret = b"edge-secret-0123456789abcdef0123456789abcdef".to_vec();
+    let n = start_node_with("fair", Some(secret.clone())).await;
+    let base = n.url.clone();
+    let height = fill_blocks(&n, 120_000).await;
+    assert!(height >= 60, "{height}");
+    *n.app.read_rate.lock().unwrap() = perps_node::sequencer::RateLimit::new(0.0, 0.0);
+    *n.app.edge_client_header.lock().unwrap() = Some("x-edge-client".into());
+    let st = n.app.streams.clone();
+    // nothing gives way and nothing is cut by time in the first part
+    st.slow_ms.store(600_000, Relaxed);
+    st.evict_idle_ms.store(600_000, Relaxed);
+    let path = "/v1/blocks/stream?from=1";
+    let mut rid = 0u8;
+    let mut edge = |client: &str| -> Vec<(String, String)> {
+        rid += 1;
+        let (h, m) = assertion(&secret, "PA", rid, now());
+        vec![("x-postern-geo".into(), h), ("x-postern-geo-mac".into(), m), ("x-edge-client".into(), client.into())]
+    };
+    let refs = |v: &[(String, String)]| v.iter().map(|(k, v)| (k.as_str().to_string(), v.as_str().to_string())).collect::<Vec<_>>();
+    async fn open(base: &str, path: &str, from_ip: &str, hs: &[(String, String)]) -> (u16, tokio::net::TcpStream) {
+        let h: Vec<(&str, &str)> = hs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let mut s = raw_get_h(from_ip, base, path, &h).await;
+        (status_of(&mut s).await, s)
+    }
+
+    // 1. two clients behind ONE peer address (the edge), each named by the edge with its assertion: each has its
+    //    own stream. (They read nothing: their streams stay open.)
+    let h1 = edge("203.0.113.1");
+    let (s1, _c1) = open(&base, path, "127.0.0.1", &h1).await;
+    let (s2, _c2) = open(&base, path, "127.0.0.1", &edge("203.0.113.2")).await;
+    assert_eq!((s1, s2), (200, 200), "two clients of the edge are two clients");
+    // the same client again: one stream per client
+    assert_eq!(open(&base, path, "127.0.0.1", &edge("203.0.113.1")).await.0, 429);
+    // a bare header is not believed: without an assertion the request is the PEER's, whatever address it claims
+    let bare = |c: &str| vec![("x-edge-client".to_string(), c.to_string())];
+    let (s3, _c3) = open(&base, path, "127.0.0.1", &bare("203.0.113.3")).await;
+    assert_eq!(s3, 200, "counted against the peer address, which had no stream yet");
+    assert_eq!(open(&base, path, "127.0.0.1", &bare("203.0.113.4")).await.0, 429, "a second claimed address from the same peer is the same peer");
+    // a wrong MAC, a replayed assertion and a header that is not one address are not believed either
+    let mut bad = edge("203.0.113.5");
+    bad[1].1 = "0".repeat(64);
+    assert_eq!(open(&base, path, "127.0.0.1", &bad).await.0, 429, "a MAC the edge did not make");
+    let mut replay = refs(&h1);
+    replay[2].1 = "203.0.113.6".into();
+    assert_eq!(open(&base, path, "127.0.0.1", &replay).await.0, 429, "the first request's assertion again, with another address");
+    assert_eq!(open(&base, path, "127.0.0.1", &edge("203.0.113.7, 203.0.113.8")).await.0, 429, "a list is not an address");
+    assert_eq!((st.in_use(), st.evicted.load(Relaxed)), (3, 0));
+
+    // 2. a fourth client takes the last slot; a fifth finds none while nothing has been idle long enough
+    let (s4, mut c4) = open(&base, path, "127.0.0.2", &[]).await;
+    assert_eq!((s4, st.in_use()), (200, 4));
+    assert_eq!(open(&base, path, "127.0.0.3", &[]).await.0, 429, "four streams at once");
+
+    // 3. the four consumers read nothing: once that has lasted the idle time, a client that needs a slot gets
+    //    one of theirs, and reads every block in order while a second eviction happens beside it
+    for _ in 0..1200 {
+        if st.idle(now(), 300) == 4 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(st.idle(now(), 300), 4, "four streams whose consumers left a chunk waiting");
+    st.evict_idle_ms.store(300, Relaxed);
+    let reader = {
+        let base = base.clone();
+        tokio::spawn(async move {
+            let mut s = raw_get("127.0.0.3", &base, "/v1/blocks/stream?from=1").await;
+            let mut buf = Vec::new();
+            s.read_to_end(&mut buf).await.unwrap();
+            buf
+        })
+    };
+    // the fourth client asks again: its OWN idle stream gives way (never someone else's for a client at its cap)
+    let (s4b, mut c4b) = open(&base, path, "127.0.0.2", &[]).await;
+    assert_eq!(s4b, 200);
+    let buf = reader.await.unwrap();
+    let text = String::from_utf8_lossy(&buf).to_string();
+    assert!(text.starts_with("HTTP/1.1 200"), "{}", &text[..60.min(text.len())]);
+    // chunked transfer: the ndjson lines are the ones that parse as a block
+    let heights: Vec<u64> = text.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter_map(|j| j["height"].as_u64()).collect();
+    assert_eq!(heights, (1..=height).collect::<Vec<_>>(), "the reader that took a freed slot got every block in order");
+    assert_eq!(st.evicted.load(Relaxed), 2, "one for the newcomer, one for the fourth client's second request");
+    // the fourth client's first stream was evicted (by its own second request, or already by the newcomer):
+    // it ends, and what its consumer finds is the head of the stream only
+    let mut got = Vec::new();
+    tokio::time::timeout(Duration::from_secs(20), c4.read_to_end(&mut got)).await.expect("an evicted stream ends").unwrap();
+    assert!(got.len() < buf.len(), "{} of {}", got.len(), buf.len());
+    let mut rest = Vec::new();
+    tokio::time::timeout(Duration::from_secs(150), c4b.read_to_end(&mut rest)).await.expect("the second request of the fourth client ends").unwrap();
+
+    // 4. no request holds a slot beyond its deadline, even one that is neither slow enough to be cut nor in
+    //    anyone's way
+    st.evict_idle_ms.store(600_000, Relaxed);
+    for _ in 0..600 {
+        if st.in_use() <= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let before = st.in_use();
+    assert!(before <= 2, "{before}");
+    st.max_ms.store(500, Relaxed);
+    let (s9, _c9) = open(&base, path, "127.0.0.9", &[]).await;
+    assert_eq!((s9, st.in_use()), (200, before + 1));
+    for _ in 0..600 {
+        if st.in_use() == before {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(st.in_use(), before, "the silent stream ended at its deadline (500 ms) with the slow-consumer time at 10 minutes");
+    let _ = n.stop.send(true);
 }

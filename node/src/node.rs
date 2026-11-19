@@ -60,6 +60,13 @@ pub struct App {
     pub oracle_token: Option<Vec<u8>>,
     /// Limits of `/v1/blocks/stream` (R436-14)
     pub streams: Arc<crate::api::StreamLimits>,
+    /// `GET /v1/blocks` is rendered off the runtime, a few at a time, up to a byte bound (R436-14 residue)
+    pub block_renders: crate::api::BlockRenders,
+    /// used attestation read signatures (R436-17 residue)
+    pub read_replay: Mutex<crate::attest::ReadReplay>,
+    /// `--edge-client-header`: the header in which the EDGE names the client's address. Believed only on a
+    /// request that carries a valid edge assertion (R436-14 residue); None = never.
+    pub edge_client_header: Mutex<Option<String>>,
     /// Bearer token of the operator's reads (`--operator-token-file`; `None`: no operator path exists)
     pub operator_token: Mutex<Option<Vec<u8>>>,
     /// Attestation records (`crate::attest`)
@@ -104,6 +111,9 @@ impl App {
             attestations: Mutex::new(crate::attest::Attestations::default()),
             operator_token: Mutex::new(None),
             streams: Arc::new(crate::api::StreamLimits::new(crate::api::STREAM_SLOTS)),
+            block_renders: crate::api::BlockRenders::new(),
+            read_replay: Mutex::new(Default::default()),
+            edge_client_header: Mutex::new(None),
             g,
             seq: Mutex::new(seq),
             geo,

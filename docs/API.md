@@ -262,8 +262,26 @@ checkpoint from `GET /v1/committee` plus this object without trusting the API ho
 | Method and path | Returns |
 |---|---|
 | `GET /v1/blocks/{height}` | `Block` |
-| `GET /v1/blocks?from=H&limit=N` | `{"blocks":[Block]}` oldest first, max 500 |
-| `GET /v1/blocks/stream?from=H` | `application/x-ndjson`, one `Block` per line (bulk replay): at most 10,001 blocks per request, produced as the client reads (backpressure); continue with `from` = the last height received + 1 until an empty answer. At most 4 streams at once and one per client address (`429 RATE_LIMITED`); a client that does not read for 10 s is disconnected, so a stream can end early: always continue from the last complete line |
+| `GET /v1/blocks?from=H&limit=N` | `{"blocks":[Block]}` oldest first, max 500 and at most 4 MiB of blocks (never fewer than one): an answer may hold FEWER blocks than `limit`; continue with `from` = the last height received + 1 until an empty answer. Rendered off the request threads, 4 renders at once (the others wait up to 5 s, then `429 RATE_LIMITED`) |
+| `GET /v1/blocks/stream?from=H` | `application/x-ndjson`, one `Block` per line (bulk replay): at most 10,001 blocks per request, produced as the client reads (backpressure); continue with `from` = the last height received + 1 until an empty answer. Limits and fairness below |
+
+**Block stream limits (R436-14 and its residue).** At most 4 streams at once and 1 per client; beyond that `429
+RATE_LIMITED`, unless an idle stream gives way. A stream ends early (the body just ends: always continue from the last
+COMPLETE line, with `from` = its height + 1) when its consumer takes no chunk for 10 s, when the request has been served for 120 s, or when it is
+EVICTED: a stream whose consumer has left a finished chunk waiting for 2 s gives its slot to a request that needs
+it (the same client asking again evicts its own; when all slots are taken, the client holding the most slots
+loses its idlest stream). A stream that keeps reading is never evicted. **Who is "one client":** the TCP peer
+address (an IPv6 peer by its /64). Behind the edge every client arrives from the edge's address, so the node can
+be told the header in which the edge names the client (`--edge-client-header NAME`, off by default, refused
+without `--edge-secret-file`); that header is believed ONLY on a request that also carries a valid edge
+assertion (`x-postern-geo` + `x-postern-geo-mac`: the edge's MAC, fresh, used once), which a client cannot make;
+a bare header, a bad or replayed assertion, or a value that is not one address is counted against the TCP peer.
+**Residual risk, stated:** the assertion's MAC does not cover the client header, so the edge must overwrite that
+header on every request it forwards and the node must not be reachable around the edge by someone holding the
+edge secret; a party with many real addresses that keeps READING can still hold all four slots for as long as it
+reads (120 s per request, then it competes again): the bulk stream can be made slow to get, not the data
+unavailable (`GET /v1/blocks` and every validator's read service serve the same log); without the edge header,
+all clients of one proxy share one client's limit.
 
 `Block`:
 
@@ -570,10 +588,17 @@ An agent wallet is a second key that may trade for an account but can never with
   `AttestationStatus`: `{"account","status":"valid|expired|missing","residenceCountry","statementId","issuedAt",
   "expiresAt","record"}` (`record` is the signed record itself). **Who may read it (R436-17; a technical default,
   the legal question is for counsel):** a record names a declared country of residence and is NOT public. The
-  `GET` answers only (a) the account itself: headers `X-Postern-Read-Time: <Unix ms>` and
-  `X-Postern-Read-Signature: 0x…` = the account's signature of the EIP-712 message `AttestationRead(address
-  account,uint64 timestamp)` under the engine domain, with the time within 60 s of the node's clock (a captured
-  pair can be replayed inside that minute: use TLS); or (b) the operator: `Authorization: Bearer <token>` of
+  `GET` answers only (a) the account itself: headers `X-Postern-Read-Time: <Unix ms>`, `X-Postern-Read-Nonce:
+  <uint64, decimal, chosen by the signer>` and `X-Postern-Read-Signature: 0x…` = the account's signature of the
+  EIP-712 message `AttestationRead(address account,string method,string path,uint64 timestamp,uint64 nonce)` under
+  the engine domain, with `method` = `GET`, `path` = `/v1/attestations/<the account, lower-case 0x>`, and the time
+  within 60 s of the node's clock. **One signature, one read:** the node remembers a used (account, nonce) for as
+  long as its time could still be accepted and answers `401` to a second use, so a captured header set reads
+  nothing; the signature is for that path and method only (it is not an action: no `typeId`). The memory is
+  bounded (32 signed reads per account at once, 100,000 in all; beyond it `429 RATE_LIMITED` until entries age
+  out, about a minute; never forgotten early). Residual: the answer itself is as private as the transport (use
+  TLS); the memory is in RAM, so a restart inside the 60 s forgets it;
+  or (b) the operator: `Authorization: Bearer <token>` of
   `--operator-token-file` (no file: no operator path). Anyone else: `401 UNAUTHORIZED`, the same answer whether a
   record exists or not. The `POST` answer carries the status with `record: null`. The store is bounded: the same
   record again stores nothing; a replacement must be issued at least 60 s after the record it replaces; accounts
@@ -715,6 +740,7 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 | 0.3 | 2026-11-19 | same version, later the same round: `GET /v1/genesis`; CORS; `Position.openNotional`; read rate limit; proofs for any final checkpoint (rebuilt from the log) and from a validator's own read service; attestation records (`/v1/attestations`); snapshots restore the history |
 | 0.2 | 2026-11-17 | follows SPEC 0.1.1 and VAULT.md 0.1: engine domain chainId 700770 + verifyingContract = vault; FIXED scales (price and size 1e-8, USDC 1e-6; per-market decimals are display only); nonce rule SPEC 2.5 (window and 64-set, errors NONCE_WINDOW / NONCE_USED inside `BAD_NONCE` admissions); checkpoint = VAULT 5.2 13 fields; certificate = VAULT `withdraw` inputs (sum-tree proof); block input tags 0x01-0x04 (SPEC 3.2) |
 | 0.3 | 2026-11-19 | same version, additive, after the frontend's asks: CORS is an explicit allowlist, EMPTY by default (was `*` in dev), with the WebSocket `Origin` check (F434-2); `Market.markBandBps`, `Market.marketSlippageBps`, `oracle.exitHaircutBps`, `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs`; `OracleStatus.haltedSince`, `OracleStatus.exitBand` (F434-5, F434-6) |
+| 0.3 | 2026-11-19 | same version, after 436's re-check: the attestation read signature binds method, path and a nonce and is spent once (BREAKING for a reader of round 2: new header `X-Postern-Read-Nonce`, new `AttestationRead` fields); `GET /v1/blocks` stops at 4 MiB and may hold fewer blocks than `limit`; block-stream fairness (idle eviction, 120 s per request, `--edge-client-header`) |
 
 ## 12. Not done / not proven (v0.3)
 

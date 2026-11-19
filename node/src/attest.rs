@@ -17,8 +17,9 @@
 //!
 //! WHO MAY READ A RECORD (R436-17; decided here as a technical default, the legal question is for counsel): a
 //! record names an address's declared country of residence, so it is not public. `GET /v1/attestations/{address}`
-//! answers only (a) the account itself, proven by a fresh signature (`read_digest`: EIP-712 `AttestationRead
-//! (address account,uint64 timestamp)` under the engine domain, timestamp within `READ_WINDOW_MS` of the node's
+//! answers only (a) the account itself, proven by a fresh signature (`read_digest`: EIP-712 `AttestationRead`
+//! binding account, method, path, timestamp and a nonce, under the engine domain, spent once (`ReadReplay`),
+//! timestamp within `READ_WINDOW_MS` of the node's
 //! clock), or (b) the operator, by the bearer token of `--operator-token-file`. Anyone else gets 401, the same
 //! answer whether a record exists or not. The node's own admission reads the store in process.
 //!
@@ -172,27 +173,113 @@ pub const READ_WINDOW_MS: u64 = 60_000;
 pub const MIN_REPLACE_MS: u64 = 60_000;
 pub const MAX_UNKNOWN_ACCOUNTS: usize = 10_000;
 
-/// The digest an account signs to read its own record: EIP-712 `AttestationRead(address account,uint64 timestamp)`
-/// under the engine domain of this deployment (`timestamp` = Unix ms).
-pub fn read_digest(g: &crate::genesis::Genesis, account: &Address, timestamp_ms: u64) -> crate::util::H256 {
+pub const READ_METHOD: &str = "GET";
+/// read signatures remembered at once (all accounts); beyond it reads by signature are refused until entries age out
+pub const READ_REPLAY_MAX: usize = 100_000;
+/// read signatures remembered at once for ONE account
+pub const READ_REPLAY_PER_ACCOUNT: u32 = 32;
+
+/// The path a read signature is for: the record of this account and nothing else.
+pub fn read_path(account: &Address) -> String {
+    format!("/v1/attestations/{}", crate::util::to_hex(account))
+}
+
+/// The digest an account signs to read its own record (R436-17 and its residue): EIP-712
+/// `AttestationRead(address account,string method,string path,uint64 timestamp,uint64 nonce)` under the engine
+/// domain of this deployment, with `method` = `GET`, `path` = `/v1/attestations/<the account, lower case>`,
+/// `timestamp` = Unix ms and `nonce` chosen by the signer. The signature is for that one request, once.
+pub fn read_digest(g: &crate::genesis::Genesis, account: &Address, timestamp_ms: u64, nonce: u64) -> crate::util::H256 {
     use crate::eip712::{digest, Registry, Val};
     use std::sync::OnceLock;
     static R: OnceLock<Registry> = OnceLock::new();
-    let r = R.get_or_init(|| Registry::from_json(&serde_json::json!({"AttestationRead": [{"name": "account", "type": "address"}, {"name": "timestamp", "type": "uint64"}]})).expect("static type"));
-    let sh = r.hash_struct("AttestationRead", &Val::Struct(vec![Val::Address(*account), Val::Uint(timestamp_ms as u128)])).expect("static type");
-    digest(&g.engine_domain.separator(), &sh)
+    let r = R.get_or_init(|| {
+        Registry::from_json(&serde_json::json!({"AttestationRead": [{"name": "account", "type": "address"}, {"name": "method", "type": "string"},
+            {"name": "path", "type": "string"}, {"name": "timestamp", "type": "uint64"}, {"name": "nonce", "type": "uint64"}]}))
+        .expect("static type")
+    });
+    let v = Val::Struct(vec![Val::Address(*account), Val::Str(READ_METHOD.into()), Val::Str(read_path(account)), Val::Uint(timestamp_ms as u128), Val::Uint(nonce as u128)]);
+    digest(&g.engine_domain.separator(), &r.hash_struct("AttestationRead", &v).expect("static type"))
 }
 
-/// Is this read of `account`'s record signed by the account itself, now? (`time` and `signature` are the values
-/// of the headers `X-Postern-Read-Time` and `X-Postern-Read-Signature`.)
-pub fn read_authorised(g: &crate::genesis::Genesis, account: &Address, time: Option<&str>, signature: Option<&str>, now_ms: u64) -> bool {
-    let (Some(t), Some(sig)) = (time, signature) else { return false };
-    let Ok(t) = t.parse::<u64>() else { return false };
+/// Is this read of `account`'s record signed by the account itself, now, for this request? (`time`, `nonce` and
+/// `signature` are the values of the headers `X-Postern-Read-Time`, `X-Postern-Read-Nonce` and
+/// `X-Postern-Read-Signature`.) Returns the signed (timestamp, nonce); the caller then spends it in `ReadReplay`.
+pub fn read_authorised(g: &crate::genesis::Genesis, account: &Address, time: Option<&str>, nonce: Option<&str>, signature: Option<&str>, now_ms: u64) -> Option<(u64, u64)> {
+    let (t, n, sig) = (time?, nonce?, signature?);
+    // canonical decimal only: one spelling per value, so one header set per signature
+    let dec = |s: &str| if s.is_empty() || s.len() > 20 || !s.bytes().all(|b| b.is_ascii_digit()) || (s.len() > 1 && s.starts_with('0')) { None } else { s.parse::<u64>().ok() };
+    let (t, n) = (dec(t)?, dec(n)?);
     if t > now_ms.saturating_add(READ_WINDOW_MS) || now_ms > t.saturating_add(READ_WINDOW_MS) {
-        return false;
+        return None;
     }
-    let Ok(sig) = crate::util::parse_hex_fixed::<65>(sig) else { return false };
-    crate::sig::recover(&read_digest(g, account, t), &sig).is_ok_and(|a| a == *account)
+    let sig = crate::util::parse_hex_fixed::<65>(sig).ok()?;
+    crate::sig::recover(&read_digest(g, account, t, n), &sig).is_ok_and(|a| a == *account).then_some((t, n))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReadOnce {
+    Fresh,
+    /// this signature was already used
+    Replayed,
+    /// the memory of used signatures is full (for this account or in all): refused, never forgotten early
+    Full,
+}
+
+/// Used read signatures, kept for as long as their timestamp could still be accepted (R436-17 residue: a captured
+/// header set could be replayed for 60 s). Bounded: per account and in all; when full, reads by signature are
+/// REFUSED until entries age out (an entry is never dropped while its signature is still acceptable).
+pub struct ReadReplay {
+    seen: std::collections::HashMap<(Address, u64), u64>,
+    order: std::collections::VecDeque<(Address, u64)>,
+    per_account: std::collections::HashMap<Address, u32>,
+    pub max: usize,
+    pub max_per_account: u32,
+}
+
+impl Default for ReadReplay {
+    fn default() -> Self {
+        ReadReplay { seen: Default::default(), order: Default::default(), per_account: Default::default(), max: READ_REPLAY_MAX, max_per_account: READ_REPLAY_PER_ACCOUNT }
+    }
+}
+
+impl ReadReplay {
+    pub fn len(&self) -> usize {
+        self.seen.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty()
+    }
+    /// Call only with a (timestamp, nonce) whose signature by `account` was just verified.
+    pub fn once(&mut self, account: &Address, nonce: u64, timestamp_ms: u64, now_ms: u64) -> ReadOnce {
+        // forget what can no longer be accepted (insertion order; timestamps differ by at most two windows, so the
+        // oldest insertion is expired at the latest 2 x READ_WINDOW_MS after the newest expired one)
+        while let Some(k) = self.order.front().copied() {
+            let expired = self.seen.get(&k).is_none_or(|t| t.saturating_add(READ_WINDOW_MS) < now_ms);
+            if !expired {
+                break;
+            }
+            self.order.pop_front();
+            if self.seen.remove(&k).is_some() {
+                if let Some(c) = self.per_account.get_mut(&k.0) {
+                    *c -= 1;
+                    if *c == 0 {
+                        self.per_account.remove(&k.0);
+                    }
+                }
+            }
+        }
+        let k = (*account, nonce);
+        if self.seen.contains_key(&k) {
+            return ReadOnce::Replayed;
+        }
+        if self.seen.len() >= self.max || self.per_account.get(account).copied().unwrap_or(0) >= self.max_per_account {
+            return ReadOnce::Full;
+        }
+        self.seen.insert(k, timestamp_ms);
+        self.order.push_back(k);
+        *self.per_account.entry(*account).or_insert(0) += 1;
+        ReadOnce::Fresh
+    }
 }
 
 /// 397's "exit-like" set of step 6: actions that never need an attestation.

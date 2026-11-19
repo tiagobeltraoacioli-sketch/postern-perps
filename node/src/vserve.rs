@@ -233,7 +233,7 @@ async fn blocks_stream(State(vs): State<VState>, req: axum::extract::Request) ->
     let raw = q.contains_key("raw");
     let g = vs.store.lock().unwrap().g.clone();
     let st = vs.store.clone();
-    crate::api::ndjson_block_stream(&vs.streams, peer_ip(&req), g, from, raw, Arc::new(move |f, n| st.lock().unwrap().take_blocks(f, n)))
+    crate::api::ndjson_block_stream(&vs.streams, crate::api::ClientKey::peer(peer_ip(&req)), g, from, raw, Arc::new(move |f, n| st.lock().unwrap().take_blocks(f, n)))
 }
 
 /// The engine state at `height` from this validator's own replay: a held state, else rebuilt ONCE from the

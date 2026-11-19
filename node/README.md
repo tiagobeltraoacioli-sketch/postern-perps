@@ -40,7 +40,7 @@ it refuses the data directory): `--seed dev --validators 7 --threshold 5 --check
 `dev` flags: `--data DIR --listen 127.0.0.1:48900 --local-validators N --block-ms 200 --snapshot-every 1000
 --engine real|stub --l2 http://A,http://B --l2-start-block N --l2-poll-ms 1000 --token 0x.. --cors-origin ORIGIN (repeatable; none = no CORS)
 --oracle-token-file F --oracle-gather-ms 500 --relay-rpc http://A[,http://B] --relay-key-file F --relay-poll-ms 2000
---geoblock FILE --edge-secret-file F --dev-default-country ZZ --ip-rate 50 --account-rate 20 --read-rate 100
+--geoblock FILE --edge-secret-file F --edge-client-header NAME --dev-default-country ZZ --ip-rate 50 --account-rate 20 --read-rate 100
 --dev-oracle` (the last one only in a binary built with the dev-only cargo feature `dev-oracle`, which a release
 build refuses to compile).
 

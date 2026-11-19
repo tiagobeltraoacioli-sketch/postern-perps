@@ -36,6 +36,13 @@ impl EdgeVerifier {
         Ok(EdgeVerifier { secret, replay: Mutex::new(postern_geoblock::assertion::ReplayCache::new(200_000)) })
     }
 
+    /// Did this request come through the edge? True for a valid, fresh, never-seen assertion (which it spends),
+    /// whatever it says about the country: used to decide whether the edge's client-address header is believed.
+    pub fn authenticate(&self, header: Option<&str>, mac: Option<&str>, now_ms: u64) -> bool {
+        let mut r = self.replay.lock().unwrap();
+        postern_geoblock::assertion::verify(header, mac, &self.secret, now_ms as i64, Some(&mut r)).is_ok()
+    }
+
     /// (country, subdivision) of a valid, fresh, never-seen assertion whose anonymizer signals do not deny.
     pub fn verify(&self, header: Option<&str>, mac: Option<&str>, now_ms: u64) -> Result<(Option<String>, Option<String>), String> {
         let mut r = self.replay.lock().unwrap();
