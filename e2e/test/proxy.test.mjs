@@ -45,6 +45,10 @@ test('proxy fault modes', async (t) => {
   assert.equal(h.number, BLOCK.number);
   assert.deepEqual((await (await call('eth_getLogs')).json()).result, [LOG], 'hash: logs untouched');
 
+  await fault('gas');
+  assert.equal((await (await call('eth_gasPrice')).json()).result, '0x7fffffffffffffff');
+  assert.deepEqual((await (await call('eth_getLogs')).json()).result, [LOG], 'gas: logs untouched');
+
   await fault('down');
   assert.equal((await call('eth_chainId')).status, 503);
 

@@ -119,10 +119,22 @@ observation is still in the engine's future, and leaves out what can never be ac
 ## 7. Relayer
 
 `docs/VAULT.md` 8a: submits this node's newest final checkpoint when a withdrawal waits, when a forced request was
-processed (at once), or `forcedDelay / 4` of L2 time after the vault's last checkpoint. Retry on the next endpoint
-with a backoff that doubles to 30 s; gas `1.5 x estimate + 40,000`; EIP-155 legacy transactions signed in process;
-alarms at `forcedDelay / 2` (open forced request) and `escapeDelay / 2`. It submits checkpoints only: `withdraw`,
-`claimEscape` and the other user calls are the user's.
+processed (at once), or `forcedDelay / 4` of L2 time after the vault's last checkpoint. It submits checkpoints only:
+`withdraw`, `claimEscape` and the other user calls are the user's.
+
+No L2 endpoint is trusted alone (R436-15, the watcher's standard): `--relay-rpc` takes at least TWO endpoints of
+independent operators; the vault is read at the `finalized` block and only when every endpoint names the same
+block and the same state; the agreed reading must be a checkpoint this node finalized, with its counts, or it is
+not believed; the gas price is twice the highest any endpoint names and never above `--relay-max-gas-price-gwei`
+(default 50; above it nothing is signed; one transaction costs at most `15,000,000 x cap`); a submission counts
+when every endpoint returns its receipt with status 1. Retry on the next endpoint with a backoff that doubles to
+30 s; gas limit `1.5 x estimate + 40,000`; EIP-155 legacy transactions signed in process.
+
+Alarms (stderr `RELAYER ALARM`, `/v1/node` `relayer.alarm`): from the believed reading, `forcedDelay / 2` since an
+open forced request, `escapeDelay / 2` of silence, escape; and from the node's OWN clock, whatever the endpoints
+say: no agreed and plausible reading for `--relay-stall-alarm-ms` (120 s), a due checkpoint not confirmed for
+`--relay-delivery-alarm-ms` (600 s), a gas price above the cap. The alarm is a log line and an API field: nothing
+pages anyone (an operator must watch it).
 
 ## 8. Tests and measurements
 
@@ -147,5 +159,8 @@ Performance of the sequencer path: `perps-bench` (method in its header), numbers
 - The watcher speaks plain HTTP to its two endpoints (a TLS-terminating proxy is needed for remote ones) and reads
   only the `finalized` tag; it was run against anvil, never against the Bloch L2.
 - The relayer was run against anvil only; it does not watch payouts (`Withdrawal.status` stops at `certified`).
-- The validator read service has no rate limit of its own; a state rebuild replays from the nearest held state.
+- The validator read service keeps whole engine states as anchors (every 1,000 blocks, 16 of them) and rebuilt
+  states (4): bounded in number, not in bytes; heights older than the anchored range replay from genesis.
+- The relayer's alarm is a log line and an API field; nothing pages an operator. Its gas-price cap default
+  (50 gwei) is a placeholder: the Bloch L2's real price range is an owner input.
 - Geoblocking is a control of the operator's access point; the L2 forced path cannot be geoblocked by the node.

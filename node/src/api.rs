@@ -179,7 +179,7 @@ async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: ax
     h.insert("vary", HeaderValue::from_static("origin"));
     if preflight {
         h.insert("access-control-allow-methods", HeaderValue::from_static("GET, POST, OPTIONS"));
-        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country"));
+        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-signature"));
         h.insert("access-control-max-age", HeaderValue::from_static("600"));
     }
     resp
@@ -617,27 +617,103 @@ async fn blocks_range(State(app): State<Arc<App>>, q: Q) -> Response {
     Json(serde_json::json!({"blocks": out})).into_response()
 }
 
-/// At most 10,001 blocks per request (continue with `from` = the last height + 1), read 200 at a time so the
-/// sequencer lock is held only for the copies.
-async fn blocks_stream(State(app): State<Arc<App>>, q: Q) -> Response {
+/// Limits of `/v1/blocks/stream` (R436-14): the stream used to be built whole in memory (up to 10,001 blocks) with
+/// every signature recovered on the runtime's threads, by any number of callers at once.
+pub struct StreamLimits {
+    /// streams served at once by this process
+    pub slots: Arc<tokio::sync::Semaphore>,
+    /// one stream per client address at a time
+    pub ips: std::sync::Mutex<std::collections::HashSet<std::net::IpAddr>>,
+    /// blocks rendered per chunk
+    pub chunk_blocks: u64,
+    /// a consumer that does not take the next chunk within this time is disconnected
+    pub slow_ms: std::sync::atomic::AtomicU64,
+}
+
+pub const STREAM_SLOTS: usize = 4;
+pub const STREAM_CHUNK_BLOCKS: u64 = 16;
+/// a chunk is closed once it holds this many bytes (a block can be megabytes of JSON)
+pub const STREAM_CHUNK_BYTES: usize = 1 << 20;
+pub const STREAM_SLOW_MS: u64 = 10_000;
+pub const STREAM_MAX_BLOCKS: u64 = 10_001;
+
+impl StreamLimits {
+    pub fn new(slots: usize) -> StreamLimits {
+        StreamLimits { slots: Arc::new(tokio::sync::Semaphore::new(slots)), ips: std::sync::Mutex::new(Default::default()), chunk_blocks: STREAM_CHUNK_BLOCKS, slow_ms: std::sync::atomic::AtomicU64::new(STREAM_SLOW_MS) }
+    }
+}
+
+struct IpSlot(Arc<StreamLimits>, std::net::IpAddr);
+
+impl Drop for IpSlot {
+    fn drop(&mut self) {
+        self.0.ips.lock().unwrap().remove(&self.1);
+    }
+}
+
+/// An ndjson stream of blocks `from ..` (at most `STREAM_MAX_BLOCKS`), produced AS IT IS READ:
+/// - at most `limits.slots` streams at once, one per client address (`429 RATE_LIMITED` otherwise);
+/// - memory per stream is bounded: `chunk_blocks` blocks are copied (by `take`, which may lock for the copy),
+///   rendered on the blocking pool (input decoding and signer recovery are CPU work) up to `STREAM_CHUNK_BYTES`,
+///   and handed to a channel of two chunks; the next chunk is made only when the consumer took one (backpressure);
+/// - a consumer that does not take a chunk for `slow_ms` is disconnected (the body ends; the client continues
+///   with `from` = its last height + 1, as it does after `STREAM_MAX_BLOCKS`).
+pub fn ndjson_block_stream(limits: &Arc<StreamLimits>, peer: std::net::IpAddr, g: Arc<crate::genesis::Genesis>, from: u64, raw: bool, take: Arc<dyn Fn(u64, u64) -> Vec<crate::types::Block> + Send + Sync>) -> Response {
+    let Ok(permit) = limits.slots.clone().try_acquire_owned() else {
+        return error(429, "RATE_LIMITED", "too many block streams are being served: retry", serde_json::json!({}));
+    };
+    if !limits.ips.lock().unwrap().insert(peer) {
+        return error(429, "RATE_LIMITED", "one block stream per client address at a time", serde_json::json!({}));
+    }
+    let ip_slot = IpSlot(limits.clone(), peer);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
+    let limits = limits.clone();
+    tokio::spawn(async move {
+        let (_permit, _ip_slot) = (permit, ip_slot);
+        let end = from.saturating_add(STREAM_MAX_BLOCKS);
+        let mut next = from;
+        while next < end {
+            let (take2, g2) = (take.clone(), g.clone());
+            let n = (end - next).min(limits.chunk_blocks.max(1));
+            let rendered = tokio::task::spawn_blocking(move || {
+                let chunk = take2(next, n);
+                let mut body = String::new();
+                let mut count = 0u64;
+                for b in &chunk {
+                    body.push_str(&block_json_g(&g2, b, raw).to_string());
+                    body.push('\n');
+                    count += 1;
+                    if body.len() >= STREAM_CHUNK_BYTES {
+                        break;
+                    }
+                }
+                (count, body)
+            })
+            .await;
+            let Ok((count, body)) = rendered else { break };
+            if count == 0 {
+                break;
+            }
+            next += count;
+            let slow = Duration::from_millis(limits.slow_ms.load(std::sync::atomic::Ordering::Relaxed));
+            match tokio::time::timeout(slow, tx.send(Ok(body.into()))).await {
+                Ok(Ok(())) => {}
+                // the consumer is gone, or too slow: stop producing; dropping the sender ends the body
+                _ => break,
+            }
+        }
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+    ([("content-type", "application/x-ndjson")], axum::body::Body::from_stream(stream)).into_response()
+}
+
+/// `GET /v1/blocks/stream?from=H`: at most 10,001 blocks per request (continue with `from` = the last height + 1
+/// until an empty answer), streamed with the limits of `ndjson_block_stream` (R436-14).
+async fn blocks_stream(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, q: Q) -> Response {
     let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
     let raw = q.get("raw").is_some();
-    let end = from.saturating_add(10_001);
-    let mut body = String::new();
-    let mut next = from;
-    while next < end {
-        let chunk = take_blocks(&app, next, (end - next).min(200));
-        if chunk.is_empty() {
-            break;
-        }
-        next += chunk.len() as u64;
-        for b in &chunk {
-            body.push_str(&block_json(&app, b, raw).to_string());
-            body.push('\n');
-        }
-        tokio::task::yield_now().await;
-    }
-    ([("content-type", "application/x-ndjson")], body).into_response()
+    let app2 = app.clone();
+    ndjson_block_stream(&app.streams, peer.ip(), app.g.clone(), from, raw, Arc::new(move |f, n| take_blocks(&app2, f, n)))
 }
 
 /// Admission path shared by REST and WebSocket: parse, recover the signer, geoblock, then the sequencer.
@@ -734,21 +810,40 @@ async fn post_attestation(State(app): State<Arc<App>>, ConnectInfo(peer): Connec
         Ok(v) => v,
         Err(e) => return error(400, "MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
     };
+    // lock order: seq before attestations (the store asks the engine whether it knows the account)
+    let s = app.seq.lock().unwrap();
+    let known = |a: &Address| s.engine.real().is_some_and(|e| e.by_addr.contains_key(a));
     let mut at = app.attestations.lock().unwrap();
     if at.statements.is_empty() {
         return error(503, "ATTESTATION_UNAVAILABLE", "this node has no attestation statement configured (--attestation-statements)", serde_json::json!({}));
     }
-    match at.submit(&rec, now) {
-        Ok(account) => Json(attestation_json(&account, &at.status(&account, now))).into_response(),
+    match at.submit(&rec, now, &known) {
+        // the answer goes to whoever holds the signed record (the account's own client): its status, not an echo
+        Ok(account) => {
+            let mut j = attestation_json(&account, &at.status(&account, now));
+            j["record"] = serde_json::Value::Null;
+            Json(j).into_response()
+        }
+        Err(e) if e.starts_with("STORE FULL") => error(503, "ATTESTATION_UNAVAILABLE", &e, serde_json::json!({})),
         Err(e) => error(400, "ATTESTATION_INVALID", &e, serde_json::json!({"statements": at.statements})),
     }
 }
 
-async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
+/// R436-17: a record names a declared residence; it is read only by the account itself (a fresh signature) or
+/// by the operator (bearer token). Everyone else: 401, the same answer whether a record exists or not.
+async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>, headers: HeaderMap) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
         Err(r) => return r,
     };
+    let h = |k: &str| headers.get(k).and_then(|v| v.to_str().ok());
+    let operator = match (&*app.operator_token.lock().unwrap(), h("authorization").and_then(|v| v.strip_prefix("Bearer "))) {
+        (Some(tok), Some(p)) => crate::oracle_pool::token_ok(tok, p.as_bytes()),
+        _ => false,
+    };
+    if !operator && !crate::attest::read_authorised(&app.g, &a, h("x-postern-read-time"), h("x-postern-read-signature"), now_ms()) {
+        return error(401, "UNAUTHORIZED", "an attestation record is read by its account (X-Postern-Read-Time + X-Postern-Read-Signature, API.md section 6) or by the operator", serde_json::json!({}));
+    }
     let at = app.attestations.lock().unwrap();
     Json(attestation_json(&a, &at.status(&a, now_ms()))).into_response()
 }

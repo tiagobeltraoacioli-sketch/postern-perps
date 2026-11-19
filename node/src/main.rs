@@ -55,7 +55,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A[,http://B] --relay-key-file F [--relay-poll-ms 2000]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--operator-token-file F] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -182,7 +182,7 @@ async fn remote_validator(a: HashMap<String, String>) {
         let Some(st) = store.clone() else { die("--listen needs --data DIR (the validator serves its own log)".into()) };
         let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| die(format!("bind {listen}: {e}")));
         tokio::spawn(async move {
-            let _ = axum::serve(listener, perps_node::vserve::router(st)).await;
+            let _ = axum::serve(listener, perps_node::vserve::router(st).into_make_service_with_connect_info::<SocketAddr>()).await;
         });
         eprintln!("validator read service on http://{listen}");
     }
@@ -339,6 +339,15 @@ async fn dev(a: HashMap<String, String>) {
         at.required = a.contains_key("require-attestation");
         *app.attestations.lock().unwrap() = at;
     }
+    // the operator's token (reads that are not public: attestation records), from a file like the ingest token
+    if let Some(p) = a.get("operator-token-file") {
+        let raw = std::fs::read(p).unwrap_or_else(|e| die(format!("--operator-token-file: {e}")));
+        let t = String::from_utf8_lossy(&raw).trim().as_bytes().to_vec();
+        if t.len() < 16 {
+            die("--operator-token-file: the token must be at least 16 bytes".into());
+        }
+        *app.operator_token.lock().unwrap() = Some(t);
+    }
     if let Some(o) = a.get("cors-origin") {
         *app.cors_origin.lock().unwrap() = o.clone();
     }
@@ -352,16 +361,14 @@ async fn dev(a: HashMap<String, String>) {
             Some(Err(e)) => die(e),
             None => die("--relay-rpc needs --relay-key-file F (a gas-only key; chmod 600)".into()),
         };
-        let cfg = perps_node::relayer::RelayConfig {
-            endpoints: eps.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
-            key,
-            vault: g.vault,
-            poll_ms: get(&a, "relay-poll-ms", 2000u64).max(100),
-            receipt_timeout_ms: get(&a, "relay-receipt-timeout-ms", 30_000u64),
-        };
-        if cfg.endpoints.is_empty() {
-            die("--relay-rpc: at least one endpoint".into());
-        }
+        let endpoints: Vec<String> = eps.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+        let mut cfg = perps_node::relayer::RelayConfig::new(endpoints, key, g.vault).unwrap_or_else(|e| die(format!("--relay-rpc: {e}")));
+        cfg.poll_ms = get(&a, "relay-poll-ms", 2000u64).max(100);
+        cfg.receipt_timeout_ms = get(&a, "relay-receipt-timeout-ms", 30_000u64);
+        cfg.max_gas_price_wei = get(&a, "relay-max-gas-price-gwei", 50u128).saturating_mul(1_000_000_000);
+        cfg.resubmit_after_ms = get(&a, "relay-resubmit-after-ms", perps_node::relayer::DEFAULT_RESUBMIT_AFTER_MS);
+        cfg.stall_alarm_ms = get(&a, "relay-stall-alarm-ms", perps_node::relayer::DEFAULT_STALL_ALARM_MS);
+        cfg.delivery_alarm_ms = get(&a, "relay-delivery-alarm-ms", perps_node::relayer::DEFAULT_DELIVERY_ALARM_MS);
         eprintln!("checkpoint relayer {} -> vault {}", perps_node::util::to_hex(&perps_node::sig::key_address(&cfg.key)), perps_node::util::to_hex(&g.vault));
         tokio::spawn(perps_node::relayer::run(app.clone(), cfg, stop_rx.clone()));
     }

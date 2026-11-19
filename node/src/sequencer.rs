@@ -255,6 +255,13 @@ impl Sequencer {
             if e2.restore(&bytes).is_err() || e2.state_root() != meta.state_root || e2.height() != *h {
                 continue;
             }
+            // R436-16 (SPEC S-16.4): the logHash INSIDE the engine snapshot is the one field its state root does not
+            // bind; it must be the log's at this height, or the snapshot is refused (loudly) and an older one or
+            // the replay from genesis is used
+            if e2.log_hash().is_some_and(|l| l != b.header.log_hash) {
+                eprintln!("snapshot at height {h} REFUSED: the logHash inside the engine snapshot is not the log's at that height");
+                continue;
+            }
             engine = e2;
             start = *h;
             recovered.snapshot_height = Some(*h);

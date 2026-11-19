@@ -217,6 +217,9 @@ impl Engine for RealEngine {
         let root = state.state_root();
         Some(Box::new(RealEngine { g: self.g.clone(), e: state, log_hash0: self.log_hash0, root }))
     }
+    fn log_hash(&self) -> Option<H256> {
+        Some(self.e.log_hash)
+    }
     fn genesis_document(&self) -> Option<Vec<u8>> {
         Some(self.e.g.g.encoding().into())
     }

@@ -301,7 +301,10 @@ async fn watcher_relayer_and_proofs_against_anvil_and_the_real_vault() {
     }
     let relay_addr = to_hex(&key_address(&relay_key));
     rpc(&a_url, "anvil_setBalance", serde_json::json!([relay_addr, "0x8ac7230489e80000"])).await.unwrap();
-    let rcfg = perps_node::relayer::RelayConfig { endpoints: vec![b_url.clone(), a_url.clone()], key: perps_node::relayer::read_key_file(&key_file).unwrap(), vault, poll_ms: 200, receipt_timeout_ms: 20_000 };
+    let mut rcfg = perps_node::relayer::RelayConfig::new(vec![b_url.clone(), a_url.clone()], perps_node::relayer::read_key_file(&key_file).unwrap(), vault).unwrap();
+    rcfg.poll_ms = 200;
+    rcfg.receipt_timeout_ms = 20_000;
+    assert!(perps_node::relayer::RelayConfig::new(vec![a_url.clone()], perps_node::relayer::read_key_file(&key_file).unwrap(), vault).is_err(), "one endpoint is not enough (R436-15)");
     let (rstop_tx, rstop_rx) = tokio::sync::watch::channel(false);
     let relayer = tokio::spawn(perps_node::relayer::run(app.clone(), rcfg, rstop_rx));
     // no withdrawal, no processed forced request, no checkpoint on the vault yet: nothing is due
@@ -356,10 +359,17 @@ async fn watcher_relayer_and_proofs_against_anvil_and_the_real_vault() {
     t.send(&vault_s, &format!("claimEscape({ACCT},bytes32[],uint64)"), &[&account_tuple(&pu), &tuple_list(&pu["proof"]), "18446744073709551615"]);
     assert_eq!(t.call_u(&token_s, "balanceOf(address)(uint256)", &[&ua_s]) - bal1, escape_value, "E: the vault paid the escape value to the unit against the node's proof");
     // the relayer's view after escape: mode `escape`, nothing more is due
-    let one = perps_node::relayer::RelayConfig { endpoints: vec![a_url.clone()], key: perps_node::relayer::read_key_file(&key_file).unwrap(), vault, poll_ms: 200, receipt_timeout_ms: 5_000 };
-    assert_eq!(perps_node::relayer::step(&app, &one, 0).await.unwrap(), None);
+    // (the relayer reads the vault at the FINALIZED block, agreed by both endpoints: two blocks later)
+    mine(2).await;
+    let both = perps_node::relayer::RelayConfig::new(vec![a_url.clone(), b_url.clone()], perps_node::relayer::read_key_file(&key_file).unwrap(), vault).unwrap();
+    assert_eq!(perps_node::relayer::step(&app, &both, 0).await.unwrap(), None);
+    // R436-15 against a real chain: while endpoint B lies about the finalized block the relayer decides nothing
+    *lie.lock().unwrap() = Lie::AlterBlockHash;
+    let e = perps_node::relayer::step(&app, &both, 0).await.expect_err("the endpoints disagree");
+    assert!(e.contains("disagree"), "{e}");
+    *lie.lock().unwrap() = Lie::Honest;
     assert_eq!(app.relay.lock().unwrap().vault_mode, "escape");
-    assert!(app.relay.lock().unwrap().alarm.as_ref().unwrap().contains("ESCAPE"));
+    assert!(app.relay.lock().unwrap().view_alarm.as_ref().unwrap().contains("ESCAPE"));
     let _ = stop_tx.send(true);
     drop(anvil);
 }

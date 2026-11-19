@@ -12,13 +12,13 @@ export default async function (ctx) {
   if (!chain) { await ctx.blocked('H-01', 'a censored user exits by the forced path', 'fake L2 stand-in: no vault to post requestForced on'); return; }
   const btc = api.market('BTC-USD');
   const maker = ctx.who('maker'), u = ctx.who('censored');
-  const forcedOf = async (i) => (await api.json(`/v1/forced?account=${u.address}`)).forced.find((f) => f.forcedId === String(i));
-  const request = async (kind, arg) => {
-    const r = await chain.send(u.address, stack.vault, 'requestForced(uint8,uint64)', [kind, arg]);
+  const forcedOf = async (i, who = u) => (await api.json(`/v1/forced?account=${who.address}`)).forced.find((f) => f.forcedId === String(i));
+  const request = async (kind, arg, who = u) => {
+    const r = await chain.send(who.address, stack.vault, 'requestForced(uint8,uint64)', [kind, arg]);
     expect(r.ok, `requestForced(${kind}, ${arg}): ${r.error}`);
     const index = Number(await chain.callOne(stack.vault, 'forcedCount()(uint64)')) - 1;
     await chain.waitFinalized(r.block);
-    const f = await api.until(async () => { const x = await forcedOf(index); return x && x.outcome && x.outcome !== 'pending' ? x : null; }, { ms: 90000, what: `forced request ${index} processed by the engine` });
+    const f = await api.until(async () => { const x = await forcedOf(index, who); return x && x.outcome && x.outcome !== 'pending' ? x : null; }, { ms: 90000, what: `forced request ${index} processed by the engine` });
     return { index, tx: r.tx, l2Block: r.block, forced: f };
   };
   /** The vault learns that the request was processed only from an accepted checkpoint. */
@@ -97,5 +97,45 @@ export default async function (ctx) {
     expect(r.enabled === true && r.accepted >= 1, JSON.stringify(r));
     expect(r.address === stack.relayer, `relayer ${r.address}`);
     return { address: r.address, submitted: r.submitted, accepted: r.accepted, failures: r.failures, lastReason: r.lastReason, vaultLatestHeight: r.vaultLatestHeight, vaultMode: r.vaultMode, alarm: r.alarm };
+  });
+  // ---- exit from a HALTED market (the oracle goes dark): forced close at the exit band, never at the stale index ----
+  const bob = ctx.who('bob');
+  let I0, entry;
+  await ctx.check('H-07', 'the oracle goes silent: the market halts (STALE); a user\'s forced CloseAll posted on the L2 is still SERVED, at the exit band (at least exitHaircutBps worse than the last index for the closer), against the opposite position', async () => {
+    blockedIf(stack.oracle !== 'replay', 'the dev oracle cannot go silent');
+    const t = await api.json('/v1/tickers');
+    I0 = t.tickers.find((x) => x.symbol === 'BTC-USD').indexPrice;
+    const others = Object.fromEntries(t.tickers.filter((x) => x.symbol !== 'BTC-USD').map((x) => [String(api.market(x.symbol).marketId), x.indexPrice]));
+    await api.cancelAll(maker);
+    entry = onTick(btc, I0, 10);
+    let r = await api.order(maker, btc, { buy: false, price: entry, size: '1', tif: 2 });
+    expect(r.body?.result?.ok, JSON.stringify(r.body));
+    r = await api.order(bob, btc, { buy: true, price: entry, size: '0.05', tif: 1 });
+    expect(r.body?.result?.ok && r.body.result.orderStatus === 'filled', `bob open: ${JSON.stringify(r.body)}`);
+    await api.cancelAll(maker);
+    // 50 rounds (150 s) without any oracle submission, then the same prices again
+    await ctx.feed('dark', [{ p: { 1: I0, ...others } }, { silent: 50 }, { p: { 1: I0, ...others }, repeat: 100000 }]);
+    // without oracle inputs nothing makes a block, and the staleness rule runs per block: an exit-only action ticks
+    const halted = await api.until(async () => { await api.cancelAll(ctx.who('alice')); const m = await api.json('/v1/markets/BTC-USD'); return m.status === 'halted' ? m : null; }, { ms: 90000, every: 1500, what: 'BTC-USD halted' });
+    const refused = await api.order(bob, btc, { buy: false, price: onTick(btc, I0, -100), size: '0.05', tif: 1, reduceOnly: true }, { wait: false });
+    const q = await request(1, 0, bob);
+    expect(q.forced.outcome === 'served', JSON.stringify(q.forced));
+    const a = await api.account(bob.address);
+    expect(!a.positions.some((p) => p.symbol === 'BTC-USD'), `bob still has the position: ${JSON.stringify(a.positions)}`);
+    const f = (await api.json(`/v1/accounts/${bob.address}/fills?limit=1`)).fills[0];
+    const band = (await api.json('/v1/markets/BTC-USD')).status;
+    const hi = Number(I0) * 0.95, lo = Number(I0) * 0.88;
+    expect(f.side === 'sell' && Number(f.size) === 0.05 && Number(f.price) <= hi + 1e-6 && Number(f.price) >= lo, `closing fill ${JSON.stringify(f)}: expected a price in [${lo.toFixed(1)}, ${hi.toFixed(1)}] (index ${I0} less the 5% haircut growing 1% per minute)`);
+    const mp = (await api.account(maker.address)).positions.find((p) => p.symbol === 'BTC-USD');
+    ctx.state.haltedForced = q;
+    return { lastIndex: I0, entry, haltReason: halted.haltReason ?? null, apiOrderWhileHalted: refused.body?.error?.code ?? refused.status, marketStatusAtClose: band, forced: q.forced, closingFill: f, haircutPct: ((1 - Number(f.price) / Number(I0)) * 100).toFixed(3), makerPositionAfter: mp?.size ?? '0' };
+  });
+  await ctx.check('H-08', 'the oracle returns: the market is active again; the vault acknowledges the request in a checkpoint and is not in escape', async () => {
+    blockedIf(!ctx.state.haltedForced, 'H-07 did not run');
+    const m = await api.until(async () => { const x = await api.json('/v1/markets/BTC-USD'); return x.status === 'active' ? x : null; }, { ms: 300000, every: 3000, what: 'BTC-USD active again' });
+    await acknowledge(ctx.state.haltedForced.index, ctx.state.haltedForced.forced.processedHeight);
+    expect(Number(await chain.callOne(stack.vault, 'escapeReason()(uint8)')) === 0, 'escape is due');
+    const mp = (await api.account(maker.address)).positions.find((p) => p.symbol === 'BTC-USD');
+    return { status: m.status, index: (await api.json('/v1/markets/BTC-USD/ticker')).indexPrice, makerPosition: mp?.size ?? '0' };
   });
 }

@@ -79,7 +79,7 @@ if [ "$L2" = anvil ]; then
   NODE_ARGS="$NODE_ARGS --cors-origin http://127.0.0.1:$M_FRONTEND"
   if [ "$RELAYER" = on ]; then
     e2e_ssh "$S/bin/relay-prepare.sh $KEEP"
-    NODE_ARGS="$NODE_ARGS --relay-rpc http://127.0.0.1:$H_ANVIL --relay-key-file \$HOME/$E2E_SCRATCH/run/relay-key --relay-poll-ms 2000"
+    NODE_ARGS="$NODE_ARGS --relay-rpc http://127.0.0.1:$H_ANVIL,http://127.0.0.1:$H_PROXY --relay-key-file \$HOME/$E2E_SCRATCH/run/relay-key --relay-poll-ms 2000"
   fi
 else
   L2_ARGS="--l2 http://127.0.0.1:53512,http://127.0.0.1:53513"

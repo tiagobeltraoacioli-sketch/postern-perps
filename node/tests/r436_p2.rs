@@ -1,0 +1,380 @@
+//! Fixes of agent 436's pass-2 findings on the node (R436-14 to R436-17). Each defect was shown on `cdf1b6b`
+//! first: R436-15 by 436's own demonstration (`review/node/r436_node_p2.rs`: 2 passed = defect present, run on
+//! the host before the fix), the others by the tests below failing there. THROWAWAY keys; every "endpoint" is a
+//! loopback fake. UNAUDITED PROTOTYPE.
+
+mod common;
+
+use axum::extract::State;
+use axum::routing::post;
+use axum::{Json, Router};
+use common::*;
+use perps_node::checkpoint::CheckpointBody;
+use perps_node::relayer::{alarm, capped_gas_price, due, local_alarm, plausible, read_vault_agreed, selector, submit, RelayConfig, RelayState, VaultView};
+use perps_node::sig::throwaway_key;
+use perps_node::util::{keccak, parse_hex_vec, to_hex};
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone)]
+struct Fake {
+    gas_price: String,
+    sent: Vec<String>,
+    /// status of the receipt this endpoint returns (None: it has no receipt)
+    receipt: Option<&'static str>,
+    /// answer eth_sendRawTransaction with this instead of the transaction's hash
+    send_hash: Option<String>,
+    finalized: (u64, String),
+    view: VaultView,
+}
+
+impl Fake {
+    fn new(view: VaultView) -> Fake {
+        Fake { gas_price: "0x3b9aca00".into(), sent: Vec::new(), receipt: Some("0x1"), send_hash: None, finalized: (40, to_hex(&[0xaa; 32])), view }
+    }
+}
+
+type Shared = Arc<Mutex<Fake>>;
+
+fn words(v: &[u64]) -> String {
+    let mut out = String::from("0x");
+    for x in v {
+        out.push_str(&format!("{x:064x}"));
+    }
+    out
+}
+
+/// A well-formed L2 endpoint whose every answer comes from `Fake` (honest or not).
+async fn fake_rpc(State(f): State<Shared>, Json(req): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let mut f = f.lock().unwrap();
+    let v = f.view.clone();
+    let result = match req["method"].as_str().unwrap_or("") {
+        "eth_chainId" => serde_json::json!("0xab162"),
+        "eth_getCode" => serde_json::json!("0x6080"),
+        "eth_getBlockByNumber" => serde_json::json!({"number": format!("0x{:x}", f.finalized.0), "hash": f.finalized.1, "timestamp": format!("0x{:x}", v.l2_time_s)}),
+        "eth_call" => {
+            let data = parse_hex_vec(req["params"][0]["data"].as_str().unwrap()).unwrap();
+            let is = |sig: &str| data[..4] == selector(sig);
+            if is("latest()") {
+                serde_json::json!(words(&[v.latest_height, 0, 0, v.latest_next_forced, v.latest_withdrawal_count, 0, 0, 0, 0]))
+            } else {
+                let x = if is("checkpointCount()") {
+                    v.checkpoint_count
+                } else if is("lastCheckpointAt()") {
+                    v.last_checkpoint_at
+                } else if is("forcedCount()") {
+                    v.forced_count
+                } else if is("forcedDelay()") {
+                    v.forced_delay
+                } else if is("escapeDelay()") {
+                    v.escape_delay
+                } else if is("paused()") {
+                    v.paused as u64
+                } else if is("inEscape()") {
+                    v.in_escape as u64
+                } else {
+                    v.open_forced_deadline.unwrap_or(0)
+                };
+                serde_json::json!(words(&[x]))
+            }
+        }
+        "eth_estimateGas" => serde_json::json!("0x30000"),
+        "eth_gasPrice" => serde_json::json!(f.gas_price),
+        "eth_getTransactionCount" => serde_json::json!("0x0"),
+        "eth_sendRawTransaction" => {
+            let raw = req["params"][0].as_str().unwrap_or("").to_string();
+            let h = f.send_hash.clone().unwrap_or_else(|| to_hex(&keccak(&parse_hex_vec(&raw).unwrap())));
+            f.sent.push(raw);
+            serde_json::json!(h)
+        }
+        "eth_getTransactionReceipt" => match f.receipt {
+            Some(st) => serde_json::json!({"status": st, "gasUsed": "0x20000"}),
+            None => serde_json::Value::Null,
+        },
+        _ => serde_json::Value::Null,
+    };
+    Json(serde_json::json!({"jsonrpc": "2.0", "id": req["id"], "result": result}))
+}
+
+async fn endpoint(f: Fake) -> (String, Shared) {
+    let st: Shared = Arc::new(Mutex::new(f));
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", l.local_addr().unwrap());
+    let s2 = st.clone();
+    tokio::spawn(async move { axum::serve(l, Router::new().route("/", post(fake_rpc)).with_state(s2)).await.unwrap() });
+    (url, st)
+}
+
+fn body(height: u64, wc: u64, nf: u64) -> CheckpointBody {
+    CheckpointBody {
+        height, time: 1_800_000_000_000, log_hash: [1; 32], accounts_root: [2; 32], markets_root: [3; 32], withdrawals_root: [4; 32],
+        next_deposit_index: 1, next_forced_index: nf, next_order_id: 1, total_escape: 0, dust: 0, aux_hash: [5; 32], deposits_head: [6; 32],
+        forced_head: [7; 32], withdrawal_count: wc, withdrawals_total: 1,
+    }
+}
+
+fn truth() -> VaultView {
+    VaultView { checkpoint_count: 3, latest_height: 50, latest_withdrawal_count: 0, last_checkpoint_at: 1_000_000, forced_delay: 172_800, escape_delay: 604_800, l2_time_s: 1_400_000, ..Default::default() }
+}
+
+fn cfg(endpoints: Vec<String>) -> RelayConfig {
+    let mut c = RelayConfig::new(endpoints, throwaway_key("r436-15-relayer", 0), [0x42; 20]).unwrap();
+    c.poll_ms = 50;
+    c.receipt_timeout_ms = 700;
+    c
+}
+
+/// R436-15 (a): the relayer signed whatever gas price ONE endpoint named (436: gasPrice 0xfffffffffffffffe).
+/// Property: twice the highest price ANY endpoint names, never above the configured cap; above it nothing is
+/// signed and nothing is handed to any endpoint.
+#[tokio::test]
+async fn r436_15_gas_price_is_capped_and_above_the_cap_nothing_is_signed() {
+    let (a, sa) = endpoint(Fake::new(truth())).await;
+    let (b, sb) = endpoint(Fake::new(truth())).await;
+    let c = cfg(vec![a.clone(), b.clone()]);
+    assert_eq!(capped_gas_price(&c).await, Ok(2_000_000_000), "1 gwei named by both: 2 gwei signed");
+    // one endpoint (either one) names an absurd price: refused, whichever endpoint the transaction would go through
+    for liar in [&sa, &sb] {
+        liar.lock().unwrap().gas_price = "0x7fffffffffffffff".into();
+        for via in [0, 1] {
+            let e = submit(&c, via, &body(100, 1, 0), &[[9u8; 65]; 5]).await.expect_err("above the cap");
+            assert!(e.starts_with("GAS PRICE ABOVE THE CAP"), "{e}");
+        }
+        liar.lock().unwrap().gas_price = "0x3b9aca00".into();
+    }
+    // a price that does not fit 128 bits, and one just above the cap (25 gwei x 2 = 50 gwei is the cap itself)
+    sa.lock().unwrap().gas_price = format!("0x{}", "f".repeat(40));
+    assert!(capped_gas_price(&c).await.is_err());
+    sa.lock().unwrap().gas_price = format!("0x{:x}", 25_000_000_001u64);
+    assert!(capped_gas_price(&c).await.is_err());
+    sa.lock().unwrap().gas_price = format!("0x{:x}", 25_000_000_000u64);
+    assert_eq!(capped_gas_price(&c).await, Ok(50_000_000_000));
+    assert!(sa.lock().unwrap().sent.is_empty() && sb.lock().unwrap().sent.is_empty(), "no signed transaction left the relayer");
+    // with honest prices the submission goes through and carries 2 x the highest price (RLP 0x84 77359400 = 2 gwei)
+    sa.lock().unwrap().gas_price = "0x3b9aca00".into();
+    let h = submit(&c, 0, &body(100, 1, 0), &[[9u8; 65]; 5]).await.expect("submitted");
+    let raw = sa.lock().unwrap().sent[0].clone();
+    assert_eq!(h, to_hex(&keccak(&parse_hex_vec(&raw).unwrap())));
+    assert!(raw.contains("8477359400"), "gas price 2 gwei in the signed transaction: {}", &raw[..40]);
+    // one endpoint is never enough
+    assert!(RelayConfig::new(vec![a.clone()], throwaway_key("x", 0), [0x42; 20]).is_err());
+    assert!(RelayConfig::new(vec![a.clone(), a], throwaway_key("x", 0), [0x42; 20]).is_err(), "the same endpoint twice is one endpoint");
+}
+
+/// R436-15: a submission counts only when EVERY endpoint returns the receipt with status 1, and the endpoint
+/// cannot name another transaction as the one that was sent.
+#[tokio::test]
+async fn r436_15_a_receipt_from_one_endpoint_is_not_a_confirmation() {
+    let (a, sa) = endpoint(Fake::new(truth())).await;
+    let (b, sb) = endpoint(Fake::new(truth())).await;
+    let c = cfg(vec![a, b]);
+    sb.lock().unwrap().receipt = None;
+    let e = submit(&c, 0, &body(100, 1, 0), &[[9u8; 65]; 5]).await.expect_err("endpoint B never saw it");
+    assert!(e.contains("1 of 2 endpoints"), "{e}");
+    sb.lock().unwrap().receipt = Some("0x0");
+    let e = submit(&c, 0, &body(100, 1, 0), &[[9u8; 65]; 5]).await.expect_err("endpoint B saw it fail");
+    assert!(e.contains("failed on"), "{e}");
+    sb.lock().unwrap().receipt = Some("0x1");
+    sa.lock().unwrap().send_hash = Some(to_hex(&[0x11; 32]));
+    let e = submit(&c, 0, &body(100, 1, 0), &[[9u8; 65]; 5]).await.expect_err("a hash that is not the signed transaction's");
+    assert!(e.contains("not the hash of the signed transaction"), "{e}");
+    sa.lock().unwrap().send_hash = None;
+    assert!(submit(&c, 1, &body(100, 1, 0), &[[9u8; 65]; 5]).await.is_ok(), "both confirm: done (sent through B)");
+}
+
+/// R436-15 (b): one lying endpoint silenced submission and alarm (436: `due` and `alarm` both None under "the
+/// vault is already ahead"). Properties: (1) the reading is taken only when every endpoint agrees on the
+/// finalized block and on the vault's state at it; (2) what they agree on must be a checkpoint THIS node
+/// finalized, with its counts, or it is not believed; (3) the relayer's own clock alarms when it has had no
+/// agreed and plausible reading, or a due checkpoint is not confirmed, whatever the endpoints say.
+#[tokio::test]
+async fn r436_15_a_lying_endpoint_can_silence_neither_the_decision_nor_the_alarm() {
+    let cp = body(100, 1, 0);
+    let lie = VaultView { latest_height: 1_000_000, last_checkpoint_at: truth().l2_time_s, ..truth() };
+    // 436's observation still holds for the pure 8a rule: it is why the rule is no longer asked alone
+    assert_eq!((due(&lie, &cp), alarm(&lie)), (None, None));
+    // (1) one endpoint tells the truth, one lies: no reading at all
+    let (a, sa) = endpoint(Fake::new(truth())).await;
+    let (b, sb) = endpoint(Fake::new(lie.clone())).await;
+    let eps = vec![a, b];
+    let e = read_vault_agreed(&eps, &[0x42; 20]).await.expect_err("they disagree");
+    assert!(e.contains("disagree on the vault's state"), "{e}");
+    sb.lock().unwrap().view = truth();
+    assert_eq!(read_vault_agreed(&eps, &[0x42; 20]).await, Ok(truth()));
+    sb.lock().unwrap().finalized = (40, to_hex(&[0xbb; 32]));
+    let e = read_vault_agreed(&eps, &[0x42; 20]).await.expect_err("another finalized block hash");
+    assert!(e.contains("disagree on the finalized block"), "{e}");
+    sb.lock().unwrap().finalized = (41, to_hex(&[0xaa; 32]));
+    assert!(read_vault_agreed(&eps, &[0x42; 20]).await.is_err(), "another finalized height");
+    assert!(read_vault_agreed(&eps[..1], &[0x42; 20]).await.is_err(), "one endpoint is no agreement");
+    // (2) BOTH lie the same lie: the reading agrees, and this node does not believe it
+    sb.lock().unwrap().finalized = sa.lock().unwrap().finalized.clone();
+    sa.lock().unwrap().view = lie.clone();
+    sb.lock().unwrap().view = lie.clone();
+    let agreed = read_vault_agreed(&eps, &[0x42; 20]).await.unwrap();
+    // this node finalized checkpoints at 50 (no withdrawal) and 100 (one withdrawal), nothing at 1,000,000
+    let mine = |h: u64| match h {
+        50 => Some(body(50, 0, 0)),
+        100 => Some(body(100, 1, 0)),
+        _ => None,
+    };
+    let e = plausible(&agreed, &mine).expect_err("a vault checkpoint this node never finalized");
+    assert!(e.contains("never finalized"), "{e}");
+    assert_eq!(plausible(&truth(), &mine), Ok(()));
+    assert_eq!(due(&truth(), &cp), Some("withdrawal"), "and on the believed reading the checkpoint is due");
+    // a real height with counts that are not that checkpoint's, an acceptance time in the future, a phantom latest
+    assert!(plausible(&VaultView { latest_withdrawal_count: 1, ..truth() }, &mine).is_err());
+    assert!(plausible(&VaultView { latest_next_forced: 4, ..truth() }, &mine).is_err());
+    assert!(plausible(&VaultView { last_checkpoint_at: truth().l2_time_s + 1, ..truth() }, &mine).is_err());
+    assert!(plausible(&VaultView { checkpoint_count: 0, ..truth() }, &mine).is_err());
+    assert_eq!(plausible(&VaultView { forced_delay: 172_800, escape_delay: 604_800, l2_time_s: 5, ..Default::default() }, &mine), Ok(()), "a vault without a checkpoint");
+    // (3) the alarms of the relayer's own clock
+    let c = cfg(eps);
+    let fresh = RelayState { started_ms: 1_000_000, ..Default::default() };
+    assert_eq!(local_alarm(&fresh, &c, 1_000_000 + c.stall_alarm_ms - 1), None);
+    assert!(local_alarm(&fresh, &c, 1_000_000 + c.stall_alarm_ms).unwrap().contains("no agreed and plausible reading"), "never a good reading since the start");
+    let reading = RelayState { started_ms: 1_000_000, last_good_read_ms: Some(2_000_000), ..Default::default() };
+    assert_eq!(local_alarm(&reading, &c, 2_000_000 + c.stall_alarm_ms - 1), None);
+    assert!(local_alarm(&reading, &c, 2_000_000 + c.stall_alarm_ms).is_some(), "the endpoints went dark, disagreed or lied since");
+    let owed = RelayState { started_ms: 1_000_000, last_good_read_ms: Some(3_000_000), due_since_ms: Some(2_500_000), ..Default::default() };
+    assert_eq!(local_alarm(&owed, &c, 3_000_000), None);
+    let later = RelayState { last_good_read_ms: Some(2_500_000 + c.delivery_alarm_ms), ..owed.clone() };
+    assert!(local_alarm(&later, &c, 2_500_000 + c.delivery_alarm_ms).unwrap().contains("due for"), "readings are fine, delivery is not");
+    let gas = RelayState { started_ms: 1, last_good_read_ms: Some(10), gas_refused: Some("GAS PRICE ABOVE THE CAP: x".into()), ..Default::default() };
+    assert!(local_alarm(&gas, &c, 11).unwrap().starts_with("NOT SUBMITTING"));
+}
+
+/// R436-15 end to end with a node: two endpoints tell the SAME well-formed lie ("the vault is ahead"); the
+/// relayer's step refuses the reading, counts the failure, and its loop raises the alarm from its own clock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn r436_15_the_relayer_loop_is_loud_when_its_endpoints_lie_in_unison() {
+    let n = net("r436-15-loop", 1);
+    let geo = perps_node::geo::GeoPolicy::from_json(&serde_json::json!({"version": "t", "unknown_country_effect": "deny", "tiers": {"allowed": {"effect": "allow"}}, "countries": {}, "denied_policy": {"policy": "exit_only"}}), true).unwrap();
+    let app = perps_node::node::App::new(n.g.clone(), n.seq, geo, perps_node::node::Mode::Dev, n.seq_view.clone(), 50, true);
+    let lie = VaultView { latest_height: 1_000_000, last_checkpoint_at: truth().l2_time_s, ..truth() };
+    let (a, _sa) = endpoint(Fake::new(lie.clone())).await;
+    let (b, _sb) = endpoint(Fake::new(lie)).await;
+    let mut c = cfg(vec![a, b]);
+    c.stall_alarm_ms = 400;
+    let e = perps_node::relayer::step(&app, &c, 0).await.expect_err("not believed");
+    assert!(e.contains("never finalized"), "{e}");
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let h = tokio::spawn(perps_node::relayer::run(app.clone(), c, rx));
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    {
+        let r = app.relay.lock().unwrap();
+        assert!(r.failures >= 2 && r.accepted == 0 && r.submitted == 0, "{}", r.to_json());
+        assert!(r.alarm.as_ref().is_some_and(|a| a.contains("no agreed and plausible reading")), "the relayer is loud: {}", r.to_json());
+        assert_eq!(r.vault_mode, "unknown", "a reading that is not believed changes nothing the API reports");
+    }
+    let _ = tx.send(true);
+    let _ = h.await;
+}
+
+/// R436-16 (Low; SPEC S-16.4): the node compared the snapshot WRAPPER's logHash with its log, never the logHash
+/// inside the engine snapshot (the one field of a snapshot the state root does not bind). A snapshot whose
+/// engine state carried another logHash was loaded. Property: the restored engine's logHash must be the log's at
+/// that height, or the snapshot is refused and recovery falls back (older snapshot or replay), never silently.
+#[test]
+fn r436_16_a_snapshot_whose_engine_log_hash_is_not_the_logs_is_refused() {
+    let mut n = net_real("r436-16", 1000);
+    n.seq.snapshot_every = 3;
+    let ua = perps_node::sig::key_address(&user(33));
+    for i in 0..7u64 {
+        n.seq_view.lock().unwrap().deposits.insert(i, deposit(i, ua, 1_000_000_000 + i));
+        n.seq.produce(now() + i).unwrap().unwrap();
+    }
+    let (root, h) = (n.seq.engine.state_root(), n.seq.log.last_height);
+    assert_eq!(h, 7);
+    let (g, key, dir) = (n.g.clone(), n.keys.sequencer.clone(), n.dir.clone());
+    drop(n);
+    let (_, _, checked) = perps_node::dev::dev_genesis_real("test-r436-16", 7, 5, 1000, 0);
+    let open = || perps_node::sequencer::Sequencer::open(g.clone(), key.clone(), Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked.clone()).unwrap()), dir.clone(), view()).unwrap();
+    // control: the untouched snapshot at 6 is used
+    let s = open();
+    assert_eq!((s.recovered.snapshot_height, s.engine.state_root()), (Some(6), root));
+    let name = s.engine.name();
+    drop(s);
+    // the engine snapshot at 6 with ANOTHER logHash inside (bytes 58..90 of SPEC 16's layout: magic 8, version 2,
+    // genesis hash 32, height 8, time 8, logHash 32), its own checksum recomputed, in a wrapper that is intact
+    let path = perps_node::log::list_snapshots(&dir).into_iter().find(|x| x.0 == 6).unwrap().1;
+    let (meta, mut bytes) = perps_node::log::read_snapshot(&path, name).unwrap();
+    bytes[58] ^= 0x01;
+    let n_ = bytes.len();
+    let sum = keccak(&bytes[..n_ - 32]);
+    bytes[n_ - 32..].copy_from_slice(&sum);
+    perps_node::log::write_snapshot(&dir, &meta, name, &bytes, 2).unwrap();
+    let s = open();
+    assert_ne!(s.recovered.snapshot_height, Some(6), "the snapshot with a foreign logHash inside must not be used: {:?}", s.recovered);
+    assert_eq!(s.recovered.snapshot_height, Some(3), "the older snapshot is");
+    assert_eq!((s.engine.state_root(), s.log.last_height), (root, h));
+    assert_eq!(s.engine.real().unwrap().log_hash, s.log.last_log_hash, "the engine's own logHash is the log's");
+}
+
+/// A validator's own store with `n` applied blocks (one deposit each), served on a loopback listener.
+async fn validator_service(name: &str, n: u64) -> (String, perps_node::vserve::SharedStore, Arc<perps_node::genesis::Genesis>, Vec<perps_node::types::Block>) {
+    let mut net = net_real(name, 1000);
+    let ua = perps_node::sig::key_address(&user(44));
+    let mut blocks = Vec::new();
+    for i in 0..n {
+        net.seq_view.lock().unwrap().deposits.insert(i, deposit(i, ua, 1_000_000_000 + i));
+        blocks.push((*net.seq.produce(now() + i).unwrap().unwrap().block).clone());
+    }
+    let (_, _, checked) = perps_node::dev::dev_genesis_real(&format!("test-{name}"), 7, 5, 1000, 0);
+    let genesis_engine: Box<dyn perps_node::engine::Engine> = Box::new(perps_node::engine::real::RealEngine::new(net.g.clone(), checked).unwrap());
+    let mut store = perps_node::vserve::ValidatorStore::open(net.g.clone(), &tmpdir(&format!("{name}-val")), genesis_engine, "0xvalidator".into()).unwrap();
+    for b in &blocks {
+        store.applied(b, None, None).unwrap();
+    }
+    let store = Arc::new(Mutex::new(store));
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    let r = perps_node::vserve::router(store.clone());
+    tokio::spawn(async move { axum::serve(l, r.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap() });
+    (url, store, net.g.clone(), blocks)
+}
+
+async fn http_get(url: &str) -> (u16, serde_json::Value) {
+    let (s, b) = perps_node::watcher::http_call("GET", url, None, &[]).await.unwrap();
+    (s, serde_json::from_slice(&b).unwrap_or(serde_json::Value::Null))
+}
+
+/// R436-14 (validator read service): every proof request for a height without a held state replayed the log
+/// again, any number at once, and the service had no rate limit. Properties: a rebuilt state is kept, so the
+/// same height again costs no replay; requests arriving together for one height share ONE rebuild; a rebuild
+/// starts from the nearest state already held, not from genesis; reads are rate-limited per client address.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r436_14_the_validator_service_rebuilds_once_keeps_the_state_and_limits_reads() {
+    let (url, store, _g, blocks) = validator_service("r436-14-val", 12).await;
+    let insurance = "0x0000000000000000000000000000000000000002";
+    let rebuilds = || store.lock().unwrap().rebuilds;
+    let (s, p5) = http_get(&format!("{url}/v1/accounts/{insurance}/proof?height=5")).await;
+    assert_eq!((s, p5["stateRoot"].as_str()), (200, Some(to_hex(&blocks[4].header.state_root).as_str())), "{p5}");
+    assert_eq!(rebuilds(), 1);
+    // the same height again: served from the kept state
+    for _ in 0..3 {
+        let (s, again) = http_get(&format!("{url}/v1/accounts/{insurance}/proof?height=5")).await;
+        assert_eq!((s, &again["proof"]), (200, &p5["proof"]));
+    }
+    assert_eq!(rebuilds(), 1, "no replay for a height whose state is kept");
+    // six requests at once for another height: one rebuild, six equal answers
+    let mut hs = Vec::new();
+    for _ in 0..6 {
+        let u = format!("{url}/v1/accounts/{insurance}/proof?height=9");
+        hs.push(tokio::spawn(async move { http_get(&u).await }));
+    }
+    let mut answers = Vec::new();
+    for h in hs {
+        answers.push(h.await.unwrap());
+    }
+    assert!(answers.iter().all(|(s, p)| *s == 200 && p["stateRoot"] == to_hex(&blocks[8].header.state_root).as_str() && p["proof"] == answers[0].1["proof"]), "{answers:?}");
+    assert_eq!(rebuilds(), 2, "requests arriving together share one rebuild");
+    // the rebuild of 9 started from the kept state of 5 (4 blocks replayed), not from genesis
+    assert_eq!(store.lock().unwrap().rebuild_blocks, 5 + 4, "blocks replayed in all: 5 for height 5, then 4 from it to 9");
+    // reads are rate-limited per client address (the service had no limit at all)
+    store.lock().unwrap().read_rate = perps_node::sequencer::RateLimit::new(1.0, 3.0);
+    let mut codes = Vec::new();
+    for _ in 0..5 {
+        codes.push(http_get(&format!("{url}/v1/validator")).await.0);
+    }
+    assert_eq!(codes, vec![200, 200, 200, 429, 429]);
+}

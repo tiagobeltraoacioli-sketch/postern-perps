@@ -5,11 +5,12 @@ The node's watcher needs TWO endpoints that agree, pinned to one block hash. Loc
 agreement itself proves nothing; what this proxy adds is the ability to make ONE endpoint lie, so the rehearsal can
 show that the node then credits nothing (fail closed):
 
-  POST /__fault  {"mode": "none" | "down" | "amount" | "hash" | "drop"}
+  POST /__fault  {"mode": "none" | "down" | "amount" | "hash" | "drop" | "gas"}
     down    every request answered 503
     amount  the amount word of every Deposit log is raised by 1 unit (a deposit that the other endpoint does not show)
     hash    the hash of every block header returned is altered (the block-hash pin must fail)
     drop    eth_getLogs returns no logs (an endpoint that hides a deposit)
+    gas     eth_gasPrice answers an absurd price (the relayer's gas cap must fail closed)
   GET /__fault   current mode and counters
 
 Loopback only. Development and tests only. UNAUDITED prototype. Copyright (c) 2026 Bloch Inc. All rights reserved.
@@ -24,7 +25,7 @@ UP = sys.argv[1]
 PORT = int(sys.argv[2])
 STATE = {"mode": "none", "requests": 0, "altered": 0}
 LOCK = threading.Lock()
-MODES = ("none", "down", "amount", "hash", "drop")
+MODES = ("none", "down", "amount", "hash", "drop", "gas")
 
 
 def alter(method, result, mode):
@@ -41,6 +42,8 @@ def alter(method, result, mode):
         return out, n
     if mode == "drop" and method == "eth_getLogs" and isinstance(result, list):
         return [], len(result)
+    if mode == "gas" and method in ("eth_gasPrice", "eth_maxPriorityFeePerGas"):
+        return "0x7fffffffffffffff", 1
     if mode == "hash" and method == "eth_getBlockByNumber" and isinstance(result, dict) and result.get("hash"):
         h = result["hash"]
         flipped = h[:-1] + ("0" if h[-1] != "0" else "1")

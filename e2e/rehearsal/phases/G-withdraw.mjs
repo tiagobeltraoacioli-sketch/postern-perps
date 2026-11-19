@@ -97,4 +97,46 @@ export default async function (ctx) {
     expect((await tokenBal(big)) === large, `paid ${fmtUsdc(await tokenBal(big))}`);
     return { withdrawalId: id, net: fmtUsdc(large), delaySeconds: delay, releasedEarly: early.error, paidAfterDelay: fmtUsdc(large) };
   });
+  // ---- the node's own relayer (the keeper) against a lying or absurd L2 endpoint (R436-15) ----
+  const relayer = async () => (await api.json('/v1/node')).relayer;
+  const fault = async (m) => { const r = await fetch(`${stack.l2Proxy}/__fault`, { method: 'POST', body: JSON.stringify({ mode: m }) }); expect(r.status === 200, `proxy fault ${m}`); };
+  const vaultCount = async () => Number((await chain.call(stack.vault, 'latest()(uint64,uint64,uint64,uint64,uint64,uint64,uint128,bytes32,bytes32)'))[4]);
+  for (const [id, mode, what, pattern, title] of [
+    ['G-06', 'gas', 'names an absurd gas price', /GAS PRICE ABOVE THE CAP/i, 'the relayer signs nothing (gas cap, loud error) while a checkpoint is due; it delivers when the price is sane again'],
+    ['G-07', 'hash', 'reports another block hash', /disagree/i, 'the relayer refuses to act on readings its two endpoints do not agree on; it delivers when they agree again'],
+  ]) {
+    await ctx.check(id, `one L2 endpoint ${what}: ${title}`, async () => {
+      blockedIf(!chain || !stack.relayer, 'the stack runs without the node relayer');
+      const r0 = await relayer();
+      await fault(mode);
+      let during, countDuring, id2;
+      try {
+        const w = await api.withdraw(alice, '10', payee);            // a new record: the keeper must deliver a checkpoint at once
+        expect(w.body?.result?.ok === true, JSON.stringify(w.body));
+        id2 = Number(w.body.result.withdrawalId);
+        await api.until(async () => (await api.json(`/v1/withdrawals/${id2}`)).status === 'certified', { ms: 60000, what: 'certified' });
+        // baseline = the moment the relayer first reports the fault for THIS due checkpoint (a delivery it had begun
+        // for an earlier record may still land between the fault being set and its next reading)
+        const first = await api.until(async () => { const r = await relayer(); return pattern.test(r.lastError ?? '') || pattern.test(r.alarm ?? '') ? r : null; }, { ms: 60000, every: 1000, what: `the relayer reporting ${pattern}` });
+        await sleep(8000);
+        during = await relayer();
+        countDuring = await vaultCount();
+        expect(pattern.test(during.lastError ?? '') || pattern.test(during.alarm ?? ''), `the relayer stopped reporting the fault: ${JSON.stringify(during).slice(0, 200)}`);
+        // What must hold (R436-15): nothing is SIGNED on a reading the endpoints do not support. The `submitted` counter
+        // may still move (observed: +1): the relayer re-broadcasts a transaction it signed BEFORE the fault for an
+        // earlier checkpoint; so the check is on the chain, not on the counter: no relayer transaction carries a gas
+        // price above the cap (50 gwei), and (below) the vault has not received the checkpoint that became due.
+        if (during.lastTx) {
+          const tx = await chain.rpc('eth_getTransactionByHash', [during.lastTx]);
+          expect(!tx || BigInt(tx.gasPrice) <= 50_000_000_000n, `the relayer signed a transaction at ${tx?.gasPrice} wei`);
+        }
+        during.submittedAfterFirstReport = during.submitted - first.submitted;
+        expect(countDuring <= id2, `the vault received a checkpoint with ${countDuring} records while the relayer should have held`);
+      } finally {
+        await fault('none');
+      }
+      const after = await api.until(async () => { const r = await relayer(); return r.accepted > r0.accepted && (await vaultCount()) > id2 ? r : null; }, { ms: 90000, every: 1500, what: 'delivery after the fault' });
+      return { withdrawalId: id2, whileFaulty: { submitted: during.submitted, rebroadcastsAfterFirstReport: during.submittedAfterFirstReport, gasRefused: during.gasRefused ?? null, lastError: (during.lastError ?? '').slice(0, 200), alarm: during.alarm }, vaultRecordsWhileFaulty: countDuring, afterwards: { submitted: after.submitted, accepted: after.accepted, vaultRecords: await vaultCount() } };
+    });
+  }
 }
