@@ -15,6 +15,10 @@ const LATEST = 'latest()(uint64,uint64,uint64,uint64,uint64,uint64,uint128,bytes
 export default async function (ctx) {
   const { api, chain, stack, CAST } = ctx;
   if (!chain) { await ctx.blocked('K-01', 'validators stop, escape, claims sum to custody with insurance first', 'fake L2 stand-in: no vault'); return; }
+  // REHEARSAL_ESCAPE=forced (R436-19): the exchange stays ALIVE but never sees a user's forced request (one L2 endpoint
+  // hides the log, so the two-endpoint watcher of sequencer and validators makes no progress); the request passes its
+  // deadline, the vault refuses the next checkpoint and anyone triggers escape with reason 2. Default: silence (reason 1).
+  const FORCED = process.env.REHEARSAL_ESCAPE === 'forced';
   const anyone = user('relayer').address;
   const tokenBal = async (a) => BigInt(await chain.callOne(stack.token, 'balanceOf(address)(uint256)', [a]));
   const view = async (sig, args = []) => chain.callOne(stack.vault, sig, args);
@@ -48,7 +52,40 @@ export default async function (ctx) {
     return { checkpointHeight: H, accounts: Object.keys(proofs).length, totalEscape: fmtUsdc(totalEscape), escapeValues: Object.fromEntries(Object.entries(proofs).map(([k, p]) => [k, fmtUsdc(BigInt(p.leafData.escapeValue))])) };
   });
 
-  await ctx.check('K-02', 'the exchange goes silent: the sequencer (with the validators inside it), the oracle feeder and all separate validators but one are stopped', async () => {
+  if (FORCED) {
+    const victim = ctx.who('escapee');
+    let reqBlock;
+    await ctx.check('K-02f', 'a forced withdrawal is posted on the L2 while one L2 endpoint hides it: the exchange keeps running and never receives it', async () => {
+      expect(H, 'K-01 failed');
+      const set = await fetch(`${stack.l2Proxy}/__fault`, { method: 'POST', body: JSON.stringify({ mode: 'drop' }) });
+      expect(set.status === 200, 'proxy fault');
+      const r = await send('requestForced(uint8,uint64)', [2, 0], victim.address);
+      expect(r.ok, `requestForced: ${r.error}`);
+      reqBlock = r.block;
+      await chain.waitFinalized(r.block);
+      await sleep(8000);
+      const f = (await api.json(`/v1/forced?account=${victim.address}`)).forced;
+      const index = Number(await view('forcedCount()(uint64)')) - 1;
+      expect(!f.some((x) => x.forcedId === String(index)), `the node received the request: ${JSON.stringify(f).slice(0, 200)}`);
+      const s0 = await api.json('/v1/status');
+      await api.cancelAll(ctx.who('alice'));
+      const s1 = await api.until(async () => { const x = await api.json('/v1/status'); return x.latestBlock.height > s0.latestBlock.height ? x : null; }, { ms: 20000, what: 'a new block' });
+      return { forcedIndex: index, l2Block: r.block, deadline: Number(await view('forcedDeadline(uint64)', [index])), nodeStillProducing: s1.latestBlock.height, nodeL2View: (await api.json('/v1/node')).l2.endpointsAgree };
+    });
+    await ctx.check('K-02g', 'past the deadline the vault refuses every further checkpoint (it would leave the request unprocessed): the censoring exchange cannot continue', async () => {
+      const index = Number(await view('forcedCount()(uint64)')) - 1;
+      const early = await send('triggerEscape()');
+      expect(!early.ok && Number(await view('escapeReason()(uint8)')) === 0, 'escape was due before the deadline');
+      await chain.warp(Number(await view('forcedDelay()(uint64)')) + 60);
+      expect(Number(await view('escapeReason()(uint8)')) === 2, `escapeReason ${await view('escapeReason()(uint8)')}`);
+      await api.cancelAll(ctx.who('alice'));
+      const C = await api.until(async () => { const r = await api.get('/v1/finality/latest'); return r.status === 200 && r.body.height > H ? r.body : null; }, { ms: 60000, what: 'a newer final checkpoint' });
+      const c = await send(CHECKPOINT_SIG, [checkpointTuple(C), `[${C.signatures.map((x) => x.signature).join(',')}]`]);
+      expect(!c.ok && Number((await chain.call(stack.vault, LATEST))[0]) === H, `a checkpoint that skips the overdue request was accepted (vault at ${(await chain.call(stack.vault, LATEST))[0]})`);
+      return { forcedIndex: index, refusedCheckpointHeight: C.height, refusal: c.error, vaultStillAt: H, earlyTrigger: early.error };
+    });
+  }
+  if (!FORCED) await ctx.check('K-02', 'the exchange goes silent: the sequencer (with the validators inside it), the oracle feeder and all separate validators but one are stopped', async () => {
     expect(H, 'K-01 failed');
     for (let i = stack.localValidators; i < 7; i++) if (!(stack.validatorApi && i === stack.validatorApiIndex)) await ctx.host('svc.sh', 'stop', `validator-${i}`, 'TERM');
     await ctx.host('svc.sh', 'stop', 'feeder', 'TERM');
@@ -58,6 +95,7 @@ export default async function (ctx) {
     return { hostServices: (await ctx.host('svc.sh', 'status')).split('\n') };
   });
   await ctx.check('K-02b', 'WITHOUT the sequencer: one validator\'s own read service (its own log, its own replay) serves every account\'s escape leaf and siblings for the checkpoint the vault holds; they verify against the vault\'s root and equal the ones fetched before (R436-11)', async () => {
+    if (FORCED) expect((await api.get('/v1/status')).status === 200, 'the sequencer was expected to be alive in this variant');
     blockedIf(!stack.validatorApi, 'no validator read service in this stack (up.sh --validator-read off, or all validators inside the sequencer): the proofs used below were fetched from the sequencer before it stopped');
     const L = await chain.call(stack.vault, LATEST);
     let n = 0;
@@ -74,7 +112,7 @@ export default async function (ctx) {
         n++;
       }
     } finally {
-      await ctx.host('svc.sh', 'stop', `validator-${stack.validatorApiIndex}`, 'TERM');
+      if (!FORCED) await ctx.host('svc.sh', 'stop', `validator-${stack.validatorApiIndex}`, 'TERM');
     }
     return { validator: stack.validatorApiIndex, proofsServedWithoutTheSequencer: n, checkpointHeight: H };
   });
@@ -91,7 +129,15 @@ export default async function (ctx) {
     expect(lateIndex >= credited, `deposit ${lateIndex} is below the credited count ${credited}`);
     return { depositIndex: lateIndex, creditedByTheLastCheckpoint: credited };
   });
-  await ctx.check('K-04', 'escape cannot be triggered while the committee is merely late; after escapeDelay without a checkpoint anyone triggers it', async () => {
+  if (FORCED) await ctx.check('K-04f', 'anyone triggers escape for the overdue forced request (reason 2), with the exchange still running', async () => {
+    expect(Number(await view('escapeReason()(uint8)')) === 2, 'escape is not due for an overdue forced request');
+    custody0 = BigInt(await view('custody()(uint64)'));
+    const r = await send('triggerEscape()');
+    expect(r.ok && (await view('inEscape()(bool)')) === 'true', `triggerEscape: ${r.error}`);
+    await fetch(`${stack.l2Proxy}/__fault`, { method: 'POST', body: JSON.stringify({ mode: 'none' }) });
+    return { reason: 2, tx: r.tx, custodyAtTrigger: fmtUsdc(custody0), escapePool: fmtUsdc(BigInt(await view('escapePool()(uint64)'))), sequencerAlive: (await api.get('/v1/status')).status === 200 };
+  });
+  else await ctx.check('K-04', 'escape cannot be triggered while the committee is merely late; after escapeDelay without a checkpoint anyone triggers it', async () => {
     const early = await send('triggerEscape()');
     expect(!early.ok && Number(await view('escapeReason()(uint8)')) === 0, `triggered early: ${JSON.stringify(early).slice(0, 200)}`);
     const delay = Number(await view('escapeDelay()(uint64)'));
