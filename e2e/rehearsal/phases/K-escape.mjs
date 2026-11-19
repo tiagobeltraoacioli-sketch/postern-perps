@@ -169,7 +169,7 @@ export default async function (ctx) {
     expect(!credited.ok, 'a deposit the checkpoint had credited was refunded');
     return { refunded: '500.000000', wrongAmount: wrong.error, second: again.error, creditedDeposit: credited.error };
   });
-  await ctx.check('K-09', 'the books close: custody at the trigger = users paid + refund + what the vault still holds; what it holds is the subordinated system share (insurance + backstop), not releasable before 90 days', async () => {
+  await ctx.check('K-09', 'the books close: custody at the trigger = users paid + refund + what the vault still holds; what it holds is the subordinated system share (insurance + backstop, not releasable before 90 days) plus certified withdrawal records nobody collected yet', async () => {
     const left = await tokenBal(stack.vault);
     const users = Object.values(paid).reduce((a, b) => a + b, 0n);
     expect(custody0 === users + usdc('500') + left, `custody ${fmtUsdc(custody0)} vs paid ${fmtUsdc(users)} + refund 500 + left ${fmtUsdc(left)}`);
@@ -177,13 +177,16 @@ export default async function (ctx) {
     const pool = BigInt(await view('escapePool()(uint64)'));
     const wantSub = ins + back < pool - senior ? ins + back : pool - senior;
     expect(sub === wantSub, `subordinated ${fmtUsdc(sub)}, expected min(insurance + backstop, pool - users) = ${fmtUsdc(wantSub)}`);
-    expect(left >= sub && left - sub < 1000n, `the vault holds ${fmtUsdc(left)}, subordinated share ${fmtUsdc(sub)}`);
+    // certified withdrawal records nobody collected yet stay payable in full in escape (VAULT.md 7): they are part of
+    // what the vault still holds (here: the 1 USDC record the conformance suite creates and never collects)
+    const unpaid = BigInt((await chain.call(stack.vault, LATEST))[5]) - BigInt(await view('withdrawnTotal()(uint64)'));
+    expect(left >= sub + unpaid && left - sub - unpaid < 1000n, `the vault holds ${fmtUsdc(left)} = subordinated share ${fmtUsdc(sub)} + uncollected withdrawal records ${fmtUsdc(unpaid)} + ${fmtUsdc(left - sub - unpaid)} (only rounding dust may remain)`);
     const sweep = await send('sweepEscapeSurplus()');
     expect(!sweep.ok, 'the surplus was swept before the 90 days');
     const o0 = await tokenBal(OWNER_FEE_ADDRESS);
     const sysKey = await view('escapeKey(address)(bytes32)', [SYSTEM.insurance]);
     const early = await send('release(bytes32,uint64)', [sysKey, String(sub)]);
     expect((await tokenBal(OWNER_FEE_ADDRESS)) === o0, 'the system share was released before the 90 days');
-    return { custodyAtTrigger: fmtUsdc(custody0), paidToUsers: fmtUsdc(users), refund: '500.000000', stillInVault: fmtUsdc(left), subordinatedSystemShare: fmtUsdc(sub), sweepBefore90Days: sweep.error, systemReleaseBefore90Days: early.error ?? 'no payment' };
+    return { custodyAtTrigger: fmtUsdc(custody0), paidToUsers: fmtUsdc(users), refund: '500.000000', stillInVault: fmtUsdc(left), subordinatedSystemShare: fmtUsdc(sub), uncollectedWithdrawalRecords: fmtUsdc(unpaid), dust: fmtUsdc(left - sub - unpaid), sweepBefore90Days: sweep.error, systemReleaseBefore90Days: early.error ?? 'no payment' };
   });
 }

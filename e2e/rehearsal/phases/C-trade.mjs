@@ -1,7 +1,7 @@
 // Phase C: orders, fills, exact fees to the fee account, refusals, conservation. UNAUDITED prototype.
 import { expect } from '../check.mjs';
 import { usdc, px, sz, sleep } from '../../lib/client.mjs';
-import { bal, fmtUsdc, tradeFee, onTick, totalBalances, SYSTEM } from '../util.mjs';
+import { bal, fmtUsdc, tradeFee, onTick, totalBalances, creditedDeposits, withdrawnGross, SYSTEM } from '../util.mjs';
 import { user } from '../../lib/keys.mjs';
 
 export default async function (ctx) {
@@ -93,19 +93,20 @@ export default async function (ctx) {
     await api.cancelAll(alice);
     return { agent: agent.address, agentWithdraw: 'AGENT_NOT_ALLOWED', afterRevoke: after.body?.error?.code };
   });
-  await ctx.check('C-08', 'alice closes with a reduce-only order; with every position flat the balances of all accounts sum exactly to the deposits (I-2)', async () => {
+  await ctx.check('C-08', 'alice closes with a reduce-only order; with every position flat the balances of all accounts sum exactly to deposits minus withdrawals (I-2)', async () => {
     const r = await api.order(alice, btc, { buy: false, price: onTick(btc, ref, -50), size, type: 1, tif: 1, reduceOnly: true });
     expect(r.body?.result?.ok === true, JSON.stringify(r.body));
     await api.cancelAll(maker);
     await sleep(500);
-    const deposits = CAST.reduce((s, a) => s + usdc(a.deposit), 0n);
+    // deposits and withdrawals as the ENGINE recorded them (read from the API, never from this run's memory)
+    const deposits = (await creditedDeposits(api, CAST)) - (await withdrawnGross(api, CAST));
     const tb = await totalBalances(api, CAST);
     expect(tb.total === deposits, `sum of balances ${fmtUsdc(tb.total)} vs deposits ${fmtUsdc(deposits)} (difference ${fmtUsdc(tb.total - deposits)})`);
     // the round trip: alice lost the spread and two taker fees, nothing else
     const spread = ((px(ask) - px(bid)) * sz(size)) / 10n ** 10n;   // exact: both prices on the tick, round size
-    const aliceLoss = usdc(alice.deposit) - (await bal(api, alice.address));
+    const aliceLoss = before.alice - (await bal(api, alice.address));   // since just before her first order of this phase
     const expectLoss = spread + tradeFee(ask, size, 450) + tradeFee(bid, size, 450);
     expect(aliceLoss === expectLoss, `alice lost ${fmtUsdc(aliceLoss)}, expected spread + fees ${fmtUsdc(expectLoss)}`);
-    return { deposits: fmtUsdc(deposits), sumOfBalances: fmtUsdc(tb.total), balances: tb.per, aliceRoundTripCost: fmtUsdc(aliceLoss) };
+    return { depositsMinusWithdrawals: fmtUsdc(deposits), sumOfBalances: fmtUsdc(tb.total), balances: tb.per, aliceRoundTripCost: fmtUsdc(aliceLoss) };
   });
 }
