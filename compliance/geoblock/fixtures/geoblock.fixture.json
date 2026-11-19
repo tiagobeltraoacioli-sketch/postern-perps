@@ -1,8 +1,8 @@
 {
   "schema": "postern-perps/geoblock",
-  "version": "0.2.1",
-  "generated_utc": "2026-11-17",
-  "status": "TEST FIXTURE ONLY (agent 397). A copy of 392's geoblock.json 0.2.1 with PA, CH and UA set to tier 'allowed' so that the allow paths can be tested. These 'allowed' entries are NOT a statement about any country; the real list (compliance/geoblock.json) has no allowed entry.",
+  "version": "0.2.2",
+  "generated_utc": "2026-11-18",
+  "status": "TEST FIXTURE ONLY (agent 397). A copy of geoblock.json 0.2.2 with PA, CH and UA set to tier 'allowed' so that the allow paths can be tested. These 'allowed' entries are NOT a statement about any country; the real list (compliance/geoblock.json) has no allowed entry.",
   "rule": "Deny by default. A request is allowed only if its ISO 3166-1 alpha-2 country is listed with tier 'allowed' AND its ISO 3166-2 subdivision (when known) is not listed in 'subdivisions' as blocked AND no anonymizer rule denies it. Any country not listed, an unknown country (missing header, 'XX', 'T1', private or unresolvable IP), and tier 'restricted-review' are all denied.",
   "tiers": {
     "blocked": {
@@ -2907,7 +2907,8 @@
       "CancelOrder",
       "CancelAll",
       "PlaceOrder(reduceOnly=true)",
-      "Withdraw"
+      "Withdraw",
+      "RevokeAgent"
     ],
     "refused_actions": "every other action type, deposit credit to a new account included",
     "public_reads": "market data, node status and account reads are not geoblocked",

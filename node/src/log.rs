@@ -9,6 +9,24 @@
 //! record (crash during append: short read or bad checksum at the very end) is cut off and reported; any defect
 //! followed by more data is corruption and the log refuses to open (fail closed: never silently skip a block).
 //!
+//! THE INDEX (`blocks.idx`, round 2). "Torn" used to be judged from the log alone, and a record that WAS durable
+//! and was damaged afterwards (its length field, its body, its checksum, or the file cut short) looked exactly
+//! like an append that never completed: it was cut, and the node restarted one block short. The index removes
+//! the ambiguity. It is `"PPIDX01\n"` followed by one 60-byte entry per completed append:
+//! `height:u64be | offset:u64be | bodyLen:u32be | keccak256(body) | keccak256(previous 52 bytes)[..8]`. An entry is
+//! written and `fsync`ed AFTER its record's own `fsync` and before the block is published, so:
+//!
+//! - no entry (and no partial entry) for the bytes at the end of the log: the append never completed; it is cut
+//!   (the only case that is cut);
+//! - an entry, or the beginning of one, exists for a record the log cannot produce intact: the record was durable
+//!   and is damaged or missing; the log REFUSES to open;
+//! - a complete, valid record without an entry (a crash between the two fsyncs): kept, and the entry is added;
+//! - an entry that disagrees with the log's record (height, offset, length, body hash) or is itself damaged:
+//!   refused (neither file is silently trusted over the other);
+//! - a directory written before the index existed gets one at its first open (that open still uses the old rule).
+//!
+//! Cost: one more `fsync` per block.
+//!
 //! UNAUDITED PROTOTYPE.
 
 use crate::eip712::digest;
@@ -58,9 +76,24 @@ pub fn check_block_link(g: &Genesis, prev_height: u64, prev_log_hash: &H256, pre
     Ok(())
 }
 
+const IDX_MAGIC: &[u8; 8] = b"PPIDX01\n";
+const IDX_ENTRY: usize = 60;
+
+fn idx_entry(height: u64, offset: u64, body: &[u8]) -> [u8; IDX_ENTRY] {
+    let mut e = [0u8; IDX_ENTRY];
+    e[..8].copy_from_slice(&height.to_be_bytes());
+    e[8..16].copy_from_slice(&offset.to_be_bytes());
+    e[16..20].copy_from_slice(&(body.len() as u32).to_be_bytes());
+    e[20..52].copy_from_slice(&keccak(body));
+    let c = keccak(&e[..52]);
+    e[52..].copy_from_slice(&c[..8]);
+    e
+}
+
 pub struct InputLog {
     path: PathBuf,
     file: File,
+    idx: File,
     /// byte offset of each record (index = height - 1)
     offsets: Vec<u64>,
     pub last_height: u64,
@@ -85,9 +118,12 @@ impl InputLog {
         let mut data = Vec::new();
         file.read_to_end(&mut data).map_err(|e| format!("read log: {e}"))?;
         let mut offsets = Vec::new();
+        // the index entry each complete record must have
+        let mut entries: Vec<[u8; IDX_ENTRY]> = Vec::new();
         let mut pos = 0usize;
         let (mut lh, mut lt, mut lr, mut height) = (g.genesis_log_hash(), g.genesis_time, crate::util::ZERO_H256, 0u64);
-        let mut torn = 0u64;
+        // bytes at the end of the log that are not a complete record (and look like an unfinished append)
+        let mut tail = 0u64;
         while pos < data.len() {
             let rest = &data[pos..];
             let parsed = (|| -> Result<(Block, usize), String> {
@@ -114,6 +150,7 @@ impl InputLog {
                 Ok((b, n)) => {
                     check_block_link(g, height, &lh, lt, &b).map_err(|e| format!("input log corrupt at offset {pos}: {e}"))?;
                     offsets.push(pos as u64);
+                    entries.push(idx_entry(b.header.height, pos as u64, &rest[8..n - 32]));
                     height = b.header.height;
                     lh = b.header.log_hash;
                     lt = b.header.time;
@@ -121,10 +158,11 @@ impl InputLog {
                     pos += n;
                 }
                 Err(e) => {
-                    // Only the final append can be torn (each append is fsynced before the next). Torn means: the
-                    // header is incomplete, or the header is valid and the record's declared extent reaches or
-                    // passes the end of the file. Anything else (bad magic with 8+ bytes left, a bad checksum with
-                    // data after the record) is corruption: refuse to open.
+                    // Only the final append can be unfinished (each append is fsynced before the next). It LOOKS
+                    // unfinished when the header is incomplete, or the header is valid and the record's declared
+                    // extent reaches or passes the end of the file. Anything else (bad magic with 8+ bytes left,
+                    // a bad checksum with data after the record) is corruption: refuse to open. Whether a tail
+                    // that looks unfinished really is, the INDEX decides below.
                     let torn_here = rest.len() < 8
                         || (&rest[..4] == MAGIC && {
                             let len = u32::from_be_bytes(rest[4..8].try_into().unwrap()) as usize;
@@ -133,17 +171,77 @@ impl InputLog {
                     if !torn_here {
                         return Err(format!("input log corrupt at offset {pos} ({e}): refusing to open"));
                     }
-                    torn = (data.len() - pos) as u64;
+                    tail = (data.len() - pos) as u64;
                     break;
                 }
             }
         }
+        // ---- the index
+        let idx_path = dir.join("blocks.idx");
+        let mut idx = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&idx_path).map_err(|e| format!("open index: {e}"))?;
+        let mut ib = Vec::new();
+        idx.read_to_end(&mut ib).map_err(|e| format!("read index: {e}"))?;
+        let legacy = ib.is_empty();
+        let m = entries.len();
+        let mut known = 0usize; // complete, valid entries
+        let mut partial = false; // the beginning of one more entry exists
+        if !legacy {
+            if ib.len() < 8 || &ib[..8] != IDX_MAGIC {
+                return Err("the log index (blocks.idx) has a damaged header: refusing to open".into());
+            }
+            let body = &ib[8..];
+            let full = body.len() / IDX_ENTRY;
+            partial = body.len() % IDX_ENTRY != 0;
+            for i in 0..full {
+                let e = &body[i * IDX_ENTRY..(i + 1) * IDX_ENTRY];
+                let sound = keccak(&e[..52])[..8] == e[52..];
+                if !sound {
+                    if i + 1 == full && !partial {
+                        // a last entry of full length that does not check: its write had begun (the same evidence
+                        // as a partial entry: the record's own fsync had completed)
+                        partial = true;
+                        break;
+                    }
+                    return Err(format!("the log index (blocks.idx) entry {} is damaged: refusing to open", i + 1));
+                }
+                if i < m && e != entries[i] {
+                    return Err(format!("the log index (blocks.idx) entry {} disagrees with the record in the log (height, offset, length or body hash): refusing to open", i + 1));
+                }
+                known += 1;
+            }
+            // every completed append the index knows must be a complete record of the log
+            if known > m || (partial && known == m) {
+                return Err(format!(
+                    "the index records {} completed append(s), the log holds {m} complete record(s): a block that was durable is damaged or missing ({tail} byte(s) at the end of the log do not form a record): refusing to open",
+                    known + partial as usize
+                ));
+            }
+            if tail > 0 && known < m {
+                return Err(format!("the index is {} entries behind the log and the log ends in an incomplete record: refusing to open", m - known));
+            }
+        }
+        // here: the index knows no completed append beyond the complete records, so a tail is an append that
+        // never completed (or the directory predates the index)
+        let torn = tail;
         if torn > 0 {
             file.set_len((data.len() as u64) - torn).map_err(|e| format!("truncate torn tail: {e}"))?;
             file.sync_all().map_err(|e| format!("fsync: {e}"))?;
         }
+        if legacy || known != m || partial {
+            // (re)write what is missing: the header, and the entries of complete records the index lacks
+            if legacy {
+                idx.write_all(IDX_MAGIC).map_err(|e| format!("write index: {e}"))?;
+            }
+            idx.set_len((8 + known * IDX_ENTRY) as u64).map_err(|e| format!("index: {e}"))?;
+            idx.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
+            for e in &entries[known..] {
+                idx.write_all(e).map_err(|e| format!("write index: {e}"))?;
+            }
+            idx.sync_all().map_err(|e| format!("fsync index: {e}"))?;
+        }
+        idx.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
         file.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
-        let log = InputLog { path, file, offsets, last_height: height, last_log_hash: lh, last_time: lt, last_state_root: lr, torn_tail_bytes: torn, fsync: true };
+        let log = InputLog { path, file, idx, offsets, last_height: height, last_log_hash: lh, last_time: lt, last_state_root: lr, torn_tail_bytes: torn, fsync: true };
         let rep = OpenReport { blocks: height, torn_tail_bytes: torn };
         Ok((log, rep))
     }
@@ -161,6 +259,11 @@ impl InputLog {
         self.file.write_all(&rec).map_err(|e| format!("append: {e}"))?;
         if self.fsync {
             self.file.sync_data().map_err(|e| format!("fsync: {e}"))?;
+        }
+        // the record is durable: now, and only now, the index learns that this append completed
+        self.idx.write_all(&idx_entry(b.header.height, off, &body)).map_err(|e| format!("index append: {e}"))?;
+        if self.fsync {
+            self.idx.sync_data().map_err(|e| format!("fsync index: {e}"))?;
         }
         self.offsets.push(off);
         self.last_height = b.header.height;

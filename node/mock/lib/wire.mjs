@@ -2,6 +2,7 @@
 // Every number leaves as a decimal string in human units (API.md 1); 64-bit ids as decimal strings.
 import { formatFixed, pow10, divFloor, divCeil, abs } from './fixed.mjs';
 import { INTERVALS, FEE_ACCOUNT, merkle } from './exchange.mjs';
+import { tree32 } from './merkle32.mjs';
 
 const U = 6;
 const RATE_DP = 10;
@@ -185,11 +186,10 @@ export function accountProof(x, acc) {
   if (!cp) return null;
   const i = cp.leaves.findIndex((l) => l.address === acc.address);
   if (i < 0) return null;
-  const tree = cp.tree ?? (cp.tree = merkleOf(x, cp));
+  // API 0.3: leafData = the vault's Account struct fields + the 88 leaf bytes; proof = the 32 siblings (SPEC 11)
+  const tree = cp.tree ?? (cp.tree = tree32(new Map(cp.leaves.map((l) => [l.index, unhexLeaf(l.leaf)]))));
   const l = cp.leaves[i];
-  return { address: acc.address, checkpoint: checkpoint(x, cp), leaf: l.leaf, leafData: JSON.parse(JSON.stringify(l.data, (k, v) => (typeof v === 'bigint' ? v.toString() : v))), proof: tree.proof(i), index: String(i) };
+  return { address: acc.address, checkpoint: checkpoint(x, cp), leaf: l.leaf, leafData: l.data, proof: tree.proof(l.index), index: String(l.index) };
 }
-function merkleOf(x, cp) {
-  return merkle(cp.leaves.map((l) => l.leaf));
-}
+const unhexLeaf = (h) => new Uint8Array(Buffer.from(h.slice(2), 'hex'));
 export { INTERVALS, FEE_ACCOUNT };

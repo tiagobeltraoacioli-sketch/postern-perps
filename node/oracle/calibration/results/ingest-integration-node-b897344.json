@@ -1,0 +1,943 @@
+{
+ "what": "oracle feeder (replay-feed) against the node ingest, loopback, build host, 2026-11-18",
+ "node": "codex/perps-node-r2-20261118 b897344 (431), release build, dev --engine real --oracle-committee-file --oracle-token-file",
+ "feeder": "codex/perps-oracle-r2-20261118 265ff17 (432), release build",
+ "committee": "7 random throwaway keys generated at run time by committee-gen, quorum 5",
+ "tape": [
+  {
+   "p": {
+    "1": "67250",
+    "2": "3480",
+    "3": "182.4"
+   },
+   "repeat": 6,
+   "note": "calm: INIT -> active on the third round"
+  },
+  {
+   "ramp": {
+    "1": "65232.5"
+   },
+   "rounds": 6,
+   "note": "BTC -3% in 6 rounds"
+  },
+  {
+   "p": {
+    "2": "3100"
+   },
+   "repeat": 4,
+   "note": "ETH gap -10.9%: JUMP halt, resumed on the third agreeing round"
+  },
+  {
+   "p": {
+    "1": "65300"
+   },
+   "override": {
+    "6": {
+     "1": "70000"
+    },
+    "5": {
+     "1": "50000"
+    }
+   },
+   "repeat": 2,
+   "note": "two lying signers"
+  },
+  {
+   "p": {
+    "1": "65310"
+   },
+   "signers": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "repeat": 2,
+   "note": "quorum only"
+  },
+  {
+   "silent": 5,
+   "note": "15 s silent: STALE"
+  },
+  {
+   "p": {
+    "1": "65320"
+   },
+   "repeat": 5,
+   "note": "back"
+  }
+ ],
+ "updatesMode": {
+  "summary": "replay-feed: end of tape {\"accepted\":25,\"refused\":0,\"rounds\":30,\"silent\":5,\"unreachable\":0}",
+  "rounds": [
+   {
+    "step": 0,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6725000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 1,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6725000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 2,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6725000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 3,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6725000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 4,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6725000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 5,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6725000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 6,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6691375000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 7,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6657750000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 8,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6624125000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 9,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6590500000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 10,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6556875000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 11,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6523250000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 12,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6523250000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 13,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6523250000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 14,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6523250000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 15,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6523250000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 16,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6530000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 17,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6530000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 18,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "btc": "6531000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "held",
+    "error": null
+   },
+   {
+    "step": 19,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "btc": "6531000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "held",
+    "error": null
+   },
+   {
+    "step": 20,
+    "silent": true
+   },
+   {
+    "step": 21,
+    "silent": true
+   },
+   {
+    "step": 22,
+    "silent": true
+   },
+   {
+    "step": 23,
+    "silent": true
+   },
+   {
+    "step": 24,
+    "silent": true
+   },
+   {
+    "step": 25,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6532000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 26,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6532000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 27,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6532000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 28,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6532000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 29,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6532000000000",
+    "http": [
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   }
+  ]
+ },
+ "observationsMode": {
+  "summary": "replay-feed: end of tape {\"accepted\":5,\"refused\":0,\"rounds\":5,\"silent\":0,\"unreachable\":0}",
+  "rounds": [
+   {
+    "step": 0,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6533000000000",
+    "http": [
+     200,
+     200,
+     200,
+     200,
+     200,
+     200,
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 1,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6533000000000",
+    "http": [
+     200,
+     200,
+     200,
+     200,
+     200,
+     200,
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 2,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6533000000000",
+    "http": [
+     200,
+     200,
+     200,
+     200,
+     200,
+     200,
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 3,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6533000000000",
+    "http": [
+     200,
+     200,
+     200,
+     200,
+     200,
+     200,
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   },
+   {
+    "step": 4,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6533000000000",
+    "http": [
+     200,
+     200,
+     200,
+     200,
+     200,
+     200,
+     200
+    ],
+    "nodeStatus": "ready",
+    "error": null
+   }
+  ]
+ },
+ "refusals": {
+  "wrongToken": [
+   {
+    "step": 0,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6534000000000",
+    "http": [
+     401
+    ],
+    "nodeStatus": null,
+    "error": "UNAUTHORIZED"
+   }
+  ],
+  "observationsSignedForAnotherVault": [
+   {
+    "step": 0,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6534000000000",
+    "http": [
+     400
+    ],
+    "nodeStatus": null,
+    "error": "ORACLE_BAD_SIGNATURE"
+   }
+  ],
+  "keysNotInTheGenesisCommittee": [
+   {
+    "step": 0,
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "btc": "6534000000000",
+    "http": [
+     400
+    ],
+    "nodeStatus": null,
+    "error": "ORACLE_BAD_SIGNATURE"
+   }
+  ]
+ },
+ "nodeOracleStatusTimeline (GET /v1/oracle/{symbol}, polled every 1.5 s, changes only)": [
+  {
+   "symbol": "BTC-USD",
+   "status": "stale",
+   "price": "0",
+   "haltReason": "STALE",
+   "round": "0",
+   "tSec": 0.0
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "stale",
+   "price": "0",
+   "haltReason": "STALE",
+   "round": "0",
+   "tSec": 0.0
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "67250",
+   "haltReason": null,
+   "round": "598348686",
+   "tSec": 9.1
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "ok",
+   "price": "3480",
+   "haltReason": null,
+   "round": "598348686",
+   "tSec": 9.1
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "66913.75",
+   "haltReason": null,
+   "round": "598348690",
+   "tSec": 21.3
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "66577.5",
+   "haltReason": null,
+   "round": "598348691",
+   "tSec": 24.4
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "66241.25",
+   "haltReason": null,
+   "round": "598348692",
+   "tSec": 27.4
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65905",
+   "haltReason": null,
+   "round": "598348693",
+   "tSec": 30.4
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65568.75",
+   "haltReason": null,
+   "round": "598348694",
+   "tSec": 33.5
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65232.5",
+   "haltReason": null,
+   "round": "598348695",
+   "tSec": 36.5
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "deviation",
+   "price": "3480",
+   "haltReason": "JUMP",
+   "round": "598348696",
+   "tSec": 39.6
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "ok",
+   "price": "3100",
+   "haltReason": null,
+   "round": "598348698",
+   "tSec": 45.7
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65300",
+   "haltReason": null,
+   "round": "598348700",
+   "tSec": 51.7
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65310",
+   "haltReason": null,
+   "round": "598348702",
+   "tSec": 57.8
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "stale",
+   "price": "65310",
+   "haltReason": "STALE",
+   "round": "598348709",
+   "tSec": 77.6
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "stale",
+   "price": "3100",
+   "haltReason": "STALE",
+   "round": "598348709",
+   "tSec": 77.6
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65320",
+   "haltReason": null,
+   "round": "598348711",
+   "tSec": 83.7
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "ok",
+   "price": "3100",
+   "haltReason": null,
+   "round": "598348711",
+   "tSec": 83.7
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65330",
+   "haltReason": null,
+   "round": "598348714",
+   "tSec": 92.8
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "ok",
+   "price": "3101",
+   "haltReason": null,
+   "round": "598348714",
+   "tSec": 92.8
+  }
+ ],
+ "final": {
+  "oracleBTC": {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "65330",
+   "time": 1795046154000,
+   "round": "598348718",
+   "sources": [],
+   "signers": 0,
+   "threshold": 5,
+   "haltReason": null
+  },
+  "roundsLatest": {
+   "quorum": 5,
+   "signers": [
+    "0x0eb09f74daf4d959962d125082b180abdb44c330",
+    "0x97502d2970b5bb2c4a7641a4e39f1cccf14e0476",
+    "0xaa9dd7556427cd1f093003e6d842635045e041af",
+    "0xacb821ee4cf4c4289bc2dfaed964f09e62129e2e",
+    "0xb151d686073aa24de8926e2135498b9ca5afea00",
+    "0xc09b78af6992187a449ab6059e998718e8678838",
+    "0xd6d6250b77678ab279a4b745754eae161b340da9"
+   ],
+   "gatherMs": 500,
+   "accepted": 206,
+   "refused": 14,
+   "conflicts": 0,
+   "roundsBuilt": 30,
+   "lastBuilt": {
+    "round": "598348718",
+    "signers": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ]
+   },
+   "held": [],
+   "enabled": true,
+   "lastAcceptedRound": "598348718"
+  }
+ },
+ "exit": [
+  "updates exit=0",
+  "observations exit=0",
+  "node stopped",
+  "DONE"
+ ],
+ "firstRun": "run 1 (feeder a858597): observations mode had 1 round refused with 7 x 409 ORACLE_CONFLICT: the second feed started inside the round the first had just signed (finding R432-2, fixed in 265ff17; this file is run 2)"
+}

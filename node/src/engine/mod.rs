@@ -18,6 +18,7 @@
 
 pub mod real;
 pub mod stub;
+pub mod view;
 
 use crate::types::Input;
 use crate::util::{keccak_parts, Address, H256};
@@ -36,6 +37,9 @@ pub struct BlockOutcome {
     pub events: Vec<serde_json::Value>,
     /// Withdrawal ids created by this block.
     pub withdrawals: Vec<u64>,
+    /// The real engine's typed events of this block, in execution order (empty for the stub). Read by the
+    /// market-data index (`crate::index`); never by consensus code.
+    pub typed: Vec<postern_perps_engine::Event>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +145,102 @@ pub fn merkle_verify(root: &H256, leaf: &H256, index: u64, count: u64, proof: &[
     p.next().is_none() && &h == root
 }
 
+/// An append-only depth-`depth` Merkle tree in SPEC 11's form (the engine crate's `merkle`: zero-padded, leaf
+/// positions dense from 0) that keeps every level, so appending a leaf and proving a leaf against ANY prefix of
+/// the leaves each cost `depth` hashes instead of rebuilding the tree (R436-6: the withdrawal certificate and the
+/// account's withdrawal list rebuilt the whole withdrawal tree per record, under the sequencer lock).
+///
+/// `levels[d][j]` is the node of height `d` at position `j` over the leaves appended so far (the last node of a
+/// level is padded with empty subtrees). For a prefix of `count` leaves, a node left of the prefix's boundary
+/// position `(count - 1) >> d` is complete and equals the stored one, a node right of it is the empty subtree, and
+/// the boundary node itself is recomputed bottom-up (`boundary`).
+#[derive(Clone, Debug)]
+pub struct IncTree {
+    depth: usize,
+    zeros: Vec<H256>,
+    levels: Vec<Vec<H256>>,
+}
+
+impl IncTree {
+    pub fn new(depth: usize) -> IncTree {
+        IncTree { depth, zeros: postern_perps_engine::merkle::zeros(depth), levels: vec![Vec::new(); depth + 1] }
+    }
+
+    pub fn len(&self) -> u64 {
+        self.levels[0].len() as u64
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.levels[0].is_empty()
+    }
+
+    pub fn push(&mut self, leaf: H256) {
+        use postern_perps_engine::merkle::node_hash;
+        self.levels[0].push(leaf);
+        let mut pos = self.levels[0].len() - 1;
+        for d in 0..self.depth {
+            let parent = pos / 2;
+            let left = self.levels[d][2 * parent];
+            let right = self.levels[d].get(2 * parent + 1).copied().unwrap_or(self.zeros[d]);
+            let h = node_hash(&left, &right);
+            if parent < self.levels[d + 1].len() {
+                self.levels[d + 1][parent] = h;
+            } else {
+                self.levels[d + 1].push(h);
+            }
+            pos = parent;
+        }
+    }
+
+    /// The boundary nodes of the prefix of `count` leaves: `b[d]` = the node of height `d` at position
+    /// `(count - 1) >> d` in the tree of exactly those leaves.
+    fn boundary(&self, count: u64) -> Vec<H256> {
+        use postern_perps_engine::merkle::node_hash;
+        let last = (count - 1) as usize;
+        let mut b = Vec::with_capacity(self.depth + 1);
+        b.push(self.levels[0][last]);
+        for d in 0..self.depth {
+            let pos = last >> d;
+            let h = if pos % 2 == 1 { node_hash(&self.levels[d][pos - 1], &b[d]) } else { node_hash(&b[d], &self.zeros[d]) };
+            b.push(h);
+        }
+        b
+    }
+
+    /// Root of the tree of the first `count` leaves.
+    pub fn root(&self, count: u64) -> Option<H256> {
+        if count > self.len() {
+            return None;
+        }
+        if count == 0 {
+            return Some(self.zeros[self.depth]);
+        }
+        Some(self.boundary(count)[self.depth])
+    }
+
+    /// Bottom-up siblings of leaf `index` in the tree of the first `count` leaves.
+    pub fn proof(&self, index: u64, count: u64) -> Option<Vec<H256>> {
+        if index >= count || count > self.len() {
+            return None;
+        }
+        let b = self.boundary(count);
+        let last = (count - 1) as usize;
+        let mut out = Vec::with_capacity(self.depth);
+        for d in 0..self.depth {
+            let sib = ((index as usize) >> d) ^ 1;
+            let bpos = last >> d;
+            out.push(if sib < bpos {
+                self.levels[d][sib]
+            } else if sib == bpos {
+                b[d]
+            } else {
+                self.zeros[d]
+            });
+        }
+        Some(out)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StateParts {
     pub accounts_root: H256,
@@ -210,6 +310,32 @@ pub trait Engine: Send + Sync {
     fn agents_json(&self, a: &Address) -> serde_json::Value;
     fn name(&self) -> &'static str;
     fn clone_box(&self) -> Box<dyn Engine>;
+    /// (maximum inputs, maximum encoded bytes) of a block this engine accepts.
+    fn block_limits(&self) -> (usize, usize) {
+        (crate::types::MAX_INPUTS_PER_BLOCK, usize::MAX)
+    }
+    /// Would this engine's own decoder accept the input on its own? Admission asks this for every action, and
+    /// `Sequencer::produce` for every input of a block the engine refused (R436-4).
+    fn precheck_input(&self, _input: &Input) -> Result<(), String> {
+        Ok(())
+    }
+    /// (maxFutureMs, maxAgeMs) of the engine's oracle time rule C2c; no bound for the stub.
+    fn oracle_time_bounds(&self) -> (u64, u64) {
+        (u64::MAX, u64::MAX)
+    }
+    /// The engine's genesis document: the exact bytes whose hash is `logHash(0)` (R435-1), `None` for the stub.
+    fn genesis_document(&self) -> Option<Vec<u8>> {
+        None
+    }
+    /// An engine of this kind (same genesis) over the given real-engine state: the base of a state rebuild from a
+    /// held frame (`crate::archive`). `None` for the stub.
+    fn with_real_state(&self, _state: postern_perps_engine::Engine) -> Option<Box<dyn Engine>> {
+        None
+    }
+    /// The real engine behind this adapter (`None` for the stub): read-only access for the API views and the index.
+    fn real(&self) -> Option<&postern_perps_engine::Engine> {
+        None
+    }
     /// The market table the engine ENFORCES, as API `Market` objects (R393-N1: the API publishes exactly this).
     fn market_table(&self, _g: &crate::genesis::Genesis) -> Option<Vec<serde_json::Value>> {
         None
@@ -243,5 +369,34 @@ mod tests {
             }
         }
         assert_ne!(merkle_root(&[]), merkle_root(&[keccak(b"")]));
+    }
+
+    /// R436-6: the incremental tree gives, for every prefix and every position, exactly the engine crate's root
+    /// and proof (the functions the checkpoint and the vault use).
+    #[test]
+    fn inc_tree_equals_the_engine_merkle_for_every_prefix_and_position() {
+        use postern_perps_engine::merkle;
+        for depth in [5usize, 32] {
+            let mut t = IncTree::new(depth);
+            assert_eq!(t.root(0), Some(merkle::root(&[], depth)));
+            assert!(t.proof(0, 0).is_none() && t.root(1).is_none());
+            let leaves: Vec<H256> = (0..30u64).map(|i| merkle::leaf_hash(&i.to_be_bytes())).collect();
+            for (n, l) in leaves.iter().enumerate() {
+                t.push(*l);
+                assert_eq!(t.len(), n as u64 + 1);
+                // every prefix, including ones shorter than what was appended since
+                for count in 1..=(n + 1) {
+                    let root = merkle::root(&leaves[..count], depth);
+                    assert_eq!(t.root(count as u64), Some(root), "depth {depth} n {n} count {count}");
+                    for i in 0..count {
+                        let p = t.proof(i as u64, count as u64).unwrap();
+                        assert_eq!(p, merkle::proof(&leaves[..count], depth, i), "depth {depth} n {n} count {count} i {i}");
+                        assert!(merkle::verify(&leaves[i], i as u64, &p, &root));
+                    }
+                    assert!(t.proof(count as u64, count as u64).is_none(), "index outside the prefix");
+                }
+                assert!(t.proof(0, n as u64 + 2).is_none(), "prefix longer than the tree");
+            }
+        }
     }
 }

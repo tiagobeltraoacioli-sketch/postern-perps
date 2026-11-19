@@ -1,9 +1,9 @@
-# PosternDEX Perpetuals: markets and risk parameters (v0.2.1, 2026-11-17)
+# PosternDEX Perpetuals: markets and risk parameters (v0.2.2, 2026-11-18)
 
 UNAUDITED prototype work by agent 392 (continuing 354). Nothing here is legal advice; whether any market may be
 offered anywhere is for counsel. Machine-readable files: `compliance/markets.json` (per market) and
-`compliance/risk.json` (global, fee tiers, insurance fund, backstop, ADL, rules R-1..R-9). The rules are checked by
-`compliance/tools/check_params.py` (24 tests: `python3 -I -m unittest discover -s compliance/tools -p 'test_*.py'`).
+`compliance/risk.json` (global, fee tiers, insurance fund, backstop, ADL, rules R-1..R-10). The rules are checked by
+`compliance/tools/check_params.py` (32 of the 59 tests of `compliance/tools`: `python3 -I -m unittest discover -s compliance/tools -p 'test_*.py'`).
 
 Units and names follow `docs/SPEC.md` v0.1 (agent 388): fixed scales (price 1e-8 USD, size 1e-8 base, USDC 1e-6),
 fractions in ppm, funding rates in `RATE_SCALE` 1e9, field names equal to SPEC section 10 (Genesis). Values are
@@ -122,6 +122,30 @@ Per 394's proposal (`node/oracle/README.md` section 8), unchanged: `minSources` 
 ETH 500, SOL 800, `maxStalenessMs` 10,000, `confirmRounds` 3. Checked against section 4: the worst one-hour moves
 (4.04%, 6.89%, 5.49%) exceed BTC's and ETH's 5% jump bound only if they happened within one 3-second round;
 whether any did is NOT measured (no minute or second resolution data recorded): not proven.
+
+### 6a. Exit band of a halted market (v0.2.2, 2026-11-18; data fix by agent 435 at agent 432's request)
+
+While a market is halted the engine stands behind no single price. Free collateral (SPEC S-9.2), forced closes and
+the settlement after `maxHaltMs` (SPEC 14) use the oracle's EXIT BAND (oracle README 6a): the last good index and
+every committee price since the halt, widened by `exitHaircutBps` at once and `exitHaircutPerMinBps` per minute of
+darkness up to `exitMaxHaircutBps`. Until 0.2.1 these four numbers were left to the engine's defaults (the jump
+bound, 100, 5000, one hour). 0.2.2 states them per market in `markets.json` (rule R-10 refuses a missing one):
+
+| Market | `exitHaircutBps` | `exitHaircutPerMinBps` | `exitMaxHaircutBps` | `maxHaltMs` |
+|---|---|---|---|---|
+| BTC-USD | 500 (= default) | 100 | 5000 | 3600000 |
+| ETH-USD | 700 (default 500) | 100 | 5000 | 3600000 |
+| SOL-USD | 1300 (default 800) | 100 | 5000 | 3600000 |
+
+Source: agent 432's calibration on public minute candles of the three markets over 34 days including the worst
+days named in section 4 (`node/oracle/calibration/CALIBRATION.md` and its scripts on the oracle line; cross-area log
+2026-11-18 23:57 and 2026-11-19 00:11 UTC). Reason for the two changes: the default band was too narrow for SOL on
+2025-10-10 (a move of 1,003 bps in two minutes against a band of 1,000, and 1,366 bps in five minutes against
+1,300), and ETH's measured moves ask for 700. Direction: WIDER only (a wider band values a position in a halted
+market more conservatively for its holder: less withdrawable during the halt, a worse forced-close price; it never
+lets more value out). R-10 keeps `exitHaircutBps >= jumpBps` and `>=` these floors, `exitMaxHaircutBps < 10000` and
+`maxHaltMs` between `maxStalenessMs` and one day (the vault's minimum `forcedDelay`). Not re-measured by 435: the
+numbers are 432's; rule R-10 and its tests (eight, each mutation refused) are 435's.
 
 ## 7. Sources (read 2026-11-17; exact sentences in `compliance/research/sources.json`)
 

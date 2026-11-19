@@ -72,6 +72,7 @@ pub fn genesis_raw(n_oracles: u32, markets: Vec<MarketParams>) -> Genesis {
         launch_backstop_min: 0,
         backstop_oi_ppm: 250_000,
         markets,
+        collateral_token: None,
     }
 }
 

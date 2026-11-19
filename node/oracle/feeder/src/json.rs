@@ -251,11 +251,18 @@ pub fn outcome_to_json(o: &MarketOutcome) -> Value {
 }
 
 pub fn report_to_json(r: &UpdateReport) -> Value {
-    json!({"round": r.round, "markets": r.outcomes.iter().map(|(m, o)| {
+    let mut v = json!({"round": r.round, "markets": r.outcomes.iter().map(|(m, o)| {
         let mut v = outcome_to_json(o);
         v.as_object_mut().unwrap().insert("marketId".into(), json!(m));
         v
-    }).collect::<Vec<_>>()})
+    }).collect::<Vec<_>>()});
+    // C2d: present only when a signer was ignored (reports of rounds without one keep their round-1 form).
+    if !r.ignored.is_empty() {
+        v.as_object_mut()
+            .unwrap()
+            .insert("ignored".into(), json!(r.ignored));
+    }
+    v
 }
 
 pub fn error_to_json(e: &OracleError) -> Value {

@@ -137,6 +137,79 @@ impl NodeClient {
     }
 }
 
+/// How a signed round is posted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// One `POST /v1/oracle/updates` (a whole dev committee's update).
+    Updates,
+    /// One `POST /v1/oracle/observations` per signer (the production shape: each feeder on its own).
+    Observations,
+}
+
+/// The request bodies of one signed round in `mode`: `(path, JSON body)`.
+pub fn round_bodies(
+    u: &perps_oracle::types::OracleUpdate,
+    mode: Mode,
+) -> Vec<(&'static str, String)> {
+    match mode {
+        Mode::Updates => vec![(UPDATES_PATH, crate::json::update_to_json(u).to_string())],
+        Mode::Observations => u
+            .observations
+            .iter()
+            .map(|o| {
+                let mut ob = crate::json::signed_to_json(o, u.round);
+                ob.as_object_mut().unwrap().remove("round");
+                (
+                    OBSERVATIONS_PATH,
+                    serde_json::json!({"round": u.round, "observation": ob}).to_string(),
+                )
+            })
+            .collect(),
+    }
+}
+
+/// The outcome of posting one round: every POST answered 2xx / some answered otherwise / some got no answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Posted {
+    pub accepted: bool,
+    pub refused: bool,
+    pub unreachable: bool,
+    /// One entry per POST: `{"status", "reply"}` or `{"error"}` (never the token).
+    pub log: Vec<serde_json::Value>,
+}
+
+impl NodeClient {
+    /// Posts one signed round. Every body is sent even when an earlier one failed.
+    pub fn post_round(&self, u: &perps_oracle::types::OracleUpdate, mode: Mode) -> Posted {
+        let mut p = Posted {
+            accepted: true,
+            refused: false,
+            unreachable: false,
+            log: Vec::new(),
+        };
+        for (path, body) in round_bodies(u, mode) {
+            match self.post_json(path, &body) {
+                Ok((status, reply)) => {
+                    if !(200..300).contains(&status) {
+                        p.accepted = false;
+                        p.refused = true;
+                    }
+                    let reply: serde_json::Value =
+                        serde_json::from_str(&reply).unwrap_or(serde_json::Value::String(reply));
+                    p.log
+                        .push(serde_json::json!({"status": status, "reply": reply}));
+                }
+                Err(e) => {
+                    p.accepted = false;
+                    p.unreachable = true;
+                    p.log.push(serde_json::json!({"error": e}));
+                }
+            }
+        }
+        p
+    }
+}
+
 fn split_head(raw: &[u8]) -> Option<(&str, &[u8])> {
     let i = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
     Some((std::str::from_utf8(&raw[..i]).ok()?, &raw[i + 4..]))

@@ -52,3 +52,21 @@ test('a checkpoint whose stateRoot does not follow from its fields is caught', {
   withMutation((x) => {
     for (const cp of x.checkpoints) cp.fields = { ...cp.fields, accountsRoot: '0x' + '77'.repeat(32) };
   }, [/stateRoot = SPEC 11 equation/, /digest recomputed/]));
+
+// API 0.3 account proof (the escape hatch's input): each way a server can serve a proof the vault would refuse.
+// The proof is served from the newest checkpoint, so the faults are planted in the checkpoints already made.
+test('an account proof whose escape value was changed after the leaf was hashed is caught', { timeout: 240_000 }, () =>
+  withMutation((x) => {
+    for (const cp of x.checkpoints) cp.leaves = cp.leaves.map((l) => ({ ...l, data: { ...l.data, escapeValue: String(BigInt(l.data.escapeValue) + 1n) } }));
+  }, [/leafData\.encoded is the 88-byte SPEC 11 account leaf/]));
+
+test('an account proof whose siblings are those of another position is caught', { timeout: 240_000 }, () =>
+  withMutation((x) => {
+    // every leaf claims the next leaf's position: the siblings served no longer belong to the leaf
+    for (const cp of x.checkpoints) { const n = cp.leaves.length; cp.leaves = cp.leaves.map((l, i) => ({ ...l, index: cp.leaves[(i + 1) % n].index })); cp.tree = undefined; }
+  }, [/32 siblings walk from the leaf to the checkpoint's accountsRoot|index = the leaf's own index/]));
+
+test('an account proof against an account tree the checkpoint does not commit is caught', { timeout: 240_000 }, () =>
+  withMutation((x) => {
+    for (const cp of x.checkpoints) cp.leaves = cp.leaves.map((l, i) => (i === 0 ? { ...l, leaf: '0x' + '11'.repeat(32) } : l));
+  }, [/32 siblings walk from the leaf to the checkpoint's accountsRoot|leaf = keccak256/]));

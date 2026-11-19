@@ -2,8 +2,12 @@
 // Shared API conformance tests for the PosternDEX Perpetuals node: run against the mock (node/mock/server.mjs) or
 // the real node in dev mode, unchanged. UNAUDITED prototype.
 //
-//   node node/mock/conformance/run.mjs --base http://127.0.0.1:49300 [--mock] [--funded [LABEL]] [--schema FILE] [--json]
-//   node node/mock/conformance/run.mjs --print-accounts [--funded LABEL]
+//   node node/mock/conformance/run.mjs --base http://127.0.0.1:49300 [--mock] [--funded [LABEL]] [--funded2 [LABEL]] [--schema FILE] [--json]
+//   node node/mock/conformance/run.mjs --print-accounts [--funded LABEL] [--funded2 LABEL]
+//
+// --funded2 (real node only, API 0.3): a SECOND funded throwaway account, so the suite can make a real fill between
+// two accounts and check fills, trades, positions, orders, candles, the ticker and the fees charged against the
+// published fee rates. Without it those checks are SKIPPED with that reason, never passed.
 //
 // Real node: checks that need an account with collateral (agents, price-0 MALFORMED, book deltas) are SKIPPED, never
 // passed, unless --funded: then the suite signs as the throwaway account derived from LABEL (default 'funded';
@@ -22,6 +26,7 @@ import { keccak256, hex, unhex, concat } from '../lib/keccak.mjs';
 import { sign, recover, addressOf, N } from '../lib/secp256k1.mjs';
 import { typedDataHash } from '../lib/eip712.mjs';
 import { decodeInputs } from '../lib/encoding.mjs';
+import { leafHash, root32, decodeAccountLeaf, encodeWithdrawalLeaf } from '../lib/merkle32.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..');
@@ -45,9 +50,25 @@ const be = (v, n) => {
   for (let i = n - 1; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; }
   return b;
 };
+/** "4.5" (bps, as /v1/markets publishes fee rates) -> 45000 (units of 1e-4 bps = ppm x 100); exact or refused. */
+function bpsScaled(s) {
+  const [i, f = ''] = s.split('.');
+  if (!/^\d+$/.test(i) || !/^\d{0,4}$/.test(f)) throw new Error(`fee rate ${s}`);
+  return BigInt(i + f.padEnd(4, '0'));
+}
+/** SPEC S-9.3 from PUBLISHED values: ceil(price x size x feePpm / 1e6 / 1e10) USDC units, price and size in 1e-8. */
+export function publishedFee(price8, size8, bps) {
+  return (BigInt(price8) * BigInt(size8) * bpsScaled(bps) + 10n ** 18n - 1n) / 10n ** 18n;
+}
 export function stateRootOfForTest(c) {
   return stateRootOf(c);
 }
+/** VAULT.md 5.2 digest of a checkpoint object as the API serves it, under the vault's own domain (for the e2e rehearsal). */
+export function checkpointDigest(vault, C, chainId = 700770) {
+  const domain = { name: 'PosternPerpsVault', version: '1', chainId, verifyingContract: vault };
+  return hex(typedDataHash(domain, 'Checkpoint', CHECKPOINT_FIELDS, Object.fromEntries(CHECKPOINT_FIELDS.map((f) => [f.name, typeof C[f.name] === 'number' ? String(C[f.name]) : C[f.name]]))));
+}
+export { CHECKPOINT_FIELDS };
 function stateRootOf(c) {
   const sys = keccak256(concat(enc.encode('PPv1sys'), be(c.nextDepositIndex, 8), be(c.nextForcedIndex, 8), be(c.nextOrderId, 8), be(c.totalEscape, 16), be(c.dust, 16), unhex(c.auxHash), be(c.withdrawalCount, 8), be(c.withdrawalsTotal, 8)));
   return hex(keccak256(concat(enc.encode('PosternPerps/state/v1'), be(c.height, 8), be(c.time, 8), unhex(c.accountsRoot), unhex(c.marketsRoot), unhex(c.withdrawalsRoot), sys)));
@@ -77,7 +98,10 @@ export async function runConformance(base, opts = {}) {
 /** The deterministic account a real-node run uses with --funded (fund it on the L2 vault first). */
 export const fundedAccount = (label = 'funded') => addressOf(keyOf(label));
 
-async function suite(base, { mock = false, schema, runId = String(Date.now()), funded = null } = {}, results) {
+/** The second deterministic account of a real-node run (--funded2). */
+export const fundedAccount2 = (label = 'funded2') => addressOf(keyOf(label));
+
+async function suite(base, { mock = false, schema, runId = String(Date.now()), funded = null, funded2 = null } = {}, results) {
   const V = new Validator(JSON.parse(readFileSync(schemaPath(schema), 'utf8')));
   const ok = (name, cond, detail = '') => {
     results.push({ name, ok: !!cond, detail: cond ? '' : String(detail).slice(0, 400) });
@@ -302,8 +326,28 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
   }
   const zero = await get(`/v1/accounts/${addressOf(keyOf(`unknown/${runId}`))}`);
   ok('unknown address returns 200 (an account, not 404)', zero.status === 200 && V.validateDef('Account', zero.body).length === 0);
-  const proof = await get(`/v1/accounts/${demo}/proof`);
-  if (proof.status === 200) valid('GET /v1/accounts/{a}/proof', 'AccountProof', proof.body);
+  // The account proof is the escape hatch's input (VAULT.md claimEscape): checked bit by bit, never only by shape.
+  const proofOf = funded !== null && !mock ? addressOf(keyOf(funded)) : demo;
+  const proof = await get(`/v1/accounts/${proofOf}/proof`);
+  if (proof.status === 200) {
+    valid('GET /v1/accounts/{a}/proof', 'AccountProof', proof.body);
+    const P = proof.body;
+    let dec = null, root = null, why = '';
+    try {
+      dec = decodeAccountLeaf(unhex(P.leafData.encoded));
+      root = root32(leafHash(unhex(P.leafData.encoded)), P.index, P.proof);
+    } catch (e) {
+      why = e.message;
+    }
+    ok('AccountProof: leafData.encoded is the 88-byte SPEC 11 account leaf of exactly the named fields', dec !== null && dec.account === P.leafData.account && dec.account === proofOf && dec.index === P.leafData.index && dec.balance === P.leafData.balance && dec.escapeValue === P.leafData.escapeValue && dec.positionsHash === P.leafData.positionsHash, why || JSON.stringify([dec, P.leafData]).slice(0, 300));
+    ok('AccountProof: leaf = keccak256(0x00 || encoded) and index = the leaf\'s own index', why === '' && hex(leafHash(unhex(P.leafData.encoded))) === P.leaf && String(P.leafData.index) === P.index, why);
+    ok('AccountProof: the 32 siblings walk from the leaf to the checkpoint\'s accountsRoot', root !== null && root === P.checkpoint.accountsRoot, why || `${root} vs ${P.checkpoint.accountsRoot}`);
+    ok('AccountProof: its checkpoint is final and its state root follows from its fields', P.checkpoint.final === true && stateRootOf(P.checkpoint) === P.checkpoint.stateRoot && P.checkpoint.signatures.length >= committee.body.threshold);
+    ok('AccountProof: escapeValue fits the checkpoint (not above totalEscape)', BigInt(P.leafData.escapeValue) <= BigInt(P.checkpoint.totalEscape));
+  } else if (canFund && status.body.mode !== 'mock') {
+    // (a mock creates the account at its first read, after its last checkpoint: only a real node must answer)
+    ok('GET /v1/accounts/{a}/proof of the funded account answers 200 once a checkpoint is final', false, `HTTP ${proof.status} ${JSON.stringify(proof.body).slice(0, 200)}`);
+  }
   const wds = (await get(`/v1/accounts/${demo}/withdrawals`)).body.withdrawals;
   for (const w of wds.filter((w) => w.certificate)) {
     const c = w.certificate;
@@ -417,10 +461,119 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
     await expectError('agent ApproveAgent', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: String(an++), agent: addressOf(keyOf(`agent2/${runId}`)), name: 'x', expiresAt: String(T0 + 1000n) }, agentKey), hdr), 403, 'AGENT_NOT_ALLOWED');
     const ags = await get(`/v1/accounts/${mainAddr}/agents`);
     ok('approved agent listed', ags.body?.agents?.some((g) => g.agent === agentAddr));
-    const rv = await post('/v1/actions?wait=included', signed('RevokeAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr }, main), hdr);
+    // R436-7 (geoblock.json 0.2.2): RevokeAgent is an exit action. A user in a denied country must be able to end
+    // an agent key (it only removes authority); approving one stays refused there. Mock and dev: X-Mock-Country.
+    const br = { 'x-mock-country': 'BR' };
+    await expectError('ApproveAgent from a geo-denied country', post('/v1/actions', signed('ApproveAgent', { account: mainAddr, nonce: nextNonce(), agent: addressOf(keyOf(`agent3/${runId}`)), name: 'x', expiresAt: String(T0 + 600_000n) }, main), br), 451, 'GEO_RESTRICTED');
+    const rv = await post('/v1/actions?wait=included', signed('RevokeAgent', { account: mainAddr, nonce: nextNonce(), agent: agentAddr }, main), br);
+    ok('RevokeAgent from a geo-denied country is admitted (exit action, R436-7)', rv.status === 200, `${rv.status} ${JSON.stringify(rv.body)}`);
     ok('RevokeAgent included and applied', rv.body?.status === 'included' && rv.body?.result?.ok === true, JSON.stringify(rv.body));
     const ags2 = await get(`/v1/accounts/${mainAddr}/agents`);
     ok('revoked agent no longer listed', !ags2.body?.agents?.some((g) => g.agent === agentAddr));
+  }
+  // ---------- a real fill between two funded accounts, and a proven withdrawal (real node, API 0.3) ----------
+  // Not run against a server that says it is a mock (its book is moved by simulated makers and takers, so which
+  // maker a taker meets is not the suite's choice; the mock's own tests cover its matching).
+  if (status.body.mode !== 'mock') {
+    const two = funded !== null && funded2 !== null;
+    const FILL = 'a fill between two funded accounts: fills, trade, positions, order, candle, ticker, fees';
+    if (!two) results.push({ name: `${FILL} (needs two funded accounts: --funded and --funded2)`, ok: null, detail: 'skipped' });
+    else {
+      const A = { key: main, addr: mainAddr }, B = { key: keyOf(funded2), addr: addressOf(keyOf(funded2)) };
+      const tick8 = scaleInt(mk.tickSize, 8), size8 = scaleInt(mk.minOrderSize, 8);
+      const book0 = (await get(`/v1/markets/${sym}/book?depth=1`)).body;
+      const tk0 = (await get(`/v1/markets/${sym}/ticker`)).body;
+      const bid0 = book0.bids[0] ? scaleInt(book0.bids[0][0], 8) : null, ask0 = book0.asks[0] ? scaleInt(book0.asks[0][0], 8) : null;
+      const mark8 = (scaleInt(tk0.markPrice, 8) / tick8) * tick8;
+      // a price strictly inside the spread (or at the mark on an empty side): B's order is then FIRST at the best price
+      let P = mark8;
+      if (ask0 !== null && P >= ask0) P = ask0 - tick8;
+      if (bid0 !== null && P <= bid0) P = bid0 + tick8;
+      const room = P > 0n && (ask0 === null || P < ask0) && (bid0 === null || P > bid0);
+      const balB0 = (await get(`/v1/accounts/${B.addr}`)).body;
+      ok(`--funded2 account ${B.addr} has collateral (fund it on the vault before the run)`, !/^-|^0(\.0*)?$/.test(balB0?.collateral ?? '0'), JSON.stringify(balB0).slice(0, 160));
+      if (!ok('there is a price strictly inside the spread for the two-account fill (a quiet book)', room && mark8 > 0n, JSON.stringify({ book0, mark: tk0.markPrice }))) {
+        // nothing more can be checked without a fill; the failed check above says why
+      } else {
+        const dec8 = (v, dp) => { const t = String(v).padStart(9, '0'); const i = t.slice(0, -8), f = t.slice(-8).slice(0, dp); return dp ? `${i}.${f}` : i; };
+        const num = (x) => Number(x);
+        const place = (who, isBuy, tif, extra = {}) => post('/v1/actions?wait=included', signed('PlaceOrder', { account: who.addr, nonce: nextNonce(), marketId: mk.marketId, isBuy, orderType: 0, timeInForce: tif, price: String(P), size: String(size8), reduceOnly: false, triggerPrice: '0', clientOrderId: '0x' + '00'.repeat(32), ...extra }, who.key), hdr);
+        const bps = bpsScaled;
+        const feeOf = (rate) => publishedFee(P, size8, rate);
+        const t0 = (await get('/v1/status')).body.time;
+        const acc0 = { A: (await get(`/v1/accounts/${A.addr}`)).body, B: balB0 };
+        const pos = (a) => a.positions.find((p) => p.symbol === sym);
+        ok('both accounts start without a position in the market (the suite leaves them flat)', !pos(acc0.A) && !pos(acc0.B));
+        // 1. B rests a post-only bid; A sells into it
+        const rb = await place(B, true, 2);
+        ok('maker bid: included, result carries orderId and orderStatus open', rb.body?.result?.ok === true && /^[1-9]\d*$/.test(rb.body?.result?.orderId ?? '') && rb.body?.result?.orderStatus === 'open', JSON.stringify(rb.body));
+        const oid = rb.body?.result?.orderId;
+        const o1 = await get(`/v1/orders/${oid}`);
+        valid('GET /v1/orders/{id}', 'Order', o1.body);
+        ok('the resting order is open at its price and size', o1.body?.status === 'open' && scaleInt(o1.body.price, 8) === P && scaleInt(o1.body.size, 8) === size8 && o1.body.account === B.addr, JSON.stringify(o1.body));
+        const ra = await place(A, false, 1);
+        ok('taker sell: included, filled in full', ra.body?.result?.ok === true && ra.body?.result?.orderStatus === 'filled' && scaleInt(ra.body?.result?.filledSize ?? '0', 8) === size8, JSON.stringify(ra.body));
+        const fa = (await get(`/v1/accounts/${A.addr}/fills?limit=1`)).body.fills?.[0], fb = (await get(`/v1/accounts/${B.addr}/fills?limit=1`)).body.fills?.[0];
+        ok('one fill for each side, same trade: taker sell, maker buy, at the maker price and size', !!fa && !!fb && fa.tradeId === fb.tradeId && fa.liquidity === 'taker' && fb.liquidity === 'maker' && fa.side === 'sell' && fb.side === 'buy' && [fa, fb].every((f) => scaleInt(f.price, 8) === P && scaleInt(f.size, 8) === size8 && f.liquidation === false), JSON.stringify([fa, fb]));
+        ok('the fees charged are the published rates: taker ceil(notional x takerFeeBps), maker ceil(notional x makerFeeBps) (SPEC S-9.3)', !!fa && !!fb && scaleInt(fa.fee, 6) === feeOf(mk.takerFeeBps) && scaleInt(fb.fee, 6) === feeOf(mk.makerFeeBps), `${fa?.fee} / ${fb?.fee} vs ${feeOf(mk.takerFeeBps)} / ${feeOf(mk.makerFeeBps)} units`);
+        const tr = (await get(`/v1/markets/${sym}/trades?limit=1`)).body.trades?.[0];
+        ok('the public tape shows the trade (taker side sell)', !!tr && tr.tradeId === fa?.tradeId && tr.side === 'sell' && scaleInt(tr.price, 8) === P && scaleInt(tr.size, 8) === size8 && tr.liquidation === false, JSON.stringify(tr));
+        const acc1 = { A: (await get(`/v1/accounts/${A.addr}`)).body, B: (await get(`/v1/accounts/${B.addr}`)).body };
+        valid('Account with a position', 'Account', acc1.A);
+        const pa = pos(acc1.A), pb = pos(acc1.B);
+        ok('positions equal and opposite at the fill price (I-1)', !!pa && !!pb && scaleInt(pa.size.replace('-', ''), 8) === size8 && pa.size.startsWith('-') && scaleInt(pb.size, 8) === size8 && scaleInt(pa.entryPrice, 8) === P && scaleInt(pb.entryPrice, 8) === P, JSON.stringify([pa, pb]));
+        ok('position notional = |size| x markPrice (to the USDC unit)', !!pa && Math.abs(num(pa.notional) - Math.abs(num(pa.size)) * num(pa.markPrice)) <= 0.000001 + 1e-9 * num(pa.notional), JSON.stringify(pa));
+        ok('requirements are positive and ordered: 0 < maintenanceMargin <= initialMargin; liquidationPrice is on the losing side', !!pa && num(pa.maintenanceMargin) > 0 && num(pa.maintenanceMargin) <= num(pa.initialMargin) && (pa.liquidationPrice === null || num(pa.liquidationPrice) > num(pa.entryPrice)) && (pb.liquidationPrice === null || num(pb.liquidationPrice) < num(pb.entryPrice)), JSON.stringify([pa, pb]));
+        const o2 = (await get(`/v1/orders/${oid}`)).body;
+        ok('the maker order is filled: filledSize = size, avgFillPrice = its price', o2?.status === 'filled' && scaleInt(o2.filledSize, 8) === size8 && scaleInt(o2.avgFillPrice, 8) === P, JSON.stringify(o2));
+        const tk1 = (await get(`/v1/markets/${sym}/ticker`)).body;
+        ok('ticker lastPrice = the trade price; openInterest grew by the size', scaleInt(tk1.lastPrice, 8) === P && scaleInt(tk1.openInterest, 8) - scaleInt(tk0.openInterest, 8) === size8, JSON.stringify([tk0, tk1]));
+        const cs = (await get(`/v1/markets/${sym}/candles?interval=1m&limit=5`)).body.candles ?? [];
+        const c = cs.find((x) => x.t === Math.floor(tr.time / 60000) * 60000);
+        ok('the 1m candle of the trade holds it: l <= price <= h, n >= 1, v >= size', !!c && scaleInt(c.l, 8) <= P && scaleInt(c.h, 8) >= P && c.n >= 1 && scaleInt(c.v, 8) >= size8, JSON.stringify(cs.slice(-2)));
+        // 2. unwind at the same price with the roles swapped on the book side: A buys back from B's post-only ask
+        const rb2 = await place(B, false, 2);
+        const ra2 = await place(A, true, 1);
+        ok('unwind: B rests the ask, A buys it back in full', rb2.body?.result?.ok === true && ra2.body?.result?.orderStatus === 'filled', JSON.stringify([rb2.body, ra2.body]));
+        const acc2 = { A: (await get(`/v1/accounts/${A.addr}`)).body, B: (await get(`/v1/accounts/${B.addr}`)).body };
+        ok('both accounts are flat again', !pos(acc2.A) && !pos(acc2.B), JSON.stringify([acc2.A.positions, acc2.B.positions]));
+        // sold and bought at one price: the only balance changes are the fees (and any funding settled meanwhile)
+        const fund = async (addr) => ((await get(`/v1/accounts/${addr}/funding?limit=20`)).body.payments ?? []).filter((x) => x.time >= t0).reduce((t, x) => t + scaleInt(x.payment, 6) * (x.payment.startsWith('-') ? -1n : 1n), 0n);
+        const dA = usd(acc2.A.collateral) - usd(acc0.A.collateral), dB = usd(acc2.B.collateral) - usd(acc0.B.collateral);
+        ok('round trip at one price costs exactly the fees: taker 2 x taker fee, maker 2 x maker fee', dA === -2n * feeOf(mk.takerFeeBps) + (await fund(A.addr)) && dB === -2n * feeOf(mk.makerFeeBps) + (await fund(B.addr)), `${dA} / ${dB} units`);
+      }
+      // 3. a withdrawal of the funded account, proven against a final checkpoint (the vault's `withdraw` input)
+      const fee6 = 1_000_000n;
+      const rw = await post('/v1/actions?wait=included', signed('Withdraw', { account: A.addr, nonce: nextNonce(), amount: String(fee6 + 1_000_000n), recipient: B.addr }, A.key), hdr);
+      ok('Withdraw included: result carries the withdrawalId', rw.body?.result?.ok === true && /^\d+$/.test(rw.body?.result?.withdrawalId ?? ''), JSON.stringify(rw.body));
+      const wid = rw.body?.result?.withdrawalId;
+      let w = null;
+      for (let i = 0; i < 40 && wid !== undefined; i++) {
+        w = (await get(`/v1/withdrawals/${wid}`)).body;
+        if (w?.status === 'certified') break;
+        await post('/v1/actions', signed('CancelAll', { account: A.addr, nonce: nextNonce(), marketId: 0 }, A.key), hdr);   // blocks, so checkpoints
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      ok('the withdrawal becomes certified (a final checkpoint commits it)', w?.status === 'certified' && w.certificate !== null, JSON.stringify(w).slice(0, 200));
+      if (w?.status === 'certified') {
+        valid('certified Withdrawal', 'Withdrawal', w);
+        ok('record: net = gross - fee, to the named recipient', scaleInt(w.amount, 6) + scaleInt(w.fee, 6) === fee6 + 1_000_000n && w.recipient === B.addr && w.account === A.addr, JSON.stringify(w).slice(0, 200));
+        const cph = w.certificate.checkpoint.height;
+        const wp = await get(`/v1/withdrawals/${wid}/proof?height=${cph}`);
+        valid('GET /v1/withdrawals/{id}/proof', 'WithdrawalProof', wp.body);
+        let root = null, leaf = null, why = '';
+        try {
+          const r = wp.body.record;
+          leaf = hex(leafHash(encodeWithdrawalLeaf({ withdrawalId: r.withdrawalId, account: r.account, recipient: r.recipient, amount: r.amount, height: r.height })));
+          root = root32(leaf, wid, wp.body.siblings);
+        } catch (e) {
+          why = e.message;
+        }
+        ok('WithdrawalProof: leaf = keccak256(0x00 || "PPv1wdrl" || id || account || recipient || amount || height) of the record', leaf !== null && leaf === wp.body.leaf && String(wp.body.record.withdrawalId) === wid && BigInt(wp.body.record.amount) === scaleInt(w.amount, 6), why || JSON.stringify(wp.body.record));
+        ok('WithdrawalProof: the 32 siblings walk to the withdrawalsRoot of the final checkpoint it names', root !== null && root === wp.body.withdrawalsRoot && root === w.certificate.checkpoint.withdrawalsRoot, why || `${root} vs ${w.certificate.checkpoint.withdrawalsRoot}`);
+        ok('the certificate\'s checkpoint counts the record (withdrawalCount > id) and is signed by the threshold', BigInt(w.certificate.checkpoint.withdrawalCount) > BigInt(wid) && w.certificate.signatures.length >= committee.body.threshold);
+      }
+    }
   }
   await checkInputs('after actions', true);
 
@@ -536,12 +689,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   const opt = (n, d) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : d);
   if (args.includes('--print-accounts')) {
-    process.stdout.write(`${JSON.stringify({ funded: fundedAccount(args.includes('--funded') && args[args.indexOf('--funded') + 1] && !args[args.indexOf('--funded') + 1].startsWith('--') ? args[args.indexOf('--funded') + 1] : 'funded') })}\n`);
+    const lab = (flag, d) => (args.includes(flag) && args[args.indexOf(flag) + 1] && !args[args.indexOf(flag) + 1].startsWith('--') ? args[args.indexOf(flag) + 1] : d);
+    process.stdout.write(`${JSON.stringify({ funded: fundedAccount(lab('--funded', 'funded')), funded2: fundedAccount2(lab('--funded2', 'funded2')) })}\n`);
     process.exit(0);
   }
   const fv = args.includes('--funded') ? args[args.indexOf('--funded') + 1] : null;
   const funded = args.includes('--funded') ? (!fv || fv.startsWith('--') ? 'funded' : fv) : null;
-  const r = await runConformance(opt('base', 'http://127.0.0.1:49300'), { mock: args.includes('--mock'), schema: opt('schema', undefined), funded });
+  const f2 = args.includes('--funded2') ? args[args.indexOf('--funded2') + 1] : null;
+  const funded2 = args.includes('--funded2') ? (!f2 || f2.startsWith('--') ? 'funded2' : f2) : null;
+  const r = await runConformance(opt('base', 'http://127.0.0.1:49300'), { mock: args.includes('--mock'), schema: opt('schema', undefined), funded, funded2 });
   if (args.includes('--json')) process.stdout.write(JSON.stringify(r, null, 1) + '\n');
   else {
     for (const f of r.failed) process.stdout.write(`FAIL ${f.name}: ${f.detail}\n`);

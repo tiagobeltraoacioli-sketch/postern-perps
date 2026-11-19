@@ -15,6 +15,7 @@ import { typedDataHash } from './eip712.mjs';
 import { Rng } from './rng.mjs';
 import { encodeInputs, ORACLE_TYPES } from './encoding.mjs';
 import { parseFixed, formatFixed, pow10, divFloor, divCeil, abs, min, max, parseU64 } from './fixed.mjs';
+import { tree32, leafHash, encodeAccountLeaf, positionsHash } from './merkle32.mjs';
 
 const enc = new TextEncoder();
 const USDC_DP = 6;
@@ -960,12 +961,27 @@ export class Exchange {
     if (!b._sig) b._sig = hex(sign(keccak256(concat(enc.encode('postern-perps-mock/block'), unhex(b.hash))), this.sequencerKey));
     return b._sig;
   }
+  /**
+   * Account leaves in the SPEC 11 / VAULT.md 5.5 format (since API 0.3: the bytes and the depth-32 tree are the
+   * documents'; what stays the mock's own is WHICH account sits at which position: address order here, order of
+   * first credit in the engine, and the mock's simplified equity). `escapeValue` = max(0, equity), 0 for the mock's
+   * liquidity and fee accounts, so the leaves sum to the checkpoint's `totalEscape`.
+   */
   accountLeaves() {
     const out = [];
-    for (const a of [...this.accounts.values()].sort((x, y) => (x.address < y.address ? -1 : 1))) {
-      const data = { address: a.address, collateral: a.collateral, positions: [...a.positions].filter(([, p]) => p.size !== 0n).map(([id, p]) => ({ marketId: id, size: p.size, cost: p.cost, isolatedMargin: p.isolatedMargin })) };
-      out.push({ address: a.address, data, leaf: h32(canonical({ mockLeaf: 'account-v0', ...data })) });
-    }
+    const sorted = [...this.accounts.values()].sort((x, y) => (x.address < y.address ? -1 : 1));
+    sorted.forEach((a, index) => {
+      const positions = [...a.positions].filter(([, p]) => p.size !== 0n).map(([id, p]) => {
+        const m = this.byId.get(id);
+        // sizes to the fixed 1e-8 scale, cost basis (USDC units) to notional units 1e-16 (SPEC section 1)
+        return { marketId: id, size: p.size * pow10(8 - m.sd), openNotional: p.cost * pow10(10), isoMargin: p.isolatedMargin, isolated: p.mode === 'isolated' };
+      });
+      let escapeValue = 0n;
+      if (a.address !== this.liquidity && a.address !== FEE_ACCOUNT) { const g = this.margins(a); if (g.equity > 0n) escapeValue = g.equity; }
+      const data = { account: a.address, index, balance: a.collateral, escapeValue, positionsHash: hex(positionsHash(positions)) };
+      const encoded = encodeAccountLeaf(data);
+      out.push({ address: a.address, index, data: { account: a.address, index, balance: String(a.collateral), escapeValue: String(escapeValue), positionsHash: data.positionsHash, encoded: hex(encoded) }, escapeValue, leaf: hex(leafHash(encoded)) });
+    });
     return out;
   }
   /**
@@ -985,15 +1001,11 @@ export class Exchange {
     wds.sort((x, y) => (x.withdrawalId < y.withdrawalId ? -1 : 1));
     const wTree = merkle(wds.map((w) => (w._leaf ??= this.withdrawalLeaf(w))));
     const marketLeaves = [...this.markets.values()].sort((x, y) => x.id - y.id).map((m) => h32(canonical({ mockLeaf: 'market-v0', marketId: m.id, index: m.index, mark: m.mark, status: m.status })));
-    let totalEscape = 0n;
-    for (const a of this.accounts.values()) {
-      if (a.address === this.liquidity || a.address === FEE_ACCOUNT) continue;
-      const g = this.margins(a);
-      if (g.equity > 0n) totalEscape += g.equity;
-    }
+    const totalEscape = leaves.reduce((t, l) => t + l.escapeValue, 0n);   // the sum of the leaves' escape values
+    const aTree = tree32(new Map(leaves.map((l) => [l.index, unhex(l.leaf)])));
     const f = {
       height: String(height), time: String(time), logHash,
-      accountsRoot: merkle(leaves.map((l) => l.leaf)).root, marketsRoot: merkle(marketLeaves).root, withdrawalsRoot: wTree.root,
+      accountsRoot: aTree.root, marketsRoot: merkle(marketLeaves).root, withdrawalsRoot: wTree.root,
       nextDepositIndex: String(this.depositsCredited), nextForcedIndex: String(this.forcedProcessed), nextOrderId: String(this.ids.order + 1n),
       totalEscape: String(totalEscape), dust: '0', auxHash: ZERO32,
       depositsHead: this.depositsHead, forcedHead: this.forcedHead,
