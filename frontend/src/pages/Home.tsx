@@ -321,7 +321,7 @@ function Gate() {
 function CustodyDiagram() {
   return (
     <figure className="diagram">
-      <svg viewBox="0 0 960 360" role="img" aria-labelledby="dg-title dg-desc" focusable="false">
+      <svg viewBox="0 0 960 370" role="img" aria-labelledby="dg-title dg-desc" focusable="false">
         <title id="dg-title">How collateral moves</title>
         <desc id="dg-desc">
           You deposit bUSDC into the vault on the Bloch L2. The exchange engine orders trades off-chain. Validators replay it and sign checkpoints, which the vault accepts. The vault pays withdrawals proven against a checkpoint. If the exchange is silent, a forced request and then the escape mode pay you directly from the vault.
@@ -335,53 +335,53 @@ function CustodyDiagram() {
           </marker>
         </defs>
         {/* Lanes */}
-        <text x="20" y="34" className="dg-lane">ON THE BLOCH L2</text>
-        <text x="620" y="34" className="dg-lane">OFF-CHAIN, REPLAYED BY VALIDATORS</text>
-        <path d="M580 20V340" className="dg-divider" />
+        <text x="20" y="24" className="dg-lane">ON THE BLOCH L2</text>
+        <text x="640" y="24" className="dg-lane">OFF-CHAIN, REPLAYED BY VALIDATORS</text>
+        <path d="M596 12V358" className="dg-divider" />
         {/* You */}
         <g>
-          <rect x="20" y="130" width="150" height="84" rx="8" className="dg-box" />
-          <text x="95" y="166" className="dg-name" textAnchor="middle">You</text>
-          <text x="95" y="188" className="dg-sub" textAnchor="middle">your wallet, your key</text>
+          <rect x="20" y="148" width="150" height="84" rx="8" className="dg-box" />
+          <text x="95" y="184" className="dg-name" textAnchor="middle">You</text>
+          <text x="95" y="206" className="dg-sub" textAnchor="middle">your wallet, your key</text>
         </g>
         {/* Vault: the gate */}
         <g>
-          <path d="M300 250V140a80 80 0 0 1 160 0V250Z" className="dg-vault" />
-          <path d="M300 250V140a80 80 0 0 1 160 0V250Z" className="dg-vault-edge" />
-          <circle cx="380" cy="86" r="5" className="dg-lamp" />
-          <text x="380" y="150" className="dg-name" textAnchor="middle">Vault</text>
-          <text x="380" y="172" className="dg-sub" textAnchor="middle">holds the bUSDC</text>
-          <text x="380" y="190" className="dg-sub" textAnchor="middle">no admin key</text>
-          <rect x="284" y="250" width="192" height="8" rx="3" className="dg-sill" />
+          <path d="M300 276V166a80 80 0 0 1 160 0V276Z" className="dg-vault" />
+          <path d="M300 276V166a80 80 0 0 1 160 0V276Z" className="dg-vault-edge" />
+          <circle cx="380" cy="112" r="5" className="dg-lamp" />
+          <text x="380" y="176" className="dg-name" textAnchor="middle">Vault</text>
+          <text x="380" y="198" className="dg-sub" textAnchor="middle">holds the bUSDC</text>
+          <text x="380" y="216" className="dg-sub" textAnchor="middle">no admin key</text>
+          <rect x="284" y="276" width="192" height="8" rx="3" className="dg-sill" />
         </g>
         {/* Engine */}
         <g>
-          <rect x="640" y="60" width="290" height="92" rx="8" className="dg-box" />
-          <text x="785" y="98" className="dg-name" textAnchor="middle">Exchange engine</text>
-          <text x="785" y="120" className="dg-sub" textAnchor="middle">one sequencer orders signed actions</text>
-          <text x="785" y="138" className="dg-sub" textAnchor="middle">order book, margin, funding, liquidation</text>
+          <rect x="640" y="44" width="290" height="92" rx="8" className="dg-box" />
+          <text x="785" y="82" className="dg-name" textAnchor="middle">Exchange engine</text>
+          <text x="785" y="104" className="dg-sub" textAnchor="middle">one sequencer orders signed actions</text>
+          <text x="785" y="122" className="dg-sub" textAnchor="middle">order book, margin, funding, liquidation</text>
         </g>
         {/* Validators */}
         <g>
-          <rect x="640" y="216" width="290" height="92" rx="8" className="dg-box" />
+          <rect x="640" y="214" width="290" height="92" rx="8" className="dg-box" />
           <text x="785" y="250" className="dg-name" textAnchor="middle">Validators</text>
           <text x="785" y="272" className="dg-sub" textAnchor="middle">replay every block</text>
           <text x="785" y="290" className="dg-sub" textAnchor="middle">a threshold signs each state root</text>
         </g>
         {/* Flows */}
-        <path d="M170 156H296" className="dg-flow" markerEnd="url(#dg-arrow)" />
-        <text x="232" y="146" className="dg-label" textAnchor="middle">1 deposit</text>
-        <path d="M296 196H170" className="dg-flow" markerEnd="url(#dg-arrow)" />
-        <text x="232" y="216" className="dg-label" textAnchor="middle">4 withdrawal paid</text>
-        <path d="M95 130V70H640" className="dg-flow dg-flow-quiet" markerEnd="url(#dg-arrow)" />
-        <text x="300" y="60" className="dg-label" textAnchor="middle">2 signed orders (cannot move funds)</text>
-        <path d="M785 152V216" className="dg-flow" markerEnd="url(#dg-arrow)" />
-        <text x="795" y="190" className="dg-label">blocks</text>
-        <path d="M640 262H466" className="dg-flow" markerEnd="url(#dg-arrow)" />
-        <text x="552" y="252" className="dg-label" textAnchor="middle">3 signed checkpoint</text>
+        <path d="M170 176H298" className="dg-flow" markerEnd="url(#dg-arrow)" />
+        <text x="234" y="166" className="dg-label" textAnchor="middle">1 deposit</text>
+        <path d="M298 212H172" className="dg-flow" markerEnd="url(#dg-arrow)" />
+        <text x="234" y="232" className="dg-label" textAnchor="middle">4 withdrawal paid</text>
+        <path d="M95 148V62H638" className="dg-flow dg-flow-quiet" markerEnd="url(#dg-arrow)" />
+        <text x="366" y="52" className="dg-label" textAnchor="middle">2 signed orders (cannot move funds)</text>
+        <path d="M785 136V212" className="dg-flow" markerEnd="url(#dg-arrow)" />
+        <text x="797" y="180" className="dg-label">blocks</text>
+        <path d="M640 252H464" className="dg-flow" markerEnd="url(#dg-arrow)" />
+        <text x="552" y="242" className="dg-label" textAnchor="middle">3 signed checkpoint</text>
         {/* The exit */}
-        <path d="M95 214V318H380V262" className="dg-flow dg-exit" markerEnd="url(#dg-arrow-net)" />
-        <text x="238" y="338" className="dg-label dg-label-net" textAnchor="middle">5 forced request · 6 escape: the vault pays you directly</text>
+        <path d="M95 232V330H380V288" className="dg-flow dg-exit" markerEnd="url(#dg-arrow-net)" />
+        <text x="238" y="352" className="dg-label dg-label-net" textAnchor="middle">5 forced request · 6 escape: the vault pays you directly</text>
       </svg>
       <figcaption className="fine">The numbers match the six steps below. Solid lines happen every day; the lit line is the exit that needs nobody's permission.</figcaption>
     </figure>

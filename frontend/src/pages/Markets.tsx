@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { feed, go } from '../state/session';
 import { useStore } from '../lib/store';
-import { formatCompactUsd, formatPpm, formatPx, formatRate, DASH } from '../lib/format';
+import { formatBps, formatCompactUsd, formatPpm, formatPx, formatRate, formatSize, DASH } from '../lib/format';
 import { notional } from '../lib/calc';
 import { AssetMark } from '../trade/AssetMark';
 import { signingProblem } from '../lib/pins';
@@ -254,6 +254,61 @@ export function Markets() {
                 <tr>
                   <td colSpan={10} className="empty">
                     {markets.length ? 'No market matches.' : error ? 'Markets could not be read.' : 'Reading markets…'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="panel" aria-label="Market parameters">
+        <header className="panel-head">
+          <h2>Contract parameters, as the exchange publishes them</h2>
+          <span className="fine">Requirements grow with position size; the first tier is shown.</span>
+        </header>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Market</th>
+                <th className="r">Tick</th>
+                <th className="r">Size step</th>
+                <th className="r">Smallest order</th>
+                <th className="r">Largest order</th>
+                <th className="r">Initial margin</th>
+                <th className="r">Maintenance margin</th>
+                <th className="r">Taker / maker</th>
+                <th className="r">Liquidation fee</th>
+                <th className="r">Funding cap (1 h)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {markets.map((m) => (
+                <tr key={m.symbol}>
+                  <td>
+                    <strong>{m.symbol}</strong>
+                  </td>
+                  <td className="r num">{formatPx(m.tick, m.priceDecimals)}</td>
+                  <td className="r num">{formatSize(m.step, m.sizeDecimals)}</td>
+                  <td className="r num">
+                    {formatSize(m.minSize, m.sizeDecimals)} {m.base}
+                  </td>
+                  <td className="r num">
+                    {formatSize(m.maxSize, m.sizeDecimals)} {m.base}
+                  </td>
+                  <td className="r num">{m.tiers[0] ? formatPpm(m.tiers[0].imfPpm, 2) : DASH}</td>
+                  <td className="r num">{m.tiers[0] ? formatPpm(m.tiers[0].mmfPpm, 2) : DASH}</td>
+                  <td className="r num">
+                    {formatBps(m.takerPpm)} / {formatBps(m.makerPpm)}
+                  </td>
+                  <td className="r num">{formatPpm(m.liquidationFeePpm, 2)}</td>
+                  <td className="r num">±{formatRate(m.maxFundingRate, 'never')}</td>
+                </tr>
+              ))}
+              {markets.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="empty">
+                    {error ? 'Markets could not be read.' : 'Reading markets…'}
                   </td>
                 </tr>
               )}

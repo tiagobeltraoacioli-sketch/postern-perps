@@ -121,20 +121,30 @@ const shot = async (name, full = true) => {
 };
 const visible = () => page.visibleText();
 const has = async (scene, pattern) => expect(scene, pattern.test(await visible()), `visible ${pattern}`);
+const lacks = async (scene, pattern) => expect(scene, !pattern.test(await visible()), `not visible ${pattern}`);
 const connect = async () => {
   if (await page.evaluate(`!!window.__h.button('Connect')`)) {
     await page.click('Connect');
     await page.waitVisibleText(/Connecting only shows your address to this page/);
     await page.click('Harness wallet');
   }
-  await page.waitVisibleText(/Equity/, 15_000);
+  // On a phone the order form (and its Equity line) is a closed sheet: the connected address in the header tells.
+  await page.waitFor('connected', `!window.__h.button('Connect') && !window.__h.button('Connecting')`, 15_000);
+  if (!phoneView) await page.waitVisibleText(/Equity/, 15_000);
+};
+let phoneView = false;
+const openOrderSheet = async () => {
+  // The bar's own button (the form's Long switch is inside the closed, inert sheet).
+  await page.evaluate(`document.querySelector('.trade-cta .tone-long').click()`);
+  await page.waitFor('order sheet open', `document.querySelector('.trade-form')?.dataset.open === 'true'`);
+  await delay(500);
 };
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 
 try {
   await scenario(RESET);
   await viewport(1440, 900);
-  await page.goto(APP);
+  await page.goto(`${APP}#/trade/BTC-USD`);
   await theme('dark');
   await page.goto(`${APP}#/trade/BTC-USD`);
   await page.reload();
@@ -205,19 +215,30 @@ try {
 
   // Phone.
   await viewport(390, 844, true);
+  phoneView = true;
   await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
+  // Phone: the first screen has the price, the chart and the way to trade; the form is a sheet, inert while closed.
+  expect('08', await page.evaluate(`document.querySelector('.trade-form').inert === true`), 'the closed order sheet is inert');
+  expect('08', await page.evaluate(`(() => { const r = document.querySelector('.trade-cta').getBoundingClientRect(); return r.bottom <= innerHeight && r.top > innerHeight / 2; })()`), 'Long / Short bar inside the first screen, in thumb reach');
+  expect('08', await page.evaluate(`document.querySelector('.chart-panel').getBoundingClientRect().top < innerHeight * 0.55`), 'the chart starts in the first screen');
   await shot('08-trade-phone-light', false);
-  await page.evaluate(`document.querySelector('.order-panel').scrollIntoView({ block: 'start' })`);
+  await openOrderSheet();
+  expect('08b', await page.evaluate(`document.querySelector('.trade-form').inert === false`), 'the open sheet is reachable');
+  await has('08b', /Limit price/);
   await shot('08b-order-phone-light', false);
+  await page.evaluate(`document.querySelector('.sheet-close').click()`);
+  await page.waitFor('order sheet closed', `document.querySelector('.trade-form')?.dataset.open === 'false'`);
   await theme('dark');
   await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
   await shot('09-trade-phone-dark', false);
-  await page.evaluate(`document.querySelector('.order-panel').scrollIntoView({ block: 'start' })`);
+  await openOrderSheet();
   await shot('09b-order-phone-dark', false);
+  await page.evaluate(`document.querySelector('.sheet-close').click()`);
+  phoneView = false;
   await viewport(1440, 900);
 
   // Restricted region: the restricted screen first (what is off, what stays open, the exits), then exit-only.
@@ -290,6 +311,24 @@ try {
   await page.click('Cancel');
   await scenario('eip712=pinned');
 
+  // Pass 2: the bare address is the public home page; the terminal is one click away and every figure on the page
+  // comes from a file or from the exchange.
+  await page.goto(`${APP}#/`);
+  await page.reload();
+  await page.waitVisibleText(/Trade in the open/, 15_000);
+  for (const text of [/prototype, not live/i, /Unaudited prototype\. No real funds/, /Taker 4\.5 bps, maker 1\.5 bps/, /5 of 7/, /no admin key/i, /What can go wrong/, /Bloch Inc \(Panama\)/, /BTC-USD/]) await has('00', text);
+  await lacks('00', /audited by|licensed|regulated by|million users|trusted by/i);
+  await shot('00-home-dark', false);
+  await shot('00-home-full-dark');
+  await page.click('Launch app');
+  await page.waitVisibleText(/Oracle index/, 15_000);
+  expect('00', /^#\/trade\/[A-Z]+-USD$/.test(await page.evaluate(`location.hash`)), 'Launch app opens the terminal');
+  for (const [hash, text] of [['', /Trade in the open/], ['#', /Trade in the open/], ['#/trade', /Oracle index/]]) {
+    await page.goto(`${APP}${hash}`);
+    await page.reload();
+    await page.waitVisibleText(text, 15_000);
+  }
+  expect('00', true, 'the bare address is home; #/trade alone is the terminal');
   const PAGES = [
     ['13-portfolio', '#/portfolio', /Margin ratio/],
     ['14-transfers', '#/transfers', /Not live/],
@@ -327,6 +366,11 @@ try {
   await page.goto(`${APP}#/markets`);
   await page.waitVisibleText(/Perpetual markets/, 15_000);
   expect('20', (await page.evaluate(`document.querySelectorAll('.markets-table tbody tr').length`)) >= 3, 'at least three markets listed');
+  // Three markets open as cards; the table is one click away and remembers the choice.
+  expect('20', (await page.evaluate(`document.querySelectorAll('.market-card').length`)) >= 3, 'a card per market, each with its sparkline or its empty state');
+  expect('20', (await page.evaluate(`document.querySelectorAll('.market-card .spark, .market-card .spark-empty').length`)) >= 3, 'every card has a sparkline or says there are no trades');
+  await has('20', /Contract parameters, as the exchange publishes them/);
+  await page.click('Table');
   await page.click('24 h volume');
   expect('20', (await page.evaluate(`document.querySelector('th[aria-sort=descending]')?.textContent ?? ''`)).includes('24 h volume'), 'sorted by volume, descending, announced with aria-sort');
   await page.evaluate(`[...document.querySelectorAll('.market-cell')].find((b) => b.textContent.includes('ETH-USD')).click()`);
@@ -344,19 +388,21 @@ try {
   }
   await theme('dark');
   await viewport(360, 780, true);
-  for (const [name, hash, pattern] of [['03-trade', '#/trade/BTC-USD', /Oracle index/], ...PAGES]) {
+  phoneView = true;
+  for (const [name, hash, pattern] of [['00-home', '#/', /Trade in the open/], ['03-trade', '#/trade/BTC-USD', /Oracle index/], ...PAGES]) {
     await page.goto(`${APP}${hash}`);
     await page.reload();
     await connect().catch(() => {});
     await page.waitVisibleText(pattern, 15_000);
     const overflow = await page.evaluate(`document.documentElement.scrollWidth - window.innerWidth`);
     expect(name, overflow <= 0, `no sideways scroll at 360 px (${overflow} px over)`);
-    if (/^(03|13|14b|14c|20|21-|22|23)/.test(name)) await shot(`${name}-phone360-dark`, false);
+    if (/^(00|03|13|14b|14c|20|21-|22|23)/.test(name)) await shot(`${name}-phone360-dark`, false);
   }
   // The phone "More" menu reaches every page that is not in the bottom bar.
   await page.click('More');
   for (const label of [/History/, /Funding/, /Agent keys/, /System/, /Notices and risk/]) await has('nav', label);
   await shot('24-more-menu-phone360-dark', false);
+  phoneView = false;
   await viewport(1440, 900);
 
   // Console must be clean of errors.

@@ -62,6 +62,7 @@ export function TradePage({ symbol }: { symbol: string }) {
   const pinProblem = signingProblem(market);
   return (
     <div className="trade" data-phone-tab={phoneTab} data-sheet={phone && sheet ? 'open' : 'closed'}>
+      <h1 className="sr-only">{market.symbol} perpetual: trade</h1>
       <MarketBar market={market} ticker={ticker} />
       {pinProblem && (
         <p className="callout callout-danger trade-alert" role="alert">

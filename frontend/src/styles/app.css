@@ -770,8 +770,9 @@ main {
 .book-bid .book-px {
   color: var(--up);
 }
+/* Over a depth bar the quiet ink would fall under AA: the totals take the second ink. */
 .book-cum {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .book-depth {
   position: absolute !important;
@@ -1134,7 +1135,7 @@ main {
   border-radius: var(--r-2);
   background: color-mix(in srgb, var(--warn) 6%, var(--surface));
 }
-.attestation h3 {
+.attestation-title {
   font-family: var(--font-display);
   font-size: var(--text-body);
 }
@@ -2646,8 +2647,20 @@ td.strong {
 
 /* ---------- Order book ---------- */
 .book-head {
-  gap: var(--s-2);
+  gap: var(--s-1) var(--s-2);
   padding-block: var(--s-2);
+  flex-wrap: wrap;
+}
+.book-head h2,
+.market-symbol,
+.mode-tabs [role='tab'],
+.lev-chip {
+  white-space: nowrap;
+}
+.mode-tablist {
+  display: flex;
+  gap: var(--s-1);
+  min-width: 0;
 }
 .book-tools {
   display: flex;
@@ -2685,44 +2698,43 @@ td.strong {
   border-radius: 2px 0 0 2px;
 }
 .book-ask .book-depth {
-  background: color-mix(in srgb, var(--down) 20%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--down) 55%, transparent);
+  background: color-mix(in srgb, var(--down) 22%, transparent);
 }
 .book-bid .book-depth {
-  background: color-mix(in srgb, var(--up) 18%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--up) 55%, transparent);
+  background: color-mix(in srgb, var(--up) 20%, transparent);
 }
 /* A level whose size changed: the row's ground lights once. The figures themselves never move or fade. */
+/* The flash is neutral (the side already has its colour): a growing level lights a little more than a shrinking one. */
 .book-row[data-flash^='up'] {
-  animation: flash-up-a 420ms var(--ease);
+  animation: flash-up-a 320ms var(--ease);
 }
 .book-row[data-flash='up-b'] {
   animation-name: flash-up-b;
 }
 .book-row[data-flash^='down'] {
-  animation: flash-down-a 420ms var(--ease);
+  animation: flash-down-a 320ms var(--ease);
 }
 .book-row[data-flash='down-b'] {
   animation-name: flash-down-b;
 }
 @keyframes flash-up-a {
   from {
-    background: color-mix(in srgb, var(--up) 26%, transparent);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
   }
 }
 @keyframes flash-up-b {
   from {
-    background: color-mix(in srgb, var(--up) 26%, transparent);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
   }
 }
 @keyframes flash-down-a {
   from {
-    background: color-mix(in srgb, var(--down) 26%, transparent);
+    background: color-mix(in srgb, var(--text) 4%, transparent);
   }
 }
 @keyframes flash-down-b {
   from {
-    background: color-mix(in srgb, var(--down) 26%, transparent);
+    background: color-mix(in srgb, var(--text) 4%, transparent);
   }
 }
 .book-spread {
@@ -2817,7 +2829,7 @@ td.strong {
       'alert alert form'
       'chart side form'
       'account account form';
-    grid-template-rows: auto auto minmax(0, 1fr) clamp(176px, 25vh, 340px);
+    grid-template-rows: auto auto minmax(0, 1fr) clamp(156px, 21vh, 300px);
   }
   .trade-chart,
   .chart-panel,
@@ -2910,6 +2922,18 @@ td.strong {
     z-index: 1;
   }
 }
+@media (min-width: 1024px) and (max-width: 1439px) {
+  /* The form column leaves less room for the market bar: the day's range gives way first. */
+  .market-stats .stat-wide {
+    display: none;
+  }
+  .market-bar {
+    gap: var(--s-4);
+  }
+  .market-stats {
+    gap: var(--s-4);
+  }
+}
 /* Tall screens: the book and the tape are both in view, the book on top. */
 @media (min-width: 1024px) and (min-height: 1000px) {
   .side-tabs {
@@ -2920,7 +2944,7 @@ td.strong {
     display: grid;
   }
   .trade-side .trade-book {
-    flex: 1.7;
+    flex: 2.2;
   }
   .trade-side .panel-head h2 {
     display: block;
@@ -3020,10 +3044,11 @@ td.strong {
   .stat-lead dd {
     font-size: var(--text-title);
   }
+  /* The chart takes what the first screen has left between the market bar and the Long / Short bar. */
   .trade-chart,
   .chart-panel {
     min-height: 0;
-    height: min(58dvh, 520px);
+    height: clamp(320px, calc(100dvh - 404px), 560px);
   }
   .app[data-page='trade'] {
     padding-bottom: calc(118px + env(safe-area-inset-bottom));
@@ -3474,7 +3499,7 @@ td.strong {
 }
 .market-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--s-3);
 }
 .market-card {
@@ -3520,7 +3545,7 @@ td.strong {
 }
 .market-card .spark {
   width: 100%;
-  height: 56px;
+  height: 72px;
 }
 .market-card dl {
   margin: 0;

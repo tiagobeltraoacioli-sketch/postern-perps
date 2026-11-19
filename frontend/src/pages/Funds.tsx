@@ -576,7 +576,7 @@ function Collect({ withdrawal: w, view, account, payout }: { withdrawal: Withdra
 
 const FORCED_CHOICES: [ForcedKind, string, string][] = [
   ['withdraw', 'Withdraw', 'The exchange must pay out your free collateral (or the amount you name) to this wallet by the normal certified path.'],
-  ['closeAll', 'Close all my positions', 'The exchange must close every position of this account at the market.'],
+  ['closeAll', 'Close all my positions', 'The exchange must close every position of this account: through the book, or in a halted market at the side of the exit band that is worse for you.'],
   ['cancelAll', 'Cancel all my orders', 'The exchange must cancel every open order of this account.'],
 ];
 
@@ -596,6 +596,11 @@ function ExitTab({ view }: { view: VaultView | null }) {
   const parsed = parseAt(amount, USDC_DECIMALS, USDC_DECIMALS);
   const arg = kind === 'withdraw' && amount !== '' ? parsed.value : 0n;
   const problems = view && arg !== null ? forcedProblems(view, kind, arg) : [];
+  // R436-18: what the exchange reports about halts and this account's positions, read before a forced close is offered.
+  const markets = useStore(feed.markets);
+  const accountState = useStore(feed.account);
+  const haltedAny = markets.filter((m) => m.status === 'halted').map((m) => m.symbol);
+  const haltedHere = haltedAny.filter((s) => accountState?.account.positions.some((p) => p.symbol === s && p.size !== 0n));
   const open = view?.account?.forcedOpen ? view.account : null;
   const escaped = phase === 'escape' || phase === 'escapeUnproven';
   return (
@@ -648,6 +653,17 @@ function ExitTab({ view }: { view: VaultView | null }) {
                 </div>
               )}
               {kind === 'withdraw' && amount !== '' && parsed.error && <p className="msg-danger">Amount {parsed.error}.</p>}
+              {kind === 'closeAll' && haltedHere.length > 0 && (
+                <div className="callout callout-danger" role="alert">
+                  <strong>
+                    {haltedHere.join(', ')} {haltedHere.length === 1 ? 'is' : 'are'} halted and you hold a position there
+                  </strong>
+                  <p>
+                    A forced close now is not a close at the market: in a halted market it is priced at the side of the exit band that is worse for you, a discount from the last index that grows while the halt lasts. It can cost the whole margin of that position. To take out your free collateral without closing, choose Withdraw.
+                  </p>
+                </div>
+              )}
+              {kind === 'closeAll' && haltedHere.length === 0 && haltedAny.length > 0 && <p className="msg-warn">{haltedAny.join(', ')} halted now. A forced close of a position in a halted market is priced against the closer; you hold none there.</p>}
               {problems.map((p) => (
                 <p key={p} className="msg-danger">
                   {p}

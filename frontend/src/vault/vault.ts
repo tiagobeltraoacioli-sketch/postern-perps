@@ -332,7 +332,14 @@ export function describeTx(d: Deployment, tx: { to: string; data: Hex }): TxDesc
           contract,
           chain,
         ],
-        notes: ['The exchange must process this before the deadline the vault sets. If it does not, anyone can switch the vault to escape mode and every user exits with their last proven balance.', 'One request can be open per account.'],
+        notes: [
+          'The exchange must process this before the deadline the vault sets. If it does not, anyone can switch the vault to escape mode and every user exits with their last proven balance.',
+          'One request can be open per account.',
+          // R436-18 (engine 0.2.3, SPEC 14): a forced close in a halted market is not a close at the market.
+          ...(kind === 'closeAll'
+            ? ['A position in a HALTED market is closed at the side of the exit band that is worse for you (a set discount from the last index that grows while the halt lasts, never past the price at which the position is worth nothing): it can cost the whole margin of a leveraged position. A withdrawal request does not close positions.']
+            : []),
+        ],
       };
     }
     case 'withdraw': {

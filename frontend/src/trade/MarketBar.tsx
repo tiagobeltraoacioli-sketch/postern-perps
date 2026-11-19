@@ -19,7 +19,8 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
   return (
     <section className="market-bar" aria-label="Market">
       <MarketPicker current={market} />
-      <dl className="market-stats">
+      {/* Scrolls sideways when the bar is narrow: reachable by keyboard for that. */}
+      <dl className="market-stats" tabIndex={0} aria-label="Market statistics">
         <div className="stat stat-lead">
           <dt>Mark</dt>
           <dd className="num">{ticker ? formatPx(ticker.mark, dp) : DASH}</dd>

@@ -313,7 +313,7 @@ function Banners({ quiet }: { quiet: boolean }) {
   const read = useStore(geoRead);
   const restricted = read !== 'pending' && (!geo || geo.restricted || geo.policy !== 'open');
   return (
-    <div className="banners">
+    <aside className="banners" aria-label="Notices">
       {LOCAL_RENDER && <p className="banner banner-local">Local build against a loopback mock or stack: not for publication.</p>}
       {!domain && (
         <p className="banner banner-warn" role="status">
@@ -338,6 +338,6 @@ function Banners({ quiet }: { quiet: boolean }) {
             </p>
           )
         ))}
-    </div>
+    </aside>
   );
 }

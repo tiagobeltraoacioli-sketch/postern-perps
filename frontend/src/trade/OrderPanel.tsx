@@ -154,12 +154,15 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
           Short
         </button>
       </div>
-      <div className="mode-tabs" role="tablist" aria-label="Order type">
-        {(['limit', 'market', 'trigger'] as Mode[]).map((m) => (
-          <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>
-            {m === 'trigger' ? 'Stop / TP' : m === 'limit' ? 'Limit' : 'Market'}
-          </button>
-        ))}
+      <div className="mode-tabs">
+        {/* The tab list holds only tabs; the leverage button stands beside it. */}
+        <div className="mode-tablist" role="tablist" aria-label="Order type">
+          {(['limit', 'market', 'trigger'] as Mode[]).map((m) => (
+            <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>
+              {m === 'trigger' ? 'Stop / TP' : m === 'limit' ? 'Limit' : 'Market'}
+            </button>
+          ))}
+        </div>
         <button type="button" className="lev-chip" onClick={() => setLeverageOpen(true)} disabled={!account} title="Leverage and margin mode for this market">
           <span className="num">{leverage}x</span> {isolated ? 'Isolated' : 'Cross'}
         </button>

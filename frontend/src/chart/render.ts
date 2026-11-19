@@ -198,7 +198,8 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
       ctx.font = font(s, 500, s.fontPx - 1);
       ctx.textBaseline = 'top';
       ctx.fillStyle = p.text3;
-      fillTabular(ctx, 'Volume', 8, plotH - band + 5, 'left');
+      // At the right: the labels of levels pinned to the bottom edge stand at the left.
+      fillTabular(ctx, 'Volume', plotW - 8, plotH - band + 5, 'right');
     }
     for (let g = 0; g < 3; g++) {
       ctx.fillStyle = withAlpha(inks[g], alphas[g]);
