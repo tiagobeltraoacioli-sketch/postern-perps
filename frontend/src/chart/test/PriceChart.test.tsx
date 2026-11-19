@@ -63,6 +63,40 @@ describe('PriceChart', () => {
     render(<PriceChart {...props({ candles: bad })} />);
     expect(screen.getByText(/1 candle not drawn: invalid data/)).toBeTruthy();
   });
+  // R395-32: a level whose numeric price is not finite cannot be placed; the chart must SAY so on screen (it was
+  // silently left off the canvas, named only in the screen-reader list).
+  it('R395-32: a level with a non-finite price is named in a visible notice, a liquidation as an alert', () => {
+    const levels: ChartLevel[] = [
+      { id: 'liq', kind: 'liquidation', side: 'buy', price: Number.NaN, priceText: '61,234.5', label: 'Liquidation' },
+      { id: 'ord', kind: 'order', side: 'buy', price: Number.POSITIVE_INFINITY, priceText: '66,000.0', label: 'Buy 0.2500' },
+      { id: 'pos', kind: 'position', side: 'buy', price: 66900, priceText: '66,900.0', label: 'Long 0.5000 BTC' },
+    ];
+    render(<PriceChart {...props({ levels })} />);
+    const notice = document.querySelector('.pc-undrawn')!;
+    expect(notice).toBeTruthy();
+    expect(notice.getAttribute('role')).toBe('alert');
+    expect(notice.textContent).toContain('2 levels not drawn: invalid price');
+    expect(notice.textContent).toContain('Liquidation');
+    expect(notice.textContent).toContain('Buy 0.2500');
+    expect(notice.textContent).not.toContain('Long 0.5000 BTC');
+  });
+  it('R395-32: without a liquidation among them the notice is a status; a non-finite mark or index is named too', () => {
+    const levels: ChartLevel[] = [{ id: 'ord', kind: 'order', side: 'sell', price: Number.NaN, priceText: 'x', label: 'Sell 1.0000' }];
+    const { rerender } = render(<PriceChart {...props({ levels })} />);
+    const notice = document.querySelector('.pc-undrawn')!;
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.textContent).toContain('1 level not drawn: invalid price');
+    rerender(<PriceChart {...props({ mark: { price: Number.NaN, text: '67,000.0' }, index: { price: Number.NEGATIVE_INFINITY, text: '1' } })} />);
+    const live = document.querySelector('.pc-undrawn')!;
+    expect(live.textContent).toContain('2 levels not drawn: invalid price');
+    expect(live.textContent).toContain('Mark price');
+    expect(live.textContent).toContain('Index price');
+  });
+  it('R395-32: no notice when every level has a finite price', () => {
+    const levels: ChartLevel[] = [{ id: 'pos', kind: 'position', side: 'buy', price: 66900, priceText: '66,900.0', label: 'Long 0.5000 BTC' }];
+    render(<PriceChart {...props({ levels, mark: { price: 67000, text: '67,000.0' } })} />);
+    expect(document.querySelector('.pc-undrawn')).toBeNull();
+  });
   it('keyboard keys used by the chart do not scroll the page', () => {
     render(<PriceChart {...props()} />);
     const plot = screen.getByRole('group', { name: 'BTC-USD price chart' });

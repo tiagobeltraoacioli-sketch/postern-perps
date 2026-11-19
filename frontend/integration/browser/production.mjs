@@ -36,6 +36,16 @@ try {
   await page.goto(`http://127.0.0.1:${port}/#/transfers`);
   await page.waitVisibleText(/Not live/, 10_000);
   await page.screenshot(join(out, '19-production-transfers-not-live.png'));
+  // Round 2: with no vault in the published configuration the deposit and the exit build nothing either, and the
+  // page still explains the exit; an unknown address is the 404 page, not another page.
+  if (!/The vault is not deployed\. This page builds no transaction and asks your wallet for nothing\./.test(await page.visibleText())) failures.push('deposit tab does not say it builds nothing');
+  await page.goto(`http://127.0.0.1:${port}/#/transfers/exit`);
+  await page.waitVisibleText(/Your funds can always leave, even if the exchange is silent/, 10_000);
+  if (!/The vault is not deployed/.test(await page.visibleText())) failures.push('exit tab is not marked not live');
+  if (await page.evaluate(`!!window.__h.button('Review request')`)) failures.push('the exit tab offers a request without a vault');
+  await page.screenshot(join(out, '19b-production-exit-not-live.png'));
+  await page.goto(`http://127.0.0.1:${port}/#/nowhere`);
+  await page.waitVisibleText(/No gate at this address/, 10_000);
 } catch (e) {
   failures.push(e.message);
 } finally {

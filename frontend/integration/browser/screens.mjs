@@ -37,12 +37,28 @@ const initScript = String.raw`
   const address = ${JSON.stringify(ADDRESS)};
   const waiting = new Map();
   let next = 0;
+  let chain = ${JSON.stringify(L2_HEX)};
+  let known = [chain];
+  window.__walletAsked = [];
+  const setChain = (c) => { chain = c; (listeners.chainChanged || []).forEach((f) => f(c)); };
+  // Test control: put the wallet on another network that does not know the Bloch L2.
+  window.__walletElsewhere = (c) => { known = [c]; setChain(c); };
   window.__walletResolve = (id, ok, value) => { const w = waiting.get(id); waiting.delete(id); if (w) ok ? w.resolve(value) : w.reject(Object.assign(new Error(value), { code: 4001 })); };
   const listeners = {};
   const provider = {
     request: async ({ method, params }) => {
       if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [address];
-      if (method === 'eth_chainId') return ${JSON.stringify(L2_HEX)};
+      if (method === 'eth_chainId') return chain;
+      // Round 2: the harness wallet has a network. It knows only the chains in 'known'; a switch to another answers
+      // 4902 until the page adds it (EIP-3085). What the page asked is recorded for the assertions.
+      if (method === 'wallet_switchEthereumChain' || method === 'wallet_addEthereumChain') {
+        window.__walletAsked.push({ method, params });
+        const want = params[0].chainId;
+        if (method === 'wallet_switchEthereumChain' && !known.includes(want)) throw Object.assign(new Error('Unrecognized chain'), { code: 4902 });
+        if (!known.includes(want)) known.push(want);
+        setChain(want);
+        return null;
+      }
       if (method === 'eth_signTypedData_v4') {
         const id = ++next;
         const p = new Promise((resolve, reject) => waiting.set(id, { resolve, reject }));
@@ -105,19 +121,30 @@ const shot = async (name, full = true) => {
 };
 const visible = () => page.visibleText();
 const has = async (scene, pattern) => expect(scene, pattern.test(await visible()), `visible ${pattern}`);
+const lacks = async (scene, pattern) => expect(scene, !pattern.test(await visible()), `not visible ${pattern}`);
 const connect = async () => {
   if (await page.evaluate(`!!window.__h.button('Connect')`)) {
     await page.click('Connect');
+    await page.waitVisibleText(/Connecting only shows your address to this page/);
     await page.click('Harness wallet');
   }
-  await page.waitVisibleText(/Equity/, 15_000);
+  // On a phone the order form (and its Equity line) is a closed sheet: the connected address in the header tells.
+  await page.waitFor('connected', `!window.__h.button('Connect') && !window.__h.button('Connecting')`, 15_000);
+  if (!phoneView) await page.waitVisibleText(/Equity/, 15_000);
+};
+let phoneView = false;
+const openOrderSheet = async () => {
+  // The bar's own button (the form's Long switch is inside the closed, inert sheet).
+  await page.evaluate(`document.querySelector('.trade-cta .tone-long').click()`);
+  await page.waitFor('order sheet open', `document.querySelector('.trade-form')?.dataset.open === 'true'`);
+  await delay(500);
 };
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 
 try {
   await scenario(RESET);
   await viewport(1440, 900);
-  await page.goto(APP);
+  await page.goto(`${APP}#/trade/BTC-USD`);
   await theme('dark');
   await page.goto(`${APP}#/trade/BTC-USD`);
   await page.reload();
@@ -188,29 +215,79 @@ try {
 
   // Phone.
   await viewport(390, 844, true);
+  phoneView = true;
   await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
+  // Phone: the first screen has the price, the chart and the way to trade; the form is a sheet, inert while closed.
+  expect('08', await page.evaluate(`document.querySelector('.trade-form').inert === true`), 'the closed order sheet is inert');
+  expect('08', await page.evaluate(`(() => { const r = document.querySelector('.trade-cta').getBoundingClientRect(); return r.bottom <= innerHeight && r.top > innerHeight / 2; })()`), 'Long / Short bar inside the first screen, in thumb reach');
+  expect('08', await page.evaluate(`document.querySelector('.chart-panel').getBoundingClientRect().top < innerHeight * 0.55`), 'the chart starts in the first screen');
   await shot('08-trade-phone-light', false);
-  await page.evaluate(`document.querySelector('.order-panel').scrollIntoView({ block: 'start' })`);
+  await openOrderSheet();
+  expect('08b', await page.evaluate(`document.querySelector('.trade-form').inert === false`), 'the open sheet is reachable');
+  await has('08b', /Limit price/);
   await shot('08b-order-phone-light', false);
+  await page.evaluate(`document.querySelector('.sheet-close').click()`);
+  await page.waitFor('order sheet closed', `document.querySelector('.trade-form')?.dataset.open === 'false'`);
   await theme('dark');
   await page.reload();
   await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
   await shot('09-trade-phone-dark', false);
-  await page.evaluate(`document.querySelector('.order-panel').scrollIntoView({ block: 'start' })`);
+  await openOrderSheet();
   await shot('09b-order-phone-dark', false);
+  await page.evaluate(`document.querySelector('.sheet-close').click()`);
+  phoneView = false;
   await viewport(1440, 900);
 
-  // Restricted region: banner, exit only, reduce-only forced.
+  // Restricted region: the restricted screen first (what is off, what stays open, the exits), then exit-only.
   await scenario('geo=BR');
   await page.reload();
   await page.waitVisibleText(/not available in your region \(BR\)/, 20_000);
+  await has('10', /PosternDEX Perpetuals is not offered where you are/);
+  await has('10', /What always stays open/);
+  await has('10', /Withdrawing your collateral/);
+  await has('10', /The exit on the Bloch L2, which no region rule can block/);
+  expect('10', !(await page.evaluate(`!!document.querySelector('.order-panel')`)), 'no order form behind the restricted screen');
+  await shot('10a-restricted-screen-dark', false);
+  await page.click('Continue to manage my account');
+  await page.waitVisibleText(/Oracle index/, 20_000);
   await connect();
   await has('10', /exit only/);
+  await has('10', /not available in your region \(BR\)/);
   await shot('10-restricted-dark');
+  // No new deposit is offered to a restricted region; withdraw and exit stay.
+  await page.goto(`${APP}#/transfers/withdraw`);
+  await page.waitVisibleText(/Review withdrawal/, 15_000);
+  await has('10', /exit without the exchange/);
   await scenario('geo=ZZ');
+  await page.goto(`${APP}#/trade/BTC-USD`);
+
+  // Round 2: a wallet on another network. Header says so, an order is refused in words, the switch adds the L2.
+  await page.reload();
+  await page.waitVisibleText(/Oracle index/, 20_000);
+  await connect();
+  await page.evaluate(`window.__walletElsewhere('0x1')`);
+  await page.waitVisibleText(/Wrong network/, 10_000);
+  await page.fill('Size', '0.1');
+  await page.fill('Limit price', '66000');
+  await page.click('Review long');
+  await page.waitVisibleText(/Signing refused/);
+  await has('10n', /Your wallet is on another network\. Switch it to the Bloch L2 \(chain 700770\)/);
+  expect('10n', (await page.button('Sign in wallet and send'))?.disabled === true, 'sign button disabled on another network');
+  await shot('10n-wrong-network-review-dark', false);
+  await page.click('Cancel');
+  await page.click('Wrong network');
+  await page.waitVisibleText(/On chain 1, not the Bloch L2/);
+  await shot('10o-wrong-network-menu-dark', false);
+  await page.click('Switch to Bloch L2');
+  await page.waitFor('wallet back on the L2', `!document.body.innerText.includes('Wrong network')`);
+  const asked = JSON.parse(await page.evaluate(`JSON.stringify(window.__walletAsked)`));
+  expect('10n', asked.map((a) => a.method).join() === 'wallet_switchEthereumChain,wallet_addEthereumChain', `switch then add (${asked.map((a) => a.method).join()})`);
+  const added = asked[1]?.params?.[0] ?? {};
+  expect('10n', added.chainId === L2_HEX && added.chainName === 'Bloch L2' && added.nativeCurrency?.symbol === 'BLCH' && added.nativeCurrency?.decimals === 18 && Array.isArray(added.rpcUrls) && added.rpcUrls.length === 1, `the network entry offered to the wallet (${JSON.stringify(added)})`);
+  await page.evaluate(`document.body.click()`);
 
   // Halted market.
   await scenario('halt=BTC-USD');
@@ -234,19 +311,99 @@ try {
   await page.click('Cancel');
   await scenario('eip712=pinned');
 
-  for (const [name, hash, pattern] of [
-    ['13-portfolio-dark', '#/portfolio', /Margin ratio/],
-    ['14-transfers-dark', '#/transfers', /Not live/],
-    ['15-agents-dark', '#/agents', /never withdraw/],
-    ['16-system-dark', '#/system', /Checks before every signature/],
-    ['17-notices-dark', '#/legal', /Where it is not available/],
-  ]) {
+  // Pass 2: the bare address is the public home page; the terminal is one click away and every figure on the page
+  // comes from a file or from the exchange.
+  await page.goto(`${APP}#/`);
+  await page.reload();
+  await page.waitVisibleText(/Trade in the open/, 15_000);
+  for (const text of [/prototype, not live/i, /Unaudited prototype\. No real funds/, /Taker 4\.5 bps, maker 1\.5 bps/, /5 of 7/, /no admin key/i, /What can go wrong/, /Bloch Inc \(Panama\)/, /BTC-USD/]) await has('00', text);
+  await lacks('00', /audited by|licensed|regulated by|million users|trusted by/i);
+  await shot('00-home-dark', false);
+  await shot('00-home-full-dark');
+  await page.click('Launch app');
+  await page.waitVisibleText(/Oracle index/, 15_000);
+  expect('00', /^#\/trade\/[A-Z]+-USD$/.test(await page.evaluate(`location.hash`)), 'Launch app opens the terminal');
+  for (const [hash, text] of [['', /Trade in the open/], ['#', /Trade in the open/], ['#/trade', /Oracle index/]]) {
+    await page.goto(`${APP}${hash}`);
+    await page.reload();
+    await page.waitVisibleText(text, 15_000);
+  }
+  expect('00', true, 'the bare address is home; #/trade alone is the terminal');
+  const PAGES = [
+    ['13-portfolio', '#/portfolio', /Margin ratio/],
+    ['14-transfers', '#/transfers', /Not live/],
+    ['14b-funds-withdraw', '#/transfers/withdraw', /Your withdrawals/],
+    ['14c-funds-exit', '#/transfers/exit', /Your funds can always leave, even if the exchange is silent/],
+    ['15-agents', '#/agents', /never withdraw/],
+    ['16-system', '#/system', /Checks before every signature/],
+    ['17-notices', '#/legal', /Where it is not available/],
+    ['20-markets', '#/markets', /Perpetual markets/],
+    ['21-history-orders', '#/history', /Account history/],
+    ['21b-history-fills', '#/history/fills', /Fees paid/],
+    ['21c-history-funding', '#/history/funding', /Net funding/],
+    ['21d-history-transfers', '#/history/transfers', /Recipient/],
+    ['22-funding', '#/funding/BTC-USD', /Settled rates, one per 1 h/],
+    ['23-notfound', '#/no-such-page', /No gate at this address/],
+  ];
+  for (const [name, hash, pattern] of PAGES) {
     await page.goto(`${APP}${hash}`);
     await page.reload();
     await connect().catch(() => {});
     await page.waitVisibleText(pattern, 15_000);
-    await shot(name);
+    await shot(`${name}-dark`);
   }
+  // The exit page says what each stage is, in plain words, with or without a vault.
+  await page.goto(`${APP}#/transfers/exit`);
+  await page.waitVisibleText(/Ask on the L2/, 15_000);
+  for (const text of [/The exchange must process it within/, /anyone can switch the vault to escape mode/, /Users are paid before the insurance fund/]) await has('14c', text);
+  // An unknown address is never shown as another page.
+  for (const bad of ['#/trade/btc-usd', '#/transfers/steal', '#/history/x', '#/portfolio/extra', '#/markets/1']) {
+    await page.goto(`${APP}${bad}`);
+    await page.waitVisibleText(/No gate at this address/, 10_000);
+  }
+  expect('23', true, 'five malformed addresses show the 404 page');
+  // The markets table sorts and a row opens its market.
+  await page.goto(`${APP}#/markets`);
+  await page.waitVisibleText(/Perpetual markets/, 15_000);
+  expect('20', (await page.evaluate(`document.querySelectorAll('.markets-table tbody tr').length`)) >= 3, 'at least three markets listed');
+  // Three markets open as cards; the table is one click away and remembers the choice.
+  expect('20', (await page.evaluate(`document.querySelectorAll('.market-card').length`)) >= 3, 'a card per market, each with its sparkline or its empty state');
+  expect('20', (await page.evaluate(`document.querySelectorAll('.market-card .spark, .market-card .spark-empty').length`)) >= 3, 'every card has a sparkline or says there are no trades');
+  await has('20', /Contract parameters, as the exchange publishes them/);
+  await page.click('Table');
+  await page.click('24 h volume');
+  expect('20', (await page.evaluate(`document.querySelector('th[aria-sort=descending]')?.textContent ?? ''`)).includes('24 h volume'), 'sorted by volume, descending, announced with aria-sort');
+  await page.evaluate(`[...document.querySelectorAll('.market-cell')].find((b) => b.textContent.includes('ETH-USD')).click()`);
+  await page.waitVisibleText(/ETH-USD/, 10_000);
+  expect('20', (await page.evaluate(`location.hash`)) === '#/trade/ETH-USD', 'a market row opens that market');
+
+  // Light theme and phone for the new pages; no page scrolls sideways at 360 px.
+  await theme('light');
+  for (const [name, hash, pattern] of PAGES.filter(([n]) => /^(13|14c|20|22)/.test(n))) {
+    await page.goto(`${APP}${hash}`);
+    await page.reload();
+    await connect().catch(() => {});
+    await page.waitVisibleText(pattern, 15_000);
+    await shot(`${name}-light`);
+  }
+  await theme('dark');
+  await viewport(360, 780, true);
+  phoneView = true;
+  for (const [name, hash, pattern] of [['00-home', '#/', /Trade in the open/], ['03-trade', '#/trade/BTC-USD', /Oracle index/], ...PAGES]) {
+    await page.goto(`${APP}${hash}`);
+    await page.reload();
+    await connect().catch(() => {});
+    await page.waitVisibleText(pattern, 15_000);
+    const overflow = await page.evaluate(`document.documentElement.scrollWidth - window.innerWidth`);
+    expect(name, overflow <= 0, `no sideways scroll at 360 px (${overflow} px over)`);
+    if (/^(00|03|13|14b|14c|20|21-|22|23)/.test(name)) await shot(`${name}-phone360-dark`, false);
+  }
+  // The phone "More" menu reaches every page that is not in the bottom bar.
+  await page.click('More');
+  for (const label of [/History/, /Funding/, /Agent keys/, /System/, /Notices and risk/]) await has('nav', label);
+  await shot('24-more-menu-phone360-dark', false);
+  phoneView = false;
+  await viewport(1440, 900);
 
   // Console must be clean of errors.
   const errors = page.console.filter((l) => /^(error|pageerror)/.test(l) && !/WebSocket|ERR_CONNECTION|Failed to load resource/.test(l));

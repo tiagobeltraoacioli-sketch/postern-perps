@@ -1,0 +1,16 @@
+{
+  "name": "PosternDEX Perpetuals",
+  "short_name": "PosternDEX",
+  "description": "Perpetual futures on a transparent order book, collateral in a vault on the Bloch L2. Unaudited prototype, not live.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b0e0f",
+  "theme_color": "#0b0e0f",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./postern.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

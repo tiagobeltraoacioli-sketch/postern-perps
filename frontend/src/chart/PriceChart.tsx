@@ -11,6 +11,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from 'react';
 import type { ChartInterval, PriceChartProps } from './types';
 import { ChartEngine, type HoverInfo } from './engine';
+import { undrawableLevels } from './levels';
 import { ALL_INTERVALS, INTERVAL_MS } from './scale';
 import { formatCandleTime, formatNumber, formatPercent, intervalWords } from './format';
 import type { Theme } from './palette';
@@ -86,6 +87,17 @@ export function PriceChart(props: PriceChartProps) {
   const [rejected, setRejected] = useState(0);
   const [inks, setInks] = useState<{ up: string; down: string } | null>(null);
   const motionReduced = useReducedMotion(reducedMotion);
+  // R395-32: levels (and the live mark / index) whose price is not a finite number have no place on the canvas.
+  // They are named on screen, never left out in silence.
+  const undrawn = useMemo(
+    () =>
+      undrawableLevels<{ price: number; label: string; kind: string }>([
+        ...levels,
+        ...(mark ? [{ price: mark.price, label: 'Mark price', kind: 'mark' }] : []),
+        ...(index ? [{ price: index.price, label: 'Index price', kind: 'index' }] : []),
+      ]),
+    [levels, mark, index],
+  );
   const ids = useId();
   const summaryId = `${ids}-summary`;
   const keysId = `${ids}-keys`;
@@ -364,6 +376,14 @@ export function PriceChart(props: PriceChartProps) {
               <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
+        )}
+        {undrawn.length > 0 && (
+          <div className="pc-undrawn" role={undrawn.some((l) => l.kind === 'liquidation') ? 'alert' : 'status'}>
+            <strong>
+              {undrawn.length} {undrawn.length === 1 ? 'level' : 'levels'} not drawn: invalid price
+            </strong>
+            <span>{undrawn.map((l) => l.label).join(', ')}</span>
+          </div>
         )}
         {rejected > 0 && (
           <div className="pc-rejected" role="status">

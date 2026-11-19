@@ -42,6 +42,24 @@ describe('refusals', () => {
   it('refuses a wallet signer that is not the connected account', () => {
     expect(refusals('PlaceOrder', order(), localSigner(generatePrivateKey()), guard(account))).toContain('The wallet account changed. Review again.');
   });
+  // Round 2 (real wallets): a wallet signs typed data only for its active network; the domain names chain 700770.
+  it('refuses a wallet signature while the wallet is on another network; an agent key (no wallet) is not affected', () => {
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: '0x1' })).join()).toMatch(/wallet is on another network.*Bloch L2 \(chain 700770\)/);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: 'garbage' })).join()).toMatch(/wallet is on another network/);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: '0xab162' }))).toEqual([]);
+    expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { walletChainId: undefined }))).toEqual([]);
+    const agentKey = generatePrivateKey();
+    const agent = localSigner(agentKey, 'agent', NOW + 3_600_000);
+    expect(refusals('PlaceOrder', order(), agent, guard(account, { walletChainId: '0x1' }))).toEqual([]);
+  });
+  it('the network is re-checked at signing time: a switch away while the review is open stops the signature', async () => {
+    const signer = localSigner();
+    const sign = vi.spyOn(signer, 'sign');
+    const prepared = prepare('PlaceOrder', order(), signer, guard(account, { walletChainId: '0xab162' }));
+    expect(prepared.refusals).toEqual([]);
+    await expect(signAndSubmit(prepared, signer, () => guard(account, { walletChainId: '0x89' }), async () => 'sent')).rejects.toThrow(/another network/);
+    expect(sign).not.toHaveBeenCalled();
+  });
   it('refuses before the typed-data check and when it differs', () => {
     expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { eip712Problem: undefined })).join()).toMatch(/not been checked/);
     expect(refusals('PlaceOrder', order(), localSigner(), guard(account, { eip712Problem: 'type PlaceOrder differs' })).join()).toMatch(/out of date/);
@@ -133,8 +151,33 @@ describe('value refusals', () => {
     expect(a({ expiresAt: String(Math.floor(NOW / 1000) + 3600) })).toMatch(/future/);
     expect(a({ name: 'bot‮' })).toMatch(/plain characters/);
   });
+  // Engine 0.2.3 (430, cross-area 2026-11-19 00:13): limit trigger types 3 and 5 with a time in force other than GTC
+  // are MALFORMED; a Withdraw to the vault, to the collateral token or to a keyless address is BAD_RECIPIENT.
+  it('a stop-limit or take-profit-limit order must be good-till-cancelled', () => {
+    for (const orderType of [3, 5]) {
+      const base = { orderType, triggerPrice: (66_000n * 10n ** 8n).toString() };
+      expect(valueProblems('PlaceOrder', order({ ...base, timeInForce: 0 }), markets(), NOW)).toEqual([]);
+      expect(valueProblems('PlaceOrder', order({ ...base, timeInForce: 1 }), markets(), NOW).join()).toMatch(/must be good till cancelled/);
+      expect(valueProblems('PlaceOrder', order({ ...base, timeInForce: 2 }), markets(), NOW).join()).toMatch(/must be good till cancelled/);
+    }
+  });
+  it('a withdrawal to the vault, to the collateral token or to a keyless address is refused before signing', () => {
+    const w = (recipient: string) => ({ account, nonce: '1', amount: '1000000', recipient });
+    const g = guard(account, { collateralToken: `0x${'bb'.repeat(20)}` });
+    expect(refusals('Withdraw', w(account), localSigner(), g)).toEqual([]);
+    expect(refusals('Withdraw', w(TEST_DOMAIN.verifyingContract), localSigner(), g).join()).toMatch(/the recipient is the exchange's vault/);
+    expect(refusals('Withdraw', w(TEST_DOMAIN.verifyingContract.toUpperCase().replace('0X', '0x')), localSigner(), g).join()).toMatch(/the recipient is the exchange's vault/);
+    expect(refusals('Withdraw', w(`0x${'BB'.repeat(20)}`), localSigner(), g).join()).toMatch(/the recipient is the collateral token/);
+    expect(refusals('Withdraw', w(`0x${'0'.repeat(36)}ffff`), localSigner(), g).join()).toMatch(/not an address anyone holds a key for/);
+    expect(refusals('Withdraw', w(`0x${'0'.repeat(39)}2`), localSigner(), g).join()).toMatch(/not an address anyone holds a key for/);
+    expect(refusals('Withdraw', w(`0x${'0'.repeat(35)}10000`), localSigner(), g)).toEqual([]);
+  });
   it('leverage bounds', () => {
-    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 20/);
+    // The bound is the market table's (compliance/markets.json 0.2.1: SOL 10x, BTC 20x; the round-1 fixture said 20 and 50).
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 10/);
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 11, isolated: false }, markets(), NOW).join()).toMatch(/1 to 10/);
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 1, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 20/);
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 1, leverage: 20, isolated: false }, markets(), NOW)).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 /** Portfolio: the account as the exchange reports it, beside this interface's own estimate from the same inputs. */
-import { feed } from '../state/session';
+import { feed, go } from '../state/session';
 import { useStore } from '../lib/store';
 import { useActions } from '../state/actions';
 import { accountSummary, health } from '../lib/calc';
@@ -26,27 +26,60 @@ export function Portfolio() {
   const ours = state ? accountSummary(state.account.collateral, positionInputs(state, markets, tickers)) : null;
   const ratio = a ? a.marginRatioPpm : null;
   const h = health(ratio);
+  const used = a && a.equity > 0n ? Number((a.initialMargin * 10_000n) / a.equity) / 100 : 0;
+  const usedPct = Math.max(0, Math.min(100, used));
   return (
-    <div className="page">
-      <header className="page-head">
-        <p className="eyebrow">Portfolio</p>
-        <h1 className="display num">{a ? `${formatUsd(a.equity)} USDC` : DASH}</h1>
-        <p className="lead">Equity: collateral plus unrealised PnL, as reported by the exchange at block {a ? a.height : DASH}.</p>
-      </header>
-      <div className="cards">
-        <Card label="Collateral" value={a && `${formatUsd(a.collateral)} USDC`} />
-        <Card label="Unrealised PnL" value={a && `${formatUsd(a.unrealised, { sign: 'always' })} USDC`} tone={a ? (a.unrealised >= 0n ? 'up' : 'down') : undefined} />
-        <Card label="Margin in use" value={a && `${formatUsd(a.initialMargin)} USDC`} />
-        <Card label="Maintenance margin" value={a && `${formatUsd(a.maintenanceMargin)} USDC`} />
-        <Card label="Free collateral" value={a && `${formatUsd(a.free, { rounding: 'floor' })} USDC`} />
-        <Card label="Withdrawable" value={a && `${formatUsd(a.withdrawable, { rounding: 'floor' })} USDC`} />
-        <div className={`card health-card health-${h}`}>
-          <span className="card-label">Margin ratio</span>
-          <span className="card-value num">{ratio === null ? DASH : formatPpm(ratio, 2)}</span>
-          <HealthMeter ppm={ratio} />
-          <span className="fine">Maintenance margin over equity. Cross positions are liquidated at 100%.</span>
+    <div className="page page-wide">
+      <header className="page-head page-head-row">
+        <div>
+          <p className="eyebrow">Portfolio</p>
+          <h1 className="display num">{a ? `${formatUsd(a.equity)} USDC` : DASH}</h1>
+          <p className="lead">Equity: collateral plus unrealised PnL, as reported by the exchange at block {a ? a.height : DASH}.</p>
         </div>
-        <Card label="Fee tier" value={a && `Tier ${a.feeTier.tier}: maker ${formatBps(a.feeTier.makerPpm)}, taker ${formatBps(a.feeTier.takerPpm)}`} sub={a && `30-day volume $${formatCompactUsd(a.feeTier.volume30d)}`} />
+        <div className="head-actions">
+          <button type="button" className="button button-primary" onClick={() => go({ page: 'transfers', tab: 'deposit' })}>
+            Deposit
+          </button>
+          <button type="button" className="button" onClick={() => go({ page: 'transfers', tab: 'withdraw' })}>
+            Withdraw
+          </button>
+          <button type="button" className="button button-quiet" onClick={() => go({ page: 'history', tab: 'fills' })}>
+            History
+          </button>
+        </div>
+      </header>
+      <div className="portfolio-top">
+        <section className="panel balance-panel" aria-label="Balance">
+          <header className="panel-head">
+            <h2>Where the equity is</h2>
+            <span className="fine num">{a ? `${formatPpm(BigInt(Math.round(usedPct * 10_000)), 1)} in use` : ''}</span>
+          </header>
+          {/* One measure (equity) split in two parts: margin held by positions and orders, and the rest. */}
+          <div className="split-bar" role="img" aria-label={a ? `Margin in use ${formatUsd(a.initialMargin)} USDC of ${formatUsd(a.equity)} USDC equity` : 'No account data'}>
+            <span className="split-used" style={{ width: `${usedPct}%` }} />
+          </div>
+          <dl className="balance-rows">
+            <Row label="Collateral" hint="bUSDC credited to your trading account" value={a && `${formatUsd(a.collateral)} USDC`} />
+            <Row label="Unrealised PnL" hint="Open positions at the mark price" value={a && `${formatUsd(a.unrealised, { sign: 'always' })} USDC`} tone={a ? (a.unrealised > 0n ? 'up' : a.unrealised < 0n ? 'down' : undefined) : undefined} />
+            <Row label="Margin in use" hint="Held by positions and resting orders" value={a && `${formatUsd(a.initialMargin)} USDC`} swatch="used" />
+            <Row label="Free collateral" hint="Available for new orders" value={a && `${formatUsd(a.free, { rounding: 'floor' })} USDC`} swatch="free" />
+            <Row label="Withdrawable" hint="What a withdrawal may take now" value={a && `${formatUsd(a.withdrawable, { rounding: 'floor' })} USDC`} />
+          </dl>
+        </section>
+        <section className={`panel risk-panel health-${h}`} aria-label="Risk">
+          <header className="panel-head">
+            <h2>Distance from liquidation</h2>
+          </header>
+          <div className="risk-body">
+            <span className="risk-figure num">{ratio === null ? DASH : formatPpm(ratio, 2)}</span>
+            <span className="fine">Margin ratio: maintenance margin over equity. Cross positions are liquidated at 100%.</span>
+            <HealthMeter ppm={ratio} />
+            <dl className="balance-rows">
+              <Row label="Maintenance margin" hint="Below this equity, liquidation starts" value={a && `${formatUsd(a.maintenanceMargin)} USDC`} />
+              <Row label="Fee tier" hint={a ? `14-day volume $${formatCompactUsd(a.feeTier.volume30d)}` : ''} value={a && `Tier ${a.feeTier.tier}: maker ${formatBps(a.feeTier.makerPpm)}, taker ${formatBps(a.feeTier.takerPpm)}`} />
+            </dl>
+          </div>
+        </section>
       </div>
       {ours && a && ours.equity !== a.equity && (
         <p className="fine">
@@ -58,12 +91,15 @@ export function Portfolio() {
   );
 }
 
-function Card({ label, value, sub, tone }: { label: string; value: string | undefined | null | false; sub?: string | false | null; tone?: 'up' | 'down' }) {
+function Row({ label, hint, value, tone, swatch }: { label: string; hint?: string; value: string | undefined | null | false; tone?: 'up' | 'down'; swatch?: 'used' | 'free' }) {
   return (
-    <div className="card">
-      <span className="card-label">{label}</span>
-      <span className={`card-value num ${tone ?? ''}`}>{value || DASH}</span>
-      {sub && <span className="fine">{sub}</span>}
+    <div>
+      <dt>
+        {swatch && <span className={`swatch swatch-${swatch}`} aria-hidden="true" />}
+        {label}
+        {hint && <span className="fine"> {hint}</span>}
+      </dt>
+      <dd className={`num ${tone ?? ''}`}>{value || DASH}</dd>
     </div>
   );
 }

@@ -36,7 +36,7 @@ export function Attestation({ account, onDone }: { account: string; onDone: () =
   };
   return (
     <div className="attestation">
-      <h3>Before your first order</h3>
+      <h2 className="attestation-title">Before your first order</h2>
       <details open>
         <summary>Risk notice</summary>
         <ul>

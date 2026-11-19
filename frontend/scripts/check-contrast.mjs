@@ -28,9 +28,12 @@ const themes = {
 
 let failed = 0;
 let checked = 0;
+// Every pair with its ratio, for the report: node scripts/check-contrast.mjs --json FILE
+const table = [];
 const check = (theme, label, fg, bg, min) => {
   const r = ratio(fg, bg);
   checked++;
+  table.push({ theme, pair: label, foreground: fg, background: bg, ratio: Math.round(r * 100) / 100, required: min });
   if (r < min) {
     failed++;
     console.log(`FAIL ${theme} ${label}: ${r.toFixed(2)} < ${min} (${fg} on ${bg})`);
@@ -58,5 +61,11 @@ check('tile', 'tile letter', '#eceae3', '#14191a', 4.5);
 // in both themes; and the badges of the networks a bridged token comes from.
 const ORIGINS = ['bitcoin', 'solana', 'tron', 'stellar'];
 for (const n of [...NETWORKS, ...ORIGINS]) check('glyph', `monogram on the ${n} gate`, '#0b0e0f', themes.dark.net(n), 4.5);
+const jsonAt = process.argv.indexOf('--json');
+if (jsonAt > 0) {
+  const { writeFileSync } = await import('node:fs');
+  const worst = (theme) => table.filter((t) => t.theme === theme).sort((a, b) => a.ratio / a.required - b.ratio / b.required)[0];
+  writeFileSync(process.argv[jsonAt + 1], JSON.stringify({ method: 'WCAG 2.1 relative luminance contrast of the design tokens (src/styles/tokens.css)', pairs: table.length, closestToTheLimit: { dark: worst('dark'), light: worst('light') }, table }, null, 1) + '\n');
+}
 console.log(`${checked} pairs checked, ${failed} below WCAG AA`);
 process.exit(failed ? 1 : 0);

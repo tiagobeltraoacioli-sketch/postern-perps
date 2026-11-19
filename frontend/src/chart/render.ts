@@ -40,6 +40,8 @@ export type Scene = {
   readonly i0: number;
   readonly i1: number;
   readonly volMax: number;
+  /** True when the price range is the automatic one (the volume lane is then clear of candles). */
+  readonly laneClear?: boolean;
   readonly palette: Palette;
   readonly candleStyle: CandleStyle;
   readonly priceDecimals: number;
@@ -55,8 +57,12 @@ export type Scene = {
   readonly fontPx: number;
 };
 
-/** Share of the plot height given to the volume bars (drawn under the candles, own scale). */
-export const VOLUME_SHARE = 0.15;
+/**
+ * Share of the plot height that is the volume LANE: its own band under the candles, own scale, separated by a rule.
+ * With the automatic price range the candles never enter it (engine.ts sets the range so the lowest low sits above
+ * the lane) and no price tick is written beside it: a price label there would name a price no candle is drawn at.
+ */
+export const VOLUME_SHARE = 0.2;
 
 const crisp = (v: number, dpr: number) => (Math.round(v * dpr - 0.5) + 0.5) / dpr;
 const snap = (v: number, dpr: number) => Math.round(v * dpr) / dpr;
@@ -137,7 +143,13 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   ctx.lineWidth = 1 / dpr;
   ctx.strokeStyle = withAlpha(p.grid, 0.7);
   ctx.setLineDash([]);
-  if (range) for (const v of s.priceTicks.values) line(ctx, 0, crisp(toY(v), dpr), plotW, crisp(toY(v), dpr));
+  const laneTop = s.laneClear && s.volMax > 0 ? plotH * (1 - VOLUME_SHARE) : plotH;
+  if (range)
+    for (const v of s.priceTicks.values) {
+      const y = toY(v);
+      if (y > laneTop) continue;
+      line(ctx, 0, crisp(y, dpr), plotW, crisp(y, dpr));
+    }
   for (const tick of s.timeTicks) {
     const x = crisp(slotX((tick.t - s.series.anchor) / s.series.intervalMs, view, plotW), dpr);
     if (x < 0 || x > plotW) continue;
@@ -177,14 +189,25 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   if (s.volMax > 0) {
     const band = plotH * VOLUME_SHARE;
     const vw = Math.max(1 / dpr, snap(view.spacing * 0.8, dpr));
-    const alphas = [0.14, 0.14, 0.07];
+    const alphas = [0.34, 0.34, 0.14];
+    if (s.laneClear) {
+      // The rule that separates the lane, and its name.
+      ctx.strokeStyle = withAlpha(p.grid, 0.95);
+      ctx.lineWidth = 1 / dpr;
+      line(ctx, 0, crisp(plotH - band, dpr), plotW, crisp(plotH - band, dpr));
+      ctx.font = font(s, 500, s.fontPx - 1);
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = p.text3;
+      // In the middle: labels of levels pinned to the bottom edge stand at the left, the names of the live prices at the right.
+      fillTabular(ctx, 'Volume', plotW / 2, plotH - band + 5, 'center');
+    }
     for (let g = 0; g < 3; g++) {
       ctx.fillStyle = withAlpha(inks[g], alphas[g]);
       for (let i = s.i0; i < s.i1; i++) {
         if (group(i) !== g) continue;
         const c = cs[i];
         if (!(c.v > 0)) continue;
-        const h = Math.max(1 / dpr, (c.v / s.volMax) * band);
+        const h = Math.max(1 / dpr, (c.v / s.volMax) * (band - (s.laneClear ? s.fontPx + 8 : 0)));
         const x = snap(slotX(slots[i], view, plotW) - vw / 2, dpr);
         ctx.fillRect(x, snap(plotH - h, dpr), vw, plotH - snap(plotH - h, dpr));
         drawn.volumes++;
@@ -333,6 +356,7 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
     for (const v of s.priceTicks.values) {
       const y = toY(v);
       if (y < s.fontPx / 2 || y > plotH - s.fontPx / 2) continue;
+      if (y > laneTop - s.fontPx / 2) continue;
       // A tick label never shows half-covered under a tag.
       if (s.tags.some((t) => Math.abs(t.y - y) < s.tagH / 2 + s.fontPx / 2)) continue;
       fillTabular(ctx, formatNumber(v, s.priceTicks.decimals), ax + 8, y, 'left');

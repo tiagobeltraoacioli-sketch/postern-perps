@@ -19,7 +19,8 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
   return (
     <section className="market-bar" aria-label="Market">
       <MarketPicker current={market} />
-      <dl className="market-stats">
+      {/* Scrolls sideways when the bar is narrow: reachable by keyboard for that. */}
+      <dl className="market-stats" tabIndex={0} aria-label="Market statistics">
         <div className="stat stat-lead">
           <dt>Mark</dt>
           <dd className="num">{ticker ? formatPx(ticker.mark, dp) : DASH}</dd>
@@ -31,6 +32,10 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
         <div className="stat">
           <dt>24 h change</dt>
           <dd className={`num ${change === null ? '' : change >= 0n ? 'up' : 'down'}`}>{change === null ? DASH : formatPpm(change, 2, 'always')}</dd>
+        </div>
+        <div className="stat stat-wide">
+          <dt>24 h high / low</dt>
+          <dd className="num">{ticker ? `${formatPx(ticker.high24h, dp)} / ${formatPx(ticker.low24h, dp)}` : DASH}</dd>
         </div>
         <div className="stat">
           <dt>24 h volume</dt>
@@ -48,7 +53,10 @@ export function MarketBar({ market, ticker }: { market: Market | undefined; tick
             {ticker ? (
               <>
                 <span className={ticker.fundingRate >= 0n ? 'up' : 'down'}>{formatRate(ticker.fundingRate)}</span>
-                <span className="stat-sub" title="Time to the next funding payment"> in {formatCountdown(ticker.nextFundingTime - now)}</span>
+                <span className="stat-sub" title="Time to the next funding payment">
+                  {' '}
+                  in {formatCountdown(ticker.nextFundingTime - now)}
+                </span>
               </>
             ) : (
               DASH

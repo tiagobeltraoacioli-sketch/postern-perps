@@ -7,7 +7,7 @@
  * device when one is approved and unexpired (no wallet prompt), unless the user switches to the wallet in the sheet;
  * everything else always uses the main wallet.
  */
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, engineErrorWords, errorWords } from '../lib/api';
 import { agentFor, agentSigner } from '../lib/agent';
 import { AGENT_ALLOWED, type ActionType, type Message } from '../lib/eip712';
@@ -65,7 +65,7 @@ function build(p: Pending, wallet: ReturnType<typeof useWallet>): Pending {
   if (!signer || !account) return { ...p, signer, prepared: null, buildError: 'Connect a wallet first.' };
   try {
     const message = p.build(nextNonce(signer.address, Date.now()), account);
-    return { ...p, signer, prepared: prepare(p.type, message, signer, currentGuard(account)), buildError: null };
+    return { ...p, signer, prepared: prepare(p.type, message, signer, currentGuard(account, wallet.account?.chainId)), buildError: null };
   } catch (e) {
     return { ...p, signer, prepared: null, buildError: e instanceof NonceError || e instanceof NoDomain ? e.message : 'The request could not be built. Nothing was signed.' };
   }
@@ -93,6 +93,9 @@ export function ActionProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [agentTick, setAgentTick] = useState(0);
   const account = wallet.account?.address.toLowerCase() ?? null;
+  // The wallet's network as of the latest render, read at signing time (it can change while a review is open).
+  const chainRef = useRef<string | null | undefined>(undefined);
+  chainRef.current = wallet.account?.chainId;
   const agentAddress = useMemo(() => (account ? (agentFor(account)?.agent ?? null) : null), [account, agentTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const request = useCallback<Ctx['request']>(
@@ -109,7 +112,7 @@ export function ActionProvider({ children }: { children: ReactNode }) {
     setPending({ ...p, phase: 'signing' });
     let outcome: Outcome;
     try {
-      const ack = await signAndSubmit(p.prepared, p.signer, () => currentGuard(account), (body) => api.action(body));
+      const ack = await signAndSubmit(p.prepared, p.signer, () => currentGuard(account, chainRef.current), (body) => api.action(body));
       outcome = outcomeOf(p.type, ack);
     } catch (e) {
       if (e instanceof Refused) outcome = { ok: false, title: 'Refused before signing or sending', text: e.reasons.join(' ') };
