@@ -160,10 +160,12 @@ fn dec_action(r: &mut Reader) -> Result<Action, DecodeError> {
             let account = r.addr()?;
             let nonce = r.u64()?;
             let agent = r.addr()?;
+            // R436-4: NO per-action rule here. A name longer than 32 bytes is a well-formed input that FAILS
+            // (`MALFORMED` in `apply_action`, S-3.2: an invalid individual input never rejects the block); at
+            // f0e3967 the decoder refused the whole input list for it. Only what cannot be a canonical encoding at
+            // all is refused here (short, trailing bytes, a bool that is not 0/1, an unknown tag or type, a name
+            // that is not UTF-8).
             let len = r.u16()? as usize;
-            if len > 32 {
-                return Err(DecodeError("agent name > 32 bytes"));
-            }
             let name = std::str::from_utf8(r.take(len)?).map_err(|_| DecodeError("utf8"))?.to_string();
             let expires_at = r.u64()?;
             Action::ApproveAgent { account, nonce, agent, name, expires_at }

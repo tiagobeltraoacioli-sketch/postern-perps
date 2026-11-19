@@ -1,9 +1,12 @@
-# PosternDEX Perpetuals: public API (v0.2)
+# PosternDEX Perpetuals: public API (v0.3)
 
-UNAUDITED PROTOTYPE. Owned by agent 351 (`node/`). Changes are announced in the cross-area log.
-Machine-readable schemas: `node/api/schema.json` (JSON Schema, one `$defs` entry per type named below) and
-`node/api/endpoints.json` (endpoint to response type). The Rust node and the Node.js mock server are both tested
-against these two files; where this text and the schema differ, the schema wins and this text is the bug.
+UNAUDITED PROTOTYPE. Owned by agent 351, then 431 (`node/`). Changes are announced in the cross-area log.
+v0.3 (2026-11-18, round 2) is the first version in which every object below is served from the real engine by
+the Rust node (`node/src/api.rs`, `index.rs`, `engine/view.rs`); section 12 lists what is still not done.
+Machine-readable schema: the draft `node/mock/schema/api.schema.json` (JSON Schema, one `$defs` entry per type named
+below, owned by agent 435 with the mock and the conformance suite; `node/api/schema.json` takes its place when it
+exists). The Rust node and the Node.js mock are both tested against it; where this text and the schema differ on a
+type the schema has, the schema wins and this text is the bug. Types added in v0.3 are specified here first.
 
 Canonical data rules (action types, EIP-712 typed data, numeric scales, state root, proofs) are in `docs/SPEC.md`
 (agent 350). Vault digests and events are in `docs/VAULT.md` (agent 352). Markets and risk parameters are in
@@ -29,11 +32,28 @@ Canonical data rules (action types, EIP-712 typed data, numeric scales, state ro
   Soft state can only be discarded if the sequencer misbehaves or crashes before the block is durably logged.
 - **Errors.** Non-2xx responses and WebSocket errors carry
   `{"error":{"code":"SNAKE_CASE","message":"human text","details":{}}}` (`Error`). Codes: section 7.
-- **Pagination.** Lists are newest first. `limit` (default 100, max 1000) and `before` (exclusive cursor taken
-  from `nextCursor` of the previous page; absent when the list is exhausted).
+- **Pagination.** Lists are newest first. `limit` (default 100, 1 to 1000; anything else is `400 MALFORMED`) and
+  `before` (exclusive cursor: the decimal string taken from `nextCursor` of the previous page; `nextCursor` is
+  absent when the list is exhausted). The cursor is the id of the last item of the page: `tradeId` for trades,
+  `fillId` for fills, `orderId` for orders, the settlement `time` for a market's funding history, and an opaque
+  sequence number for an account's funding payments.
+- **Rounding of displayed values** (the engine's own integers are never rounded; these rules apply only where a
+  value is derived for display). USDC values owed TO the account (equity, PnL, notional, `q` of a candle) are
+  FLOORED to 1e-6; requirements (initial and maintenance margin) are rounded UP to 1e-6; `freeCollateral` and
+  `withdrawable` are the engine's integer unchanged; `marginRatio` is rounded UP to 1e-6 (toward liquidation);
+  `entryPrice` and `avgFillPrice` are truncated to 1e-8; `change24h` is truncated to 1e-6. Prices and sizes that
+  sit on the market's grid (book levels, trades, orders, fills, candles) are printed with exactly `priceDecimals`
+  / `sizeDecimals` digits; other prices and sizes (mark, index, entry, position size, liquidation price) are exact
+  with trailing zeros removed. A value that is not on the grid is printed exactly, never cut.
+- **History kept in memory** (this prototype has no history database): per market the newest 100,000 trades and
+  20,000 candles per interval; per account the newest 20,000 fills, 10,000 funding payments and 5,000 closed
+  orders (open orders are never dropped). The index is rebuilt from the input log at start, so a restarted node
+  serves the same history.
 - **Rate limits.** Per IP and per account; `429 RATE_LIMITED` with `Retry-After` (seconds). Defaults in section 8.
-- **CORS.** `Access-Control-Allow-Origin` is the configured frontend origin (`*` in mock mode). No cookies, no
-  sessions: authority comes only from EIP-712 signatures.
+- **CORS.** `Access-Control-Allow-Origin` is the configured frontend origin (`--cors-origin`; `*` in mock mode and
+  by default in dev mode). A preflight (`OPTIONS`) is answered `204` with `GET, POST, OPTIONS` and the headers
+  `content-type, x-postern-geo, x-postern-geo-mac, x-mock-country`. No cookies, no sessions: authority comes only
+  from EIP-712 signatures.
 
 ## 2. Market data (public, not geoblocked)
 
@@ -44,10 +64,11 @@ Canonical data rules (action types, EIP-712 typed data, numeric scales, state ro
 | `GET /v1/tickers` | `{"tickers":[Ticker]}` | mark, index, funding, 24 h statistics for every market |
 | `GET /v1/markets/{symbol}/ticker` | `Ticker` | |
 | `GET /v1/markets/{symbol}/book?depth=50` | `Book` | aggregated by price level; depth 1 to 500 |
-| `GET /v1/markets/{symbol}/trades?limit=&before=` | `{"trades":[Trade],"nextCursor"?}` | |
-| `GET /v1/markets/{symbol}/candles?interval=1m&from=&to=&limit=` | `{"candles":[Candle]}` | oldest first; intervals `1m 5m 15m 1h 4h 1d`; max 1500 |
-| `GET /v1/markets/{symbol}/funding?limit=&before=` | `{"funding":[FundingRate],"nextCursor"?}` | settled hourly rates |
-| `GET /v1/oracle/{symbol}` | `OracleStatus` | per-source prices, the median, staleness, halt state |
+| `GET /v1/markets/{symbol}/trades?limit=&before=` | `{"trades":[Trade],"nextCursor"?}` | the public tape (below) |
+| `GET /v1/markets/{symbol}/candles?interval=1m&from=&to=&limit=` | `{"candles":[Candle]}` | oldest first; intervals `1m 5m 15m 1h 4h 1d`; `from` / `to` inclusive open times (ms); `limit` default 300, 1 to 1500: the NEWEST candles of the range |
+| `GET /v1/markets/{symbol}/funding?limit=&before=` | `{"funding":[FundingRate],"nextCursor"?}` | settled rates, one per funding interval in which a rate was charged |
+| `GET /v1/oracle/{symbol}` | `OracleStatus` | the committee index the engine holds, its time, the halt state |
+| `GET /v1/oracle/rounds/latest` | `OracleRounds` | the ingest pool: observations held per round (section 2.1) |
 
 `Market`:
 
@@ -89,12 +110,22 @@ Levels are `[price, totalSize]`, bids descending, asks ascending. `seq` increase
 (one batch per block that touched the book).
 
 `Trade`: `{"tradeId":"771203","symbol":"BTC-USD","price":"67250.5","size":"0.0120","side":"buy","time":1794878412200,"height":120344,"liquidation":false}`
-(`side` is the taker's side).
+(`side` is the taker's side). The tape is what crossed the BOOK: ordinary matches and liquidations executed through
+the book (`liquidation: true`), which is exactly what moves the engine's last-trade price. Transfers at a bound price
+outside the book (backstop take-overs, auto-deleveraging, settlement of a market halted past `maxHaltMs`) are not
+trades: they appear in the accounts' fills and in the block, never in the tape, the candles or the 24 h statistics.
+`tradeId` is assigned in execution order and has gaps where such a transfer happened.
 
 `Candle`: `{"t":1794878400000,"o":"67240.0","h":"67262.5","l":"67231.0","c":"67250.5","v":"12.4410","q":"836612.11","n":211}`
 (`t` open time, `v` base volume, `q` USD volume, `n` trades). The last candle of a response may be still open.
+Candles are built deterministically from the tape: a trade at engine time `T` belongs to the candle with
+`t = T - T mod interval` of each of the six intervals. An interval without a trade has NO candle (clients that want
+a continuous series carry the previous close forward).
 
 `FundingRate`: `{"symbol":"BTC-USD","time":1794877200000,"rate":"0.0000125","premium":"0.0000110","markPrice":"67190.0","indexPrice":"67188.2"}`
+(`time` is the engine time of the block that settled: the first block at or after the interval boundary; `premium`
+is the median premium sample of the interval, SPEC 7; `markPrice` is the mark the payments were computed with. An
+interval whose rate is zero, or whose market is halted at the boundary, settles nothing and has no entry.)
 
 `OracleStatus`:
 
@@ -106,9 +137,43 @@ Levels are `[price, totalSize]`, bids descending, asks ascending. `seq` increase
  "signers":5,"threshold":5,"haltReason":null}
 ```
 
-`status`: `ok`, `stale`, `insufficientSources`, `deviation`, `halted`. `sources` is what THIS node's adapters see;
-`price` is the committee-agreed price last applied by the engine (section 6 of `node/README.md` explains the
-difference).
+`status`: `ok`, `stale` (no index yet, or the index is older than `maxStalenessMs`: engine halt reason `STALE`),
+`deviation` (jump halt, `JUMP`), `halted` (`ARITHMETIC`); `insufficientSources` is reserved. `price`, `time` and
+`round` are what the ENGINE holds (the committee index, its time, the last accepted round); `haltReason` is the
+engine's reason or null; `signers` is the number of observations the ingest pool holds for its newest round;
+`sources` (per-venue prices) is knowledge of the feeders, not of the node: always empty here in v0.3.
+
+### 2.1 Oracle ingest (operator channel; not public, not geoblocked)
+
+The oracle committee's feeders (`node/oracle/feeder`, agent 432) deliver signed observations to the sequencer. The
+node RELAYS them; the ENGINE verifies and decides (oracle/README rules C1 to C5).
+
+| Method and path | Body | Returns |
+|---|---|---|
+| `POST /v1/oracle/observations` | `{"round":598295763,"observation":{"signer":0,"timeMs":1794887290471,"prices":[{"marketId":1,"price":"6499240000000","sources":7}],"signature":"0x…65 bytes"}}` | `OracleIngestAck` |
+| `POST /v1/oracle/updates` | `{"round":598295763,"observations":[…]}` (oracle/README section 4) | `OracleIngestAck` plus `observations:[{signer,status,code?,message?}]` |
+
+- **Authentication**: `Authorization: Bearer <token>`; the node reads the token from the file named by
+  `--oracle-token-file` (at least 16 bytes, never a flag value, never logged). No file: both paths answer
+  `503 ORACLE_INGEST_DISABLED`. Missing or wrong token: `401 UNAUTHORIZED`.
+- **Form**: exactly the fields shown (unknown or missing fields are refused). `round`, `signer`, `timeMs`,
+  `marketId`, `sources` are JSON numbers or canonical decimal strings; `price` is the integer in the engine's price
+  scale (1e-8 USD) as a decimal string (a JSON number is accepted). Body limit 16 KiB.
+- **Pre-filter** (it can only refuse; what passes is verified again by every validator's engine): `round ==
+  timeMs / 3000`; 1 to 256 prices, `marketId` strictly ascending, `price > 0`; `signer` below the committee size;
+  the signature recovers to `oracleCommittee[signer]` over the engine crate's observation digest under the engine
+  domain `{PosternPerps, 1, 700770, vault}` (`400 ORACLE_MALFORMED`, `400 ORACLE_BAD_SIGNATURE`); the round is above
+  the engine's last accepted round (`409 ORACLE_ROUND_NOT_NEW`) and at most one round ahead of the node's clock
+  (`400 ORACLE_TIME`).
+- **One observation per (round, signer)**: the first is kept; the identical one again is `200`; a different one is
+  `409 ORACLE_CONFLICT` (counted, logged).
+- **No selection (R395-9)**: a round enters a block with EVERY observation held for it, signer ascending. It is
+  ready when all `n` signers arrived, or at least `q` arrived and `--oracle-gather-ms` (default 500) passed since
+  the q-th. The newest ready round is taken; older rounds are dropped. At most 8 rounds are held.
+
+`OracleIngestAck`: `{"round":"598295763","signer":0,"held":5,"quorum":5,"status":"held|ready"}`.
+`OracleRounds`: `{"enabled":true,"quorum":5,"signers":["0x…"],"gatherMs":500,"accepted":70,"refused":0,"conflicts":0,
+"roundsBuilt":10,"lastBuilt":{"round":"…","signers":[0,1,2,3,4,5,6]},"lastAcceptedRound":"…","held":[{"round":"…","signers":[0,1],"quorumAtMs":null}]}`.
 
 ## 3. Node, finality, input log
 
@@ -128,7 +193,11 @@ difference).
 ```
 
 `mode`: `mock`, `dev` (single process, throwaway keys), `live`. `sequencer.state`: `running`, `recovering`,
-`halted`. `vaultMode`: `normal`, `paused`, `escape`, `unknown`.
+`halted`. `vaultMode`: `normal`, `paused`, `escape`, `unknown` (what the node's checkpoint relayer last read from
+the vault; `unknown` without a relayer: the relayer is the keeper of `docs/VAULT.md` 8a, started with
+`--relay-rpc` and `--relay-key-file`, and it submits CHECKPOINTS only). `network.collateralToken` is the address given with `--token` (zero when
+not given). `GET /v1/node` holds diagnostics outside this schema (engine, validators, L2 watcher, recovery, the
+index's cross-check counters, the oracle ingest pool, proof frames, the relayer).
 
 ### 3.2 Finality
 
@@ -169,6 +238,10 @@ checkpoint from `GET /v1/committee` plus this object without trusting the API ho
  "inputsEncoded":"0x…","sequencerSignature":"0x…"}
 ```
 
+`GET /v1/genesis` returns the ENGINE's genesis document, byte for byte what `logHash(0)` commits to
+(`logHash(0) = keccak256("PosternPerps/genesis/v1" || document)`; R435-1): with it and `/v1/blocks/stream` anyone
+replays the exchange with the engine CLI (`engine replay <genesis.json> <log.jsonl>`) from published data only.
+
 `inputsEncoded` is the canonical byte encoding of the block's inputs as `docs/SPEC.md` defines it (what the engine
 consumes and what `logHash` commits to: `logHash = keccak256(prevLogHash || height || time || keccak256(inputsEncoded))`);
 `inputs` is the same content decoded for people. Heights with no input do not exist (empty blocks are skipped), so
@@ -180,15 +253,16 @@ consumes and what `logHash` commits to: `logHash = keccak256(prevLogHash || heig
 
 | Method and path | Returns |
 |---|---|
-| `GET /v1/accounts/{address}` | `Account` |
-| `GET /v1/accounts/{address}/orders?status=open\|all&symbol=&limit=&before=` | `{"orders":[Order],"nextCursor"?}` |
+| `GET /v1/accounts/{address}[?finalized=true]` | `Account` (`finalized=true`: the state at the latest final checkpoint; `404` until one exists) |
+| `GET /v1/accounts/{address}/orders?status=open\|all&symbol=&limit=&before=` | `{"orders":[Order],"nextCursor"?}` (default `open`: resting and untriggered orders) |
+| `GET /v1/orders/{orderId}` | `Order` (`404` when unknown or pruned) |
 | `GET /v1/accounts/{address}/fills?symbol=&limit=&before=` | `{"fills":[Fill],"nextCursor"?}` |
 | `GET /v1/accounts/{address}/funding?symbol=&limit=&before=` | `{"payments":[FundingPayment],"nextCursor"?}` |
 | `GET /v1/accounts/{address}/deposits` | `{"deposits":[Deposit]}` |
 | `GET /v1/accounts/{address}/withdrawals` | `{"withdrawals":[Withdrawal]}` |
 | `GET /v1/accounts/{address}/agents` | `{"agents":[Agent]}` |
 | `GET /v1/accounts/{address}/nonce` | `{"account":"0x…","nextNonce":"17","agents":[{"agent":"0x…","nextNonce":"4"}]}` |
-| `GET /v1/accounts/{address}/proof` | `AccountProof` against the latest finalized root (escape hatch input) |
+| `GET /v1/accounts/{address}/proof[?height=H]` | `AccountProof` against the FINAL checkpoint at height `H` (default: the latest final): the `claimEscape` input |
 
 `Account`:
 
@@ -201,8 +275,12 @@ consumes and what `logHash` commits to: `logHash = keccak256(prevLogHash || heig
  "positions":[Position],"openOrders":2}
 ```
 
-`marginRatio` = maintenanceMargin / equity (liquidation at 1 or above). An unknown address returns a zero account,
-not 404.
+`collateral` is the engine's balance of the account (signed: a negative balance is recorded bad debt).
+`marginRatio` = maintenanceMargin / equity (liquidation at 1 or above; `"0"` without a requirement; the cap
+`"1000000"` when equity is not positive). An unknown address returns a zero account, not 404. `freeCollateral` and
+`withdrawable` are the engine's own `free_collateral` (SPEC S-9.2: what a `Withdraw` may take now). `feeTier.volume30d`
+keeps its v0.1 name and holds the volume the ENGINE uses for fee tiers, which is the last 14 UTC days before today
+(SPEC S-9.4), not 30 days. In a `finalized=true` read `realizedPnl` and `fundingSinceOpen` of positions are zero.
 
 `Position`:
 
@@ -213,7 +291,14 @@ not 404.
  "initialMargin":"3362.560000","maintenanceMargin":"336.256000","fundingSinceOpen":"-1.220000"}
 ```
 
-`liquidationPrice` is an estimate holding every other position still; `null` when none exists.
+`openNotional` (v0.3 addition) is the engine's own integer for the position: the signed sum of size x price of the
+open part in notional units (1e-16 USD) as a decimal string; clients that compute exactly use it instead of
+`size x entryPrice` (`entryPrice` is truncated). `liquidationPrice` is the mark of this market at which the engine's test `equity < maintenance` first holds with
+every other mark held still (for a long the highest such price, for a short the lowest), found by exact integer
+search; `null` when no price does. `entryPrice` = open notional / size. `realizedPnl` and `fundingSinceOpen` are
+the sums credited to the balance since the position last opened or flipped. `marginMode` is always `cross` and
+`isolatedMargin` null in engine 0.1.x. `leverage` is the account's setting for the market (default: the market's
+`defaultLeverage`).
 
 `Order`:
 
@@ -226,7 +311,13 @@ not 404.
 
 `type`: `limit`, `market`, `stopMarket`, `stopLimit`, `takeProfitMarket`, `takeProfitLimit`. `timeInForce`: `GTC`,
 `IOC`, `POST_ONLY`. `status`: `untriggered`, `open`, `filled`, `canceled`, `rejected`, `expired`.
-`triggerCondition`: `markAbove`, `markBelow`, or null.
+`triggerCondition`: `markAbove`, `markBelow`, or null. `status` as the node derives it from the engine's events:
+`untriggered` (a stored trigger), `open` (resting), `filled` (filled in full), `canceled` (by the user, by a
+liquidation or forced request, by the engine for a stated `rejectReason` such as `SELF_TRADE`, `REDUCE_ONLY`,
+`MARKET_HALTED`, or the unfilled remainder of an IOC / market order: `rejectReason` is then the engine's reason,
+e.g. `NO_LIQUIDITY`; what filled before stays in `filledSize`). An action the engine refuses outright creates no
+order: the refusal is in the action's `result.error`. `rejected` and `expired` are reserved. `price` of a market
+order is its limit (SPEC 2.3 makes it mandatory).
 
 `Fill`:
 
@@ -236,15 +327,39 @@ not 404.
  "liquidation":false,"time":1794878100000,"height":120010}
 ```
 
-`fee` is in USDC, positive = paid by the account, negative = rebate.
+`fee` is in USDC, positive = paid by the account, negative = rebate. Every execution of the account is a fill:
+matches (`liquidity` maker or taker), and the transfers outside the book: backstop take-overs and auto-deleveraging
+(the closing side is `taker`, the counterparty `maker`, `orderId` `"0"`), and the settlement of a halted market
+(`taker`, no counterparty). `liquidation` is true for both sides of a fill that closed a liquidated account.
+`realizedPnl` is what the fill credited to the balance (floored to 1e-6 by the engine, S-0.3).
 
 `FundingPayment`: `{"symbol":"BTC-USD","time":1794877200000,"rate":"0.0000125","positionSize":"0.5000","markPrice":"67190.0","payment":"-0.419938"}`
 (`payment` negative = paid by the account).
 
 `Agent`: `{"agent":"0x…","name":"trading-bot","approvedAt":1794800000000,"expiresAt":1797392000000,"height":98000}`
 
-`AccountProof`: `{"address":"0x…","checkpoint":Checkpoint,"leaf":"0x…","leafData":{},"proof":["0x…"],"index":"12"}`
-(format of `leaf` and `proof`: `docs/SPEC.md`; what the vault does with it: `docs/VAULT.md`).
+`AccountProof`: `{"address":"0x…","checkpoint":Checkpoint,"leaf":"0x…","leafData":{"account":"0x…","index":12,
+"balance":"995763250","escapeValue":"995763250","positionsHash":"0x…","encoded":"0x…"},"proof":["0x…" x 32],"index":"12"}`.
+`leafData` holds the fields of the vault's `Account` struct (`docs/VAULT.md` `claimEscape`; integers in USDC units,
+`balance` signed) and `encoded`, the 88 leaf bytes (`leaf = keccak256(0x00 || encoded)`); `proof` is the 32 siblings
+bottom-up. The node recomputes the root from `leaf` and `proof` and serves the object only when it equals the
+checkpoint's `accountsRoot`. The checkpoint must be the one the VAULT holds as latest: pass its `height`. The node
+keeps the state of the 8 newest final checkpoints, of every checkpoint its relayer submitted (the newest 8) and
+of up to 32 not yet final ones; for any OLDER final checkpoint it rebuilds the state from the input log (replay
+from the nearest held state or from genesis, checked against the checkpoint's state root; one rebuild at a time,
+the 4 newest rebuilt states are kept), so the answer can take as long as the replay. A height that is not a final
+checkpoint answers `404`.
+
+**The same proof without the sequencer (R436-11).** The escape hatch must not depend on the party whose silence it
+exists for. Every validator process (`postern-perps-node validator --data DIR --listen ADDR`) keeps its own copy of
+the input log and serves, from its OWN replay: `GET /v1/validator` (its address, height, latch state),
+`GET /v1/genesis`, `GET /v1/blocks`, `/v1/blocks/{height}`, `/v1/blocks/stream` (the same `Block` objects) and
+`GET /v1/accounts/{address}/proof?height=H` for any height it has applied (from a held state, else rebuilt from its
+log). A validator's `AccountProof` adds `"source":"validator"`, `height`, `stateRoot` and `accountsRoot` (the roots
+it computed) and carries as `checkpoint` the body it signed at that height with its own signature only
+(`final:false`), or null when it signed none there. It is not a certificate: the claimant compares `accountsRoot`
+with the root the VAULT holds (`latest()` on the L2), which is all `claimEscape` checks. The system accounts the vault needs in escape
+(`0x…02` INSURANCE, `0x…03` BACKSTOP) are served like any other address.
 
 ### 4.1 Deposits and withdrawals
 
@@ -252,6 +367,7 @@ not 404.
 |---|---|
 | `GET /v1/deposits/{l2TxHash}` | `{"deposits":[Deposit]}` (one transaction can carry several logs) |
 | `GET /v1/withdrawals/{withdrawalId}` | `Withdrawal` |
+| `GET /v1/withdrawals/{withdrawalId}/proof[?count=N\|height=H]` | `WithdrawalProof`: the vault's `withdraw(seq, w, siblings, want)` inputs for the accepted checkpoint whose `withdrawalCountAt(seq)` is `N` (or the final checkpoint at height `H`; default: the latest final) |
 | `GET /v1/forced?account=0x…` | `{"forced":[ForcedAction]}` requests read from the vault queue |
 
 `Deposit`:
@@ -261,8 +377,9 @@ not 404.
  "status":"credited","creditedHeight":119800,"time":1794878000000}
 ```
 
-`status`: `seen` (in an L2 block not yet final), `l2Finalized` (final on the L2, both L2 endpoints agree, waiting
-for inclusion), `credited` (applied by the engine at `creditedHeight`). A deposit is credited only from the L2's
+`status`: `seen` (in an L2 block not yet final; never reported by v0.3, whose watcher reads only the `finalized`
+tag), `l2Finalized` (final on the L2, both L2 endpoints agree, waiting for inclusion), `credited` (applied by the
+engine at `creditedHeight`). `time` is the engine time of the crediting block (0 until credited). A deposit is credited only from the L2's
 `finalized` tag; the Bloch L2 finalizes a block per proof, minutes apart, so `seen` can last minutes.
 
 `Withdrawal`:
@@ -275,17 +392,36 @@ for inclusion), `credited` (applied by the engine at `creditedHeight`). A deposi
  "l2TxHash":null,"availableAt":null,"time":1794878200000}
 ```
 
-Certificate (v0.2 of this document, VAULT.md `withdraw` inputs): `{"record":{"index","account","recipient","amount"},
-"proof":{"index","hashes":[…],"sums":[…]},"leaf","digest","checkpoint":Checkpoint,"signatures":[…]}`; `amount` is the
-net amount (gross minus the flat fee, SPEC S-9.2) in USDC units.
+Certificate (v0.3; VAULT.md 0.2 `withdraw` inputs): `{"digest":"0x… (the checkpoint digest)","record":{"withdrawalId",
+"account","recipient","amount","height"},"checkpoint":Checkpoint,"proof":["0x…" x 32],"signatures":[…]}`; the record's
+integers are decimal strings in USDC units, `amount` is the NET amount (gross minus the flat fee, SPEC S-9.2), `proof`
+is the 32 siblings against `checkpoint.withdrawalsRoot` (the newest final checkpoint). The vault proves a record
+against an ACCEPTED checkpoint `seq`; when that is not the newest final one, take the siblings from
+`GET /v1/withdrawals/{id}/proof?count=<withdrawalCountAt(seq)>`.
+
+`WithdrawalProof`: `{"withdrawalId":"0","count":"1","checkpointHeight":120140,"withdrawalsRoot":"0x…","record":{…},
+"leaf":"0x…","siblings":["0x…" x 32]}` (`checkpointHeight` null when asked by `count`; with `height` the node serves
+it only when the siblings rebuild that checkpoint's `withdrawalsRoot`).
 
 `status`: `requested` (action accepted), `included` (debited by the engine), `finalized` (in a finalized
-checkpoint), `certified` (k-of-n signatures collected: anyone may now submit the certificate to the vault; the
-relayer does it by default), `submitted` (L2 transaction seen), `delayed` (the vault holds a large amount until
-`availableAt`), `paid`, `rejected`. `certificate` is null before `certified`; its `record`, `digest` and `proof`
+checkpoint), `certified` (k-of-n signatures collected: anyone may now submit the certificate to the vault),
+`submitted` (L2 transaction seen), `delayed` (the vault holds a large amount until `availableAt`), `paid`,
+`rejected`. `amount` is the NET amount the vault pays (the gross amount of the `Withdraw` action minus `fee`), in
+the object and in the certificate's record alike. v0.3 reports `included` and `certified` only: the node does not watch the vault's payout events, and
+its relayer submits checkpoints, not withdrawals (the user or the frontend calls `withdraw`). `time` is the engine
+time of the block that created the record. `certificate` is null before `certified`; its `record`, `digest` and `proof`
 are exactly the vault's input (`docs/VAULT.md`), so a user can submit it without any relayer.
 
-`ForcedAction`: `{"forcedId":"3","account":"0x…","kind":"cancelAll|close|withdraw","l2TxHash":"0x…","l2Block":18240,"deadlineTime":1794881800000,"status":"queued|included|expired","includedHeight":null}`
+`ForcedAction`: `{"forcedId":"3","account":"0x…","kind":"cancelAll|close|withdraw","l2TxHash":"0x…","l2Block":18240,"deadlineTime":1794881800000,"status":"queued|included|expired","includedHeight":null,
+"arg":"0","outcome":"served|rejected|pending|null","reason":null,"processedHeight":null}`
+
+`deadlineTime` is the vault's deadline (L2 `block.timestamp`, here in ms). `status`: `queued` (final on the L2, not
+yet in a block), `included` (received by the engine at `includedHeight`), `expired` (the L2 time this node last saw
+is past the deadline and the engine has not processed the request: the vault can be put into escape). `outcome` is
+the ENGINE's verdict (SPEC 14): `served`; `rejected` (consumed for a reason the user caused, in `reason`); `pending`
+(not servable now for a reason the user does not control, e.g. `POSITION_IN_HALTED_MARKET`: it stays at the head of
+the queue and the vault's deadline keeps running); null before the engine looked at it. `processedHeight` is set
+for `served` and `rejected`. (`arg`, `outcome`, `reason`, `processedHeight` are v0.3 additions.)
 
 ## 5. Actions (writes)
 
@@ -321,8 +457,8 @@ Request (`ActionRequest`):
   / `sizeDecimals`; a ready-made helper is in `node/mock/sign.mjs`). `"wire":true` in the request declares that
   `message` already holds the scaled integers as decimal strings, and the node then converts nothing.
 - The signer is recovered from the signature. It must be `message.account` or one of its approved, unexpired agents.
-- `nonce`: per signer, strictly increasing; the engine keeps the highest used and rejects reuse (replay
-  protection). Gaps are allowed, so a client may use the millisecond clock.
+- `nonce`: SPEC 2.5: the signer's millisecond clock, valid inside `now - 120 s .. now + 30 s` of engine time, single
+  use, and above the lowest of the signer's 64 highest used nonces (`NONCE_WINDOW`, `NONCE_USED`).
 - Optional query `?wait=included` holds the response until the action is in a block (at most 2 s).
 
 Response `200` (`ActionAck`):
@@ -337,6 +473,10 @@ with `?wait=included`:
 {"actionHash":"0x…","status":"included","receivedAt":1794878412300,"height":120345,"index":2,
  "result":{"ok":true,"orderId":"9912050","orderStatus":"open","filledSize":"0","error":null}}
 ```
+
+`result` (`ActionResult`): `ok`, `error` (the engine's error name or null), and for an accepted `PlaceOrder`
+`orderId`, `orderStatus` (the order's status after its own block) and `filledSize`; for an accepted `Withdraw`
+`withdrawalId`.
 
 `status`: `accepted` (passed admission, queued), `included` (in a block; `result` is the engine's outcome, which
 may still be a business rejection such as insufficient margin: `result.ok=false` with `result.error`), `rejected`
@@ -385,6 +525,19 @@ An agent wallet is a second key that may trade for an account but can never with
   node treats the request as restricted in `live` mode (fail closed) and reports `country: null`.
 - Mock and dev mode: the header `X-Mock-Country: BR` or the query `?country=BR` sets the country for a request
   (for frontend tests). Ignored in `live` mode.
+- **Attestation** (agent 397's design, `compliance/geoblock/DESIGN.md`; the text and its legal weight are for
+  counsel). `POST /v1/attestations` takes the user's signed eligibility record `{"message":{"account","statementId",
+  "statementHash","residenceCountry","issuedAt","expiresAt"},"signature"}`: EIP-712 primary type `Attestation` under
+  the engine domain (times in ms as decimal strings). The node verifies it with 397's Rust port (the statement must
+  be the current text of `compliance/legal/notices.json`; signature strict and by the account; validity at most
+  400 days) and stores the newest valid record per account. `GET /v1/attestations/{address}` returns
+  `AttestationStatus`: `{"account","status":"valid|expired|missing","residenceCountry","statementId","issuedAt",
+  "expiresAt","record"}` (`record` is the signed record itself, re-verifiable by anyone). Refusals:
+  `400 ATTESTATION_INVALID`, `503 ATTESTATION_UNAVAILABLE` (no statement configured). At admission: a valid record
+  that declares a residence the list does not allow makes the account exit-only whatever its IP says (`451
+  GEO_RESTRICTED`, `details.reason` `RESIDENCE_DECLARED_RESTRICTED`); with `--require-attestation` an action that
+  opens or changes exposure needs a valid record of an allowed residence (`403 ATTESTATION_REQUIRED`,
+  `details.status`). `CancelOrder`, `CancelAll`, reduce-only `PlaceOrder`, `Withdraw`, `RevokeAgent` never need one.
 - Geoblocking at this API is a control of the operator's access point. The L2 forced-action path (cancel, close,
   withdraw) is a contract anyone can call and is not, and cannot be, geoblocked by the node.
 
@@ -398,6 +551,8 @@ An agent wallet is a second key that may trade for an account but can never with
 | 400 | `NONCE_USED` | nonce already used or pending for this signer, or not above the lowest of its 64 highest used (SPEC 2.5) |
 | 403 | `UNKNOWN_SIGNER` | signer is neither the account nor an approved agent |
 | 403 | `AGENT_NOT_ALLOWED` | action type requires the main key |
+| 403 | `ATTESTATION_REQUIRED` | section 6: the action needs a valid attestation of the account |
+| 400 | `ATTESTATION_INVALID` | the attestation record does not verify (`message` says why) |
 | 404 | `NOT_FOUND` | unknown market, height, id |
 | 409 | `MARKET_HALTED` | market does not accept this action now |
 | 413 | `TOO_LARGE` | body over 16 KiB |
@@ -416,7 +571,7 @@ unchanged (for example `INSUFFICIENT_MARGIN`, `POST_ONLY_WOULD_CROSS`, `REDUCE_O
 |---|---|
 | Actions per account | 20 per second, burst 40 |
 | Actions per IP | 50 per second, burst 100 |
-| REST reads per IP | 100 per second |
+| REST reads per IP | 100 per second, burst 200 (`--read-rate`, 0 = off): every GET except the WebSocket upgrade; `429 RATE_LIMITED` |
 | WebSocket connections per IP | 20; subscriptions per connection 100 |
 | Request body | 16 KiB |
 | WebSocket message in | 16 KiB; out queue 1024 messages, then the connection is closed (`SLOW_CONSUMER`) |
@@ -452,8 +607,8 @@ Every data message is `{"channel","type","data"}` plus `symbol`, `interval` or `
 |---|---|---|
 | `book` | `symbol`, `depth` (default 50) | `snapshot`: `Book`. `delta`: `BookDelta` |
 | `trades` | `symbol` | `snapshot`: `{"trades":[Trade]}` (last 50, newest first). `update`: `{"trades":[Trade]}` (the block's trades, oldest first) |
-| `ticker` | `symbol` (or `"*"` for all) | `update`: `Ticker`, at most one per market per second, and at once on funding |
-| `candles` | `symbol`, `interval` | `snapshot`: `{"candles":[Candle]}` (last 300). `update`: `Candle` (the open candle, or a newly closed one) |
+| `ticker` | `symbol` (or `"*"` for all) | `update`: `Ticker`: one at subscription, then at most one per market per second while blocks arrive (a change inside that second is sent when the second ends), and at once on a funding settlement |
+| `candles` | `symbol`, `interval` | `snapshot`: `{"candles":[Candle]}` (last 300, oldest first). `update`: `Candle`: the candle the block's trades fell into, after the block; an update with a new `t` means the previous candle is closed |
 | `account` | `account` (address) | `snapshot`: `AccountSnapshot`. `update`: `AccountUpdate` |
 | `status` | none | `update`: `{"latestBlock":…,"latestFinalized":…}` on every block and every new checkpoint |
 
@@ -484,6 +639,10 @@ the subscribed depth.
 ```
 
 `orders` holds each order whose state changed in the block (including the final `filled` / `canceled` state).
+An update is sent for every block that touched the account: its actions, deposits, forced requests, fills (also as
+a maker or an ADL counterparty), funding payments, liquidation, withdrawals. `account` is always present. At most
+100 subscriptions per connection (`RATE_LIMITED`); an unknown interval or symbol is an `error` frame with the
+subscription's `id`.
 
 ## 10. Mock mode
 
@@ -507,4 +666,32 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 |---|---|---|
 | 0.1 | 2026-11-17 | first version, written before `docs/SPEC.md` exists: action names and typed fields are provisional and follow the spec |
 | 0.2 | 2026-11-17 | admission nonce errors are SPEC's `NONCE_WINDOW` / `NONCE_USED` (no `BAD_NONCE`); `GET /v1/node` holds node diagnostics outside `Status`; `ActionResult` fields flat (`ok`, `error`, `orderId`, `orderStatus`, `filledSize`, `withdrawalId`) |
+| 0.3 | 2026-11-18 | round 2: positions, margin summary, orders, fills, funding, trades, candles, tickers and the oracle status served from the real engine; rounding and pagination rules stated; `GET /v1/orders/{id}`; `?finalized=true`; `AccountProof` and `WithdrawalProof` (`/v1/withdrawals/{id}/proof`) as the vault's inputs; certificate `proof` = 32 siblings; `ForcedAction` + `arg`, `outcome`, `reason`, `processedHeight`; oracle ingest (2.1); `ActionResult` order and withdrawal ids; WebSocket `trades`, `candles`, `ticker` and full `account` updates; nonce text follows SPEC 2.5 |
+| 0.3 | 2026-11-19 | same version, later the same round: `GET /v1/genesis`; CORS; `Position.openNotional`; read rate limit; proofs for any final checkpoint (rebuilt from the log) and from a validator's own read service; attestation records (`/v1/attestations`); snapshots restore the history |
 | 0.2 | 2026-11-17 | follows SPEC 0.1.1 and VAULT.md 0.1: engine domain chainId 700770 + verifyingContract = vault; FIXED scales (price and size 1e-8, USDC 1e-6; per-market decimals are display only); nonce rule SPEC 2.5 (window and 64-set, errors NONCE_WINDOW / NONCE_USED inside `BAD_NONCE` admissions); checkpoint = VAULT 5.2 13 fields; certificate = VAULT `withdraw` inputs (sum-tree proof); block input tags 0x01-0x04 (SPEC 3.2) |
+
+## 12. Not done / not proven (v0.3)
+
+- UNAUDITED prototype; nothing deployed; `live` mode is refused by the binary.
+- History is kept in memory with the limits of section 1 and rebuilt from the log at start; there is no history
+  database and no export.
+- Three displayed values are node-side replicas of engine rules (SPEC 6.2 requirements, the step-4 mark of a funding
+  settlement, the predicted funding rate), cross-checked by tests against the engine's public results
+  (`node/tests/api_views.rs`) and to be replaced by the engine's own values when it exposes them. Order ids of a
+  block are recovered from the engine's events by a rule whose proof is in `node/src/index.rs`; a block where the
+  rule fails is counted in `GET /v1/node` (`index.mismatches`, zero in every test).
+- `Withdrawal.status` stops at `certified`; `Deposit.status` never shows `seen`; `OracleStatus.sources` is empty.
+- `feeTier.volume30d` is a 14-day volume (name kept from v0.1); a `volume14d` field needs a schema change.
+- `Position.openNotional` is new in v0.3 and not yet in the draft schema.
+- `?finalized=true` exists for `GET /v1/accounts/{address}` only (not for market reads), and its positions carry
+  zero `realizedPnl` / `fundingSinceOpen`.
+- The machine-readable schema is still the draft `node/mock/schema/api.schema.json` (agent 435): the v0.3
+  additions (`ForcedAction` extras, `WithdrawalProof`, `OracleIngestAck`, `OracleRounds`, `AccountProof.leafData`
+  fields) are specified here and not yet in that file.
+- A validator's read service has no rate limit and no CORS headers of its own (put it behind the operator's
+  proxy); a state rebuild replays from genesis when no nearer state is held (linear in the height).
+- The node's geoblock decision is still the node's own function (round 1) plus the edge assertion and the
+  attestation step; it is not 397's `decide()` port, and its equality with 397's decision vectors is not proven
+  (sanctions-list freshness, subdivision rules and the hosting rule of the design are not in the node).
+- The oracle ingest token is a shared secret over loopback HTTP; a deployment needs TLS or a private network, and
+  per-signer credentials are not built (the observation's own signature is the real authentication).

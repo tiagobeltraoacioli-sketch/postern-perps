@@ -4,8 +4,8 @@
 //! its own strict decoder (`codec::decode_inputs`, which also re-encodes and compares). A difference between the
 //! node's and the engine's canonical form is therefore a refused block, never a silent reinterpretation.
 //!
-//! Engine 0.1 has no snapshot/restore: `snapshot()` is empty and the sequencer then recovers by replaying the
-//! log from genesis (correct, slower; stated).
+//! Snapshots are the engine's own (SPEC 16): `snapshot()` / `restore()` pass through, and the sequencer checks the
+//! restored root against the root its log holds for that height before it trusts one.
 //!
 //! UNAUDITED PROTOTYPE.
 
@@ -23,6 +23,9 @@ pub struct RealEngine {
     pub g: Arc<Genesis>,
     pub e: pe::Engine,
     log_hash0: H256,
+    /// The state root of `e`, kept from the engine's own block outcome (the engine recomputes it from every
+    /// account on each call; the state changes only through `apply_block` and `restore`).
+    root: H256,
 }
 
 impl RealEngine {
@@ -43,7 +46,8 @@ impl RealEngine {
         }
         let e = pe::Engine::new(checked);
         let log_hash0 = e.log_hash;
-        Ok(RealEngine { g, e, log_hash0 })
+        let root = e.state_root();
+        Ok(RealEngine { g, e, log_hash0, root })
     }
 
     fn agent_allowed(&self, primary: &str) -> bool {
@@ -56,6 +60,7 @@ impl Engine for RealEngine {
         let bytes = encode_inputs(&self.g.types, inputs)?;
         let theirs = pe::codec::decode_inputs(&bytes).map_err(|e| format!("engine decoder refused the node's encoding: {}", e.0))?;
         let out = self.e.apply_block(&pe::Block { height, time, inputs: theirs }).map_err(|e| format!("engine block error {e:?}"))?;
+        self.root = out.state_root;
         let mut bo = BlockOutcome::default();
         for (inp, r) in inputs.iter().zip(&out.outcomes) {
             let ah = match inp {
@@ -71,12 +76,14 @@ impl Engine for RealEngine {
             if let pe::Event::Withdrawal(w) = ev {
                 bo.withdrawals.push(w.id);
             }
-            bo.events.push(serde_json::Value::String(format!("{ev:?}")));
         }
+        bo.typed = out.events;
         Ok(bo)
     }
     fn state_root(&self) -> H256 {
-        self.e.state_root()
+        // every debug build (the whole test suite) proves the kept root against the engine's on each call
+        debug_assert_eq!(self.root, self.e.state_root(), "the kept state root is the engine's");
+        self.root
     }
     fn height(&self) -> u64 {
         self.e.height
@@ -84,11 +91,17 @@ impl Engine for RealEngine {
     fn time(&self) -> u64 {
         self.e.time
     }
+    /// The engine's canonical snapshot (SPEC 16, format version 1).
     fn snapshot(&self) -> Vec<u8> {
-        Vec::new()
+        self.e.snapshot()
     }
-    fn restore(&mut self, _bytes: &[u8]) -> Result<(), String> {
-        Err("engine 0.1 has no snapshot format: replay from genesis".into())
+    /// Loads a snapshot taken under THIS genesis (the engine's strict decoder: checksum, genesis hash, canonical
+    /// re-encoding, structural invariants). The caller compares the restored state root with one it trusts (the
+    /// root logged for that height): `Sequencer::open` does.
+    fn restore(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.e = pe::Engine::restore(self.e.g.clone(), bytes, None).map_err(|e| format!("engine snapshot refused: {e:?}"))?;
+        self.root = self.e.state_root();
+        Ok(())
     }
     fn next_deposit_index(&self) -> u64 {
         self.e.next_deposit
@@ -194,6 +207,26 @@ impl Engine for RealEngine {
     fn name(&self) -> &'static str {
         "postern-perps-engine"
     }
+    fn real(&self) -> Option<&pe::Engine> {
+        Some(&self.e)
+    }
+    fn block_limits(&self) -> (usize, usize) {
+        (pe::engine::MAX_INPUTS, pe::engine::MAX_BLOCK_BYTES)
+    }
+    fn with_real_state(&self, state: pe::Engine) -> Option<Box<dyn Engine>> {
+        let root = state.state_root();
+        Some(Box::new(RealEngine { g: self.g.clone(), e: state, log_hash0: self.log_hash0, root }))
+    }
+    fn genesis_document(&self) -> Option<Vec<u8>> {
+        Some(self.e.g.g.encoding().into())
+    }
+    fn oracle_time_bounds(&self) -> (u64, u64) {
+        (self.e.g.g.oracle_max_future_ms, self.e.g.g.oracle_max_age_ms)
+    }
+    fn precheck_input(&self, input: &Input) -> Result<(), String> {
+        let bytes = encode_inputs(&self.g.types, std::slice::from_ref(input))?;
+        pe::codec::decode_inputs(&bytes).map(|_| ()).map_err(|e| e.0.to_string())
+    }
     fn market_table(&self, g: &Genesis) -> Option<Vec<serde_json::Value>> {
         use crate::util::scaled_to_decimal as d;
         let frac = |ppm: u32| d(ppm as u128, 6);
@@ -275,10 +308,19 @@ pub fn trim(s: String) -> String {
 /// (single source for the table the engine enforces and the API publishes, R393-N1), bound to the node's
 /// committee and vault. Dev overrides, stated: backstop seed 0 and launch insurance minimum 0 (the real values are
 /// owner inputs; with them nothing trades until the funds are seeded).
-pub fn dev_engine_genesis_compliance(g: &Genesis, markets: &serde_json::Value, risk: &serde_json::Value) -> Result<pe::genesis::Checked, String> {
+pub fn dev_engine_genesis_compliance(g: &Genesis, markets: &serde_json::Value, risk: &serde_json::Value, funding_interval_ms: Option<u64>) -> Result<pe::genesis::Checked, String> {
     let signers = g.oracle_committee.iter().map(|a| to_hex(a)).collect();
     let mut eg = pe::genesis::from_compliance(markets, risk, &to_hex(&g.vault), signers, g.oracle_quorum as u8, "0", 250_000)?;
     eg.launch_insurance_min = 0;
     eg.launch_backstop_min = 0;
+    // DEV override (stated in `dev::DevOptions`): a shorter funding interval for rehearsals; part of the genesis hash
+    if let Some(iv) = funding_interval_ms {
+        if iv < 10_000 {
+            return Err("dev funding interval below 10 s refused".into());
+        }
+        for m in eg.markets.iter_mut() {
+            m.funding_interval_ms = iv;
+        }
+    }
     eg.check()
 }

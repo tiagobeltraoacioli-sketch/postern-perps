@@ -49,12 +49,22 @@ impl EdgeVerifier {
     }
 }
 
+/// Everything a list's `denied_policy.exit_only_actions` may name: actions that reduce exposure, take the user's
+/// own funds out, or REMOVE authority. Nothing that opens exposure or grants authority can be listed.
+pub const EXIT_ACTIONS_BOUND: [&str; 4] = ["CancelOrder", "CancelAll", "Withdraw", "RevokeAgent"];
+pub const EXIT_REDUCE_ONLY_ORDER: &str = "PlaceOrder(reduceOnly=true)";
+
 #[derive(Clone)]
 pub struct GeoPolicy {
     pub version: String,
     pub allowed: BTreeSet<String>,
     pub blocked_subdivisions: BTreeSet<String>,
     pub exit_only: bool,
+    /// Action types a denied user may still send (`denied_policy.exit_only_actions` of the list; R436-7), always
+    /// inside `EXIT_ACTIONS_BOUND`.
+    pub exit_actions: BTreeSet<String>,
+    /// `PlaceOrder(reduceOnly=true)` is among the list's exit actions.
+    pub exit_reduce_only_orders: bool,
     pub sanctioned: BTreeSet<Address>,
     pub trusted_proxies: BTreeSet<IpAddr>,
     pub country_header: String,
@@ -108,11 +118,36 @@ impl GeoPolicy {
             }
         }
         let exit_only = j.pointer("/denied_policy/policy").and_then(|v| v.as_str()) == Some("exit_only");
+        // R436-7: the exit actions are the list's. A list may CLOSE more than v0.1 did; it can never open an
+        // action outside the fixed bound (an action that adds exposure or grants authority): such a file is
+        // refused, so an edit of the data cannot widen what a denied user may do.
+        let (mut exit_actions, mut exit_reduce_only_orders) = (BTreeSet::new(), false);
+        match j.pointer("/denied_policy/exit_only_actions") {
+            None => {
+                // a list without the field: the v0.1 rule
+                exit_actions = ["CancelOrder", "CancelAll", "Withdraw"].iter().map(|s| s.to_string()).collect();
+                exit_reduce_only_orders = true;
+            }
+            Some(v) => {
+                for e in v.as_array().ok_or("denied_policy.exit_only_actions must be a list")? {
+                    let name = e.as_str().ok_or("denied_policy.exit_only_actions: entries are strings")?;
+                    if name == EXIT_REDUCE_ONLY_ORDER {
+                        exit_reduce_only_orders = true;
+                    } else if EXIT_ACTIONS_BOUND.contains(&name) {
+                        exit_actions.insert(name.to_string());
+                    } else {
+                        return Err(format!("denied_policy.exit_only_actions: {name:?} can never be an exit action (allowed: {EXIT_ACTIONS_BOUND:?} and {EXIT_REDUCE_ONLY_ORDER:?})"));
+                    }
+                }
+            }
+        }
         Ok(GeoPolicy {
             version,
             allowed,
             blocked_subdivisions,
             exit_only,
+            exit_actions,
+            exit_reduce_only_orders,
             sanctioned: BTreeSet::new(),
             trusted_proxies: BTreeSet::new(),
             country_header: "x-country".into(),
@@ -178,7 +213,8 @@ impl GeoPolicy {
         }
     }
 
-    /// Exit-only actions of `denied_policy` (CancelOrder, CancelAll, reduce-only PlaceOrder, Withdraw).
+    /// The v0.1 exit-only set (CancelOrder, CancelAll, reduce-only PlaceOrder, Withdraw): what a list without
+    /// `exit_only_actions` means. The policy's own set is `is_exit`.
     pub fn is_exit_action(primary: &str, reduce_only: Option<bool>) -> bool {
         match primary {
             "CancelOrder" | "CancelAll" | "Withdraw" => true,
@@ -187,12 +223,20 @@ impl GeoPolicy {
         }
     }
 
+    /// Is this action an exit action of THIS list (R436-7)?
+    pub fn is_exit(&self, primary: &str, reduce_only: Option<bool>) -> bool {
+        if primary == "PlaceOrder" {
+            return self.exit_reduce_only_orders && reduce_only == Some(true);
+        }
+        self.exit_actions.contains(primary)
+    }
+
     /// Whether an action may be admitted under this decision.
     pub fn admits(&self, d: &GeoDecision, primary: &str, reduce_only: Option<bool>) -> bool {
         match d {
             GeoDecision::Allow => true,
             GeoDecision::Sanctioned => false,
-            GeoDecision::ExitOnly { .. } => self.exit_only && Self::is_exit_action(primary, reduce_only),
+            GeoDecision::ExitOnly { .. } => self.exit_only && self.is_exit(primary, reduce_only),
         }
     }
 }
@@ -237,6 +281,48 @@ mod tests {
         assert_eq!(p.decide(Some("PA"), None, &[2u8; 20], &a), GeoDecision::Sanctioned);
     }
 
+    /// R436-7 (Low): the exit actions are the LIST's (`denied_policy.exit_only_actions`), so a denied user can
+    /// revoke a leaked agent key once the list says so (geoblock.json 0.2.2); the node bounds what a list may open.
+    #[test]
+    fn r436_7_exit_actions_come_from_the_list_inside_a_fixed_bound() {
+        let base = |actions: serde_json::Value| {
+            let mut j = serde_json::json!({
+                "version": "t", "unknown_country_effect": "deny",
+                "tiers": {"blocked": {"effect": "deny"}, "allowed": {"effect": "allow"}},
+                "countries": {"PA": {"tier": "allowed"}, "BR": {"tier": "blocked"}},
+                "denied_policy": {"policy": "exit_only"}
+            });
+            if !actions.is_null() {
+                j["denied_policy"]["exit_only_actions"] = actions;
+            }
+            GeoPolicy::from_json(&j, false)
+        };
+        let a = [1u8; 20];
+        // the 0.2.2 list: RevokeAgent leaves authority and moves no value: admitted for a denied country
+        let p = base(serde_json::json!(["CancelOrder", "CancelAll", "PlaceOrder(reduceOnly=true)", "Withdraw", "RevokeAgent"])).unwrap();
+        let d = p.decide(Some("BR"), None, &a, &a);
+        assert!(p.admits(&d, "RevokeAgent", None));
+        assert!(!p.admits(&d, "ApproveAgent", None), "granting authority stays refused");
+        assert!(p.admits(&d, "PlaceOrder", Some(true)) && !p.admits(&d, "PlaceOrder", Some(false)) && !p.admits(&d, "PlaceOrder", None));
+        assert!(p.admits(&d, "Withdraw", None) && p.admits(&d, "CancelOrder", None) && p.admits(&d, "CancelAll", None));
+        // a list without it (0.2.1) and a file without the field (the v0.1 rule) refuse it
+        let p = base(serde_json::json!(["CancelOrder", "CancelAll", "PlaceOrder(reduceOnly=true)", "Withdraw"])).unwrap();
+        assert!(!p.admits(&p.decide(Some("BR"), None, &a, &a), "RevokeAgent", None));
+        let p = base(serde_json::Value::Null).unwrap();
+        let d = p.decide(Some("BR"), None, &a, &a);
+        assert!(!p.admits(&d, "RevokeAgent", None) && p.admits(&d, "Withdraw", None) && p.admits(&d, "PlaceOrder", Some(true)));
+        // a shorter list is honoured (a list may close more)
+        let p = base(serde_json::json!(["Withdraw"])).unwrap();
+        let d = p.decide(Some("BR"), None, &a, &a);
+        assert!(p.admits(&d, "Withdraw", None) && !p.admits(&d, "CancelAll", None) && !p.admits(&d, "PlaceOrder", Some(true)));
+        // a list can never OPEN an action that adds exposure or authority: the file is refused (fail closed)
+        for bad in ["ApproveAgent", "PlaceOrder", "UpdateLeverage", "UpdateMargin", "PlaceOrder(reduceOnly=false)", "Deposit", ""] {
+            assert!(base(serde_json::json!(["Withdraw", bad])).is_err(), "{bad:?} must not be accepted as an exit action");
+        }
+        assert!(base(serde_json::json!("Withdraw")).is_err(), "not a list");
+        assert!(base(serde_json::json!([1])).is_err());
+    }
+
     #[test]
     fn country_only_from_trusted_proxy_in_live_mode() {
         let mut p = policy();
@@ -258,6 +344,11 @@ mod tests {
             let j: serde_json::Value = serde_json::from_slice(&b).unwrap();
             let p = GeoPolicy::from_json(&j, false).unwrap();
             assert!(p.exit_only);
+            // R436-7: whatever version of the list is checked out, its exit actions keep the four of v0.1
+            let a = [1u8; 20];
+            let d = p.decide(Some("BR"), None, &a, &a);
+            assert!(p.admits(&d, "CancelOrder", None) && p.admits(&d, "CancelAll", None) && p.admits(&d, "Withdraw", None) && p.admits(&d, "PlaceOrder", Some(true)));
+            assert!(!p.admits(&d, "ApproveAgent", None) && !p.admits(&d, "PlaceOrder", Some(false)));
             for c in ["US", "BR", "GB", "CA", "KP", "IR"] {
                 assert!(!p.allowed.contains(c), "{c} must not be open");
             }
