@@ -3575,9 +3575,12 @@ td.strong {
     gap: var(--s-5);
     min-height: 0;
   }
+  /* Words and the way in first; the gate closes the first screen. */
   .gate-art {
-    order: -1;
-    width: min(62%, 260px);
+    width: min(70%, 280px);
+  }
+  .hero-eyebrow {
+    letter-spacing: 0.06em;
   }
   .strip button {
     grid-template-columns: auto minmax(0, 1fr) auto;
