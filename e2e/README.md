@@ -29,7 +29,7 @@ The build host address and the ssh identity path are operator facts kept in the 
 ```
 bash e2e/integrate.sh                      # local integration worktree = main + every round-2 branch (never pushed)
 bash e2e/build.sh int HEAD ~/worktrees/perps-e2e-r2-int-20261118
-bash e2e/up.sh --label int --local-validators 4 [--frontend]
+bash e2e/up.sh --label int --local-validators 4 [--frontend]   # 4 validators in the sequencer process, 3 separate
 node e2e/rehearsal/run.mjs                 # every phase; --only A,B,C or --skip K; evidence JSON
 bash e2e/down.sh                           # stops everything by PID
 bash e2e/hostctl.sh test-all.sh int        # whole Rust test set of a built tree (on the build host)
@@ -63,7 +63,7 @@ counted as passed). The evidence file holds every check and the stack descriptio
 | I validators | signature by a stranger refused; a committee member signing another state root refused and never published; 3 of 7 stopped: blocks continue, nothing becomes final, finality returns with the fifth; each restarted validator signs again (finality with exactly 5 running when it is one of them); sequencer stopped cleanly and by SIGKILL: same chain after restart, finality resumes |
 | J geoblock | opening order from Brazil 451, exit actions still admitted, unknown country denied |
 | L conformance | the whole shared API conformance suite against this stack with two funded accounts, nothing skipped |
-| K escape (last, one way) | every account's escape leaf fetched and verified for the vault's last checkpoint; committee stopped; a late deposit; escape refused early, triggered after `escapeDelay`; vault takes nothing more; claims wait for the system shares; users are senior and paid in full; fee share only to the owner's address; no claim twice; late deposit refunded; books close to the unit; system share locked |
+| K escape (last, one way) | every account's escape leaf fetched and verified for the vault's last checkpoint; sequencer and feeder stopped; the same proofs served by a validator's own read service WITHOUT the sequencer, verified against the vault's root and used for the claims; a late deposit; escape refused early, triggered after `escapeDelay`; vault takes nothing more; claims wait for the system shares; users are senior and paid in full; fee share only to the owner's address; no claim twice; late deposit refunded; books close to the unit; system share locked |
 
 Arithmetic and key derivations of the rehearsal have their own tests (`e2e/test/`), as does the proxy.
 
@@ -71,8 +71,8 @@ Arithmetic and key derivations of the rehearsal have their own tests (`e2e/test/
 
 - The L2 is anvil, not the Bloch L2: no proof-based finality, no real bUSDC bytecode, gas not measured there.
 - The two L2 endpoints read ONE chain: their agreement proves nothing by itself; only the lying-endpoint checks do.
-- Escape proofs are fetched from the sequencer's API before it is stopped; fetching them without the sequencer
-  (from a validator's log, R436-11) is not rehearsed.
+- Escape without the sequencer is rehearsed with ONE validator's read service still running (K-02b); nothing
+  obliges a validator to keep serving its log, and a claimant with no source at all is not rehearsed (R436-11).
 - A shortfall escape (an account under water at the last checkpoint: insurance first, then pro rata) is covered by
   the vault's forge tests on engine-produced vectors (433), not by this rehearsal.
 - The edge module (per-action geo assertion, `compliance/geoblock/edge`) is not a process of the stack: J-04 is
