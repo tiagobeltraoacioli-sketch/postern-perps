@@ -21,12 +21,15 @@ D["Symbol"]={"type":"string","pattern":r"^[A-Z0-9]{2,12}-USD$"}
 D["Side"]=enum("buy","sell")
 D["Error"]=obj({"error":obj({"code":{"type":"string","pattern":r"^[A-Z][A-Z0-9_]*$"},"message":{"type":"string"},"details":{"type":"object"}})})
 D["MarginTier"]=obj({"notionalFloor":R("UDec"),"initialMarginFraction":R("UDec"),"maintenanceMarginFraction":R("UDec"),"maxLeverage":R("UDec")})
-D["OracleConfig"]=obj({"sources":arr({"type":"string","minLength":1},minItems=1),"minSources":R("Int"),"maxStalenessMs":R("Int"),"maxDeviationBps":R("UDec")})
+# API 0.3 (431 031ed40, optional additions): the exit band parameters of a halted market, from the engine's own table
+D["OracleConfig"]=obj({"sources":arr({"type":"string","minLength":1},minItems=1),"minSources":R("Int"),"maxStalenessMs":R("Int"),"maxDeviationBps":R("UDec"),
+ "exitHaircutBps":R("Int"),"exitHaircutPerMinBps":R("Int"),"exitMaxHaircutBps":R("Int"),"maxHaltMs":R("Int")},opt=("exitHaircutBps","exitHaircutPerMinBps","exitMaxHaircutBps","maxHaltMs"))
 D["Market"]=obj({"symbol":R("Symbol"),"marketId":{"type":"integer","minimum":1,"maximum":4294967295},"base":{"type":"string","pattern":"^[A-Z0-9]{2,12}$"},"quote":{"const":"USD"},
  "status":enum("active","halted","closeOnly","settled"),"priceDecimals":{"type":"integer","minimum":0,"maximum":18},"sizeDecimals":{"type":"integer","minimum":0,"maximum":18},
  "tickSize":R("UDec"),"stepSize":R("UDec"),"minOrderSize":R("UDec"),"maxOrderSize":R("UDec"),"maxLeverage":R("UDec"),"marginTiers":arr(R("MarginTier"),minItems=1),
  "makerFeeBps":R("Dec"),"takerFeeBps":R("UDec"),"liquidationFeeBps":R("UDec"),"fundingIntervalSec":R("Int"),"maxFundingRate":R("UDec"),"oracle":R("OracleConfig"),"openInterestCap":R("UDec"),
- "haltReason":nul({"type":"string"})},opt=("haltReason",))
+ "haltReason":nul({"type":"string"}),
+ "markBandBps":R("Int"),"marketSlippageBps":R("Int")},opt=("haltReason","markBandBps","marketSlippageBps"))
 D["Ticker"]=obj({"symbol":R("Symbol"),"markPrice":R("UDec"),"indexPrice":R("UDec"),"lastPrice":R("UDec"),"fundingRate":R("Dec"),"nextFundingTime":R("Ms"),"openInterest":R("UDec"),
  "volume24h":R("UDec"),"high24h":R("UDec"),"low24h":R("UDec"),"price24hAgo":R("UDec"),"change24h":R("Dec"),"height":R("Int"),"time":R("Ms")})
 D["Level"]={"type":"array","prefixItems":[R("UDec"),R("UDec")],"minItems":2,"maxItems":2}
@@ -37,7 +40,8 @@ D["Candle"]=obj({"t":R("Ms"),"o":R("UDec"),"h":R("UDec"),"l":R("UDec"),"c":R("UD
 D["FundingRate"]=obj({"symbol":R("Symbol"),"time":R("Ms"),"rate":R("Dec"),"premium":R("Dec"),"markPrice":R("UDec"),"indexPrice":R("UDec")})
 D["OracleSource"]=obj({"name":{"type":"string"},"price":nul(R("UDec")),"time":nul(R("Ms")),"used":{"type":"boolean"},"reason":{"type":["string","null"]}},opt=("reason",))
 D["OracleStatus"]=obj({"symbol":R("Symbol"),"status":enum("ok","stale","insufficientSources","deviation","halted"),"price":R("UDec"),"time":R("Ms"),"round":R("U64"),
- "sources":arr(R("OracleSource")),"signers":R("Int"),"threshold":R("Int"),"haltReason":{"type":["string","null"]}})
+ "sources":arr(R("OracleSource")),"signers":R("Int"),"threshold":R("Int"),"haltReason":{"type":["string","null"]},
+ "haltedSince":nul(R("Ms")),"exitBand":nul(obj({"low":R("UDec"),"high":R("UDec"),"settlePrice":R("UDec"),"settleDue":{"type":"boolean"},"asOf":R("Ms")}))},opt=("haltedSince","exitBand"))
 D["BlockRef"]=obj({"height":R("Int"),"time":R("Ms"),"hash":R("Hash"),"stateRoot":R("Hash"),"logHash":R("Hash")})
 D["Status"]=obj({"name":{"type":"string"},"version":{"type":"string"},"apiVersion":{"type":"string","pattern":r"^[0-9]+\.[0-9]+$"},"mode":enum("mock","dev","live"),"unaudited":{"type":"boolean"},
  "network":obj({"eip712":R("Domain"),"collateralChainId":{"const":700770},"vault":R("Address"),"collateralToken":R("Address"),"collateralSymbol":{"type":"string"},"collateralDecimals":{"const":6}}),

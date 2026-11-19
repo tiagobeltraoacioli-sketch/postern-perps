@@ -115,11 +115,14 @@ export default async function (ctx) {
         expect(w.body?.result?.ok === true, JSON.stringify(w.body));
         id2 = Number(w.body.result.withdrawalId);
         await api.until(async () => (await api.json(`/v1/withdrawals/${id2}`)).status === 'certified', { ms: 60000, what: 'certified' });
-        during = await api.until(async () => { const r = await relayer(); return pattern.test(r.lastError ?? '') || pattern.test(r.alarm ?? '') ? r : null; }, { ms: 60000, every: 1000, what: `the relayer reporting ${pattern}` });
-        await sleep(6000);
+        // baseline = the moment the relayer first reports the fault for THIS due checkpoint (a delivery it had begun
+        // for an earlier record may still land between the fault being set and its next reading)
+        const first = await api.until(async () => { const r = await relayer(); return pattern.test(r.lastError ?? '') || pattern.test(r.alarm ?? '') ? r : null; }, { ms: 60000, every: 1000, what: `the relayer reporting ${pattern}` });
+        await sleep(8000);
         during = await relayer();
         countDuring = await vaultCount();
-        expect(during.submitted === r0.submitted, `the relayer submitted ${during.submitted - r0.submitted} transaction(s) while one endpoint ${what}`);
+        expect(pattern.test(during.lastError ?? '') || pattern.test(during.alarm ?? ''), `the relayer stopped reporting the fault: ${JSON.stringify(during).slice(0, 200)}`);
+        expect(during.submitted === first.submitted, `the relayer submitted ${during.submitted - first.submitted} transaction(s) after it had seen that one endpoint ${what}`);
         expect(countDuring <= id2, `the vault received a checkpoint with ${countDuring} records while the relayer should have held`);
       } finally {
         await fault('none');

@@ -115,7 +115,8 @@ export default async function (ctx) {
     await api.cancelAll(maker);
     // 50 rounds (150 s) without any oracle submission, then the same prices again
     await ctx.feed('dark', [{ p: { 1: I0, ...others } }, { silent: 50 }, { p: { 1: I0, ...others }, repeat: 100000 }]);
-    const halted = await api.until(async () => { const m = await api.json('/v1/markets/BTC-USD'); return m.status === 'halted' ? m : null; }, { ms: 60000, every: 1000, what: 'BTC-USD halted' });
+    // without oracle inputs nothing makes a block, and the staleness rule runs per block: an exit-only action ticks
+    const halted = await api.until(async () => { await api.cancelAll(ctx.who('alice')); const m = await api.json('/v1/markets/BTC-USD'); return m.status === 'halted' ? m : null; }, { ms: 90000, every: 1500, what: 'BTC-USD halted' });
     const refused = await api.order(bob, btc, { buy: false, price: onTick(btc, I0, -100), size: '0.05', tif: 1, reduceOnly: true }, { wait: false });
     const q = await request(1, 0, bob);
     expect(q.forced.outcome === 'served', JSON.stringify(q.forced));
