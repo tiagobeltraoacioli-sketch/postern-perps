@@ -45,7 +45,11 @@ if (!account) {
     if (score > best) [best, account] = [score, a];
   }
 }
-if (!/^0x[0-9a-fA-F]{40}$/.test(account)) throw new Error('no account to watch');
+if (!/^0x[0-9a-fA-F]{40}$/.test(account)) {
+  // A stack that was just started has no account yet: nothing to show, and not a failure of the page.
+  console.log('the stack names no account yet (no deposit, no action in its blocks): nothing to watch; run again later');
+  process.exit(2);
+}
 const facts = { account, node: { mode: status.mode, apiVersion: status.apiVersion, height: status.latestBlock.height, vault: status.network.vault } };
 facts.engine = await get(`/v1/accounts/${account}`);
 facts.fills = (await get(`/v1/accounts/${account}/fills?limit=500`)).fills.length;

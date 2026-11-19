@@ -2407,6 +2407,11 @@ td.strong {
   }
   .trade .book .book-ask {
     justify-content: flex-end;
+    /* The far end of each side fades out where the panel cuts it: a half row never reads as a level. */
+    mask-image: linear-gradient(to bottom, transparent, var(--text) 20px);
+  }
+  .trade .book .book-bid {
+    mask-image: linear-gradient(to top, transparent, var(--text) 20px);
   }
   .trade-account .account-tables {
     height: 100%;
