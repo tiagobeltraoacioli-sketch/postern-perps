@@ -5,6 +5,10 @@ import { BAR_SHARE } from '../trade/BookAndTrades';
 import { trimZeros } from '../trade/ChartPanel';
 import { notional, type Level } from '../lib/calc';
 import appSource from '../App.tsx?raw';
+import stackWriteSource from '../../integration/browser/stack-write.mjs?raw';
+import pinnedVault from '../../config/vault-abi.json';
+import { toFunctionSelector, type AbiFunction } from 'viem';
+import { VAULT_ABI } from '../vault/abi';
 import { openNotionalOf } from '../lib/convert';
 import { allBandsWords, bandFor, currentBand, exitBand, notePublishedMarkets } from '../lib/exit-band';
 import { MAX_SLIPPAGE_PPM, maxSlippagePpm } from '../trade/order-builder';
@@ -154,5 +158,26 @@ describe('F434-5 / F434-6: the exchange\'s own published bands come first, the l
     expect(maxSlippagePpm({ marketSlippagePpm: null })).toBe(MAX_SLIPPAGE_PPM);
     expect(maxSlippagePpm({ marketSlippagePpm: 50_000n })).toBe(50_000n);
     expect(maxSlippagePpm({ marketSlippagePpm: 500_000n })).toBe(MAX_SLIPPAGE_PPM);
+  });
+});
+
+describe('one vault ABI: the pinned file, for the page and for the harness that drives it', () => {
+  it('the page\'s vault ABI is the pinned file itself', () => {
+    expect(VAULT_ABI).toBe(pinnedVault.abi);
+  });
+  it('the pinned deposit is deposit(uint64 amount, address account), selector 0x576bcd2f (435\'s run on the real vault)', () => {
+    const deposit = (pinnedVault.abi as AbiFunction[]).filter((f) => f.type === 'function' && f.name === 'deposit');
+    expect(deposit).toHaveLength(1);
+    expect(deposit[0].inputs.map((i) => `${i.type} ${i.name}`)).toEqual(['uint64 amount', 'address account']);
+    expect(toFunctionSelector(deposit[0])).toBe('0x576bcd2f');
+  });
+  it('stack-write.mjs reads that file and writes no vault signature of its own', () => {
+    expect(stackWriteSource).toContain("new URL('../../config/vault-abi.json', import.meta.url)");
+    // Its only hand-written fragments are the mock token's (mint, balanceOf, approve): none names a vault function.
+    const fragments = [...stackWriteSource.matchAll(/'function ([A-Za-z_]+)\(/g)].map((m) => m[1]);
+    expect(fragments.sort()).toEqual(['approve', 'balanceOf', 'mint']);
+    const vaultNames = new Set((pinnedVault.abi as AbiFunction[]).filter((f) => f.type === 'function').map((f) => f.name));
+    for (const name of ['deposit', 'withdraw', 'release', 'requestForced', 'claimEscape']) expect(vaultNames.has(name)).toBe(true);
+    expect(stackWriteSource).not.toMatch(/function (deposit|withdraw|release)\(/);
   });
 });
