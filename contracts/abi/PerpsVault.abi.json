@@ -1,0 +1,2214 @@
+[
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "address",
+      "name": "token",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "feeRecipient",
+      "type": "address"
+     },
+     {
+      "internalType": "address[]",
+      "name": "validators",
+      "type": "address[]"
+     },
+     {
+      "internalType": "uint8",
+      "name": "threshold",
+      "type": "uint8"
+     },
+     {
+      "internalType": "uint8",
+      "name": "unpauseThreshold",
+      "type": "uint8"
+     },
+     {
+      "internalType": "uint64",
+      "name": "cap",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "minDeposit",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "windowLimit",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "windowSeconds",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "largeThreshold",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "largeDelay",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "forcedDelay",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "escapeDelay",
+      "type": "uint64"
+     },
+     {
+      "internalType": "address[]",
+      "name": "guardians",
+      "type": "address[]"
+     },
+     {
+      "internalType": "uint64",
+      "name": "pauseDuration",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "pauseCooldown",
+      "type": "uint64"
+     }
+    ],
+    "internalType": "struct PerpsVault.Config",
+    "name": "c",
+    "type": "tuple"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "constructor"
+ },
+ {
+  "inputs": [],
+  "name": "CHECKPOINT_TYPEHASH",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SURPLUS_DELAY",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "UNPAUSE_TYPEHASH",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "availableToRelease",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "bucket",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "bucketUpdatedAt",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "cap",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "checkpointCount",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "uint64",
+      "name": "height",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "time",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "logHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "accountsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "marketsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "withdrawalsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextDepositIndex",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextForcedIndex",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextOrderId",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint128",
+      "name": "totalEscape",
+      "type": "uint128"
+     },
+     {
+      "internalType": "uint128",
+      "name": "dust",
+      "type": "uint128"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "auxHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "depositsHead",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "forcedHead",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "withdrawalCount",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "withdrawalsTotal",
+      "type": "uint64"
+     }
+    ],
+    "internalType": "struct PerpsVault.Checkpoint",
+    "name": "cp",
+    "type": "tuple"
+   }
+  ],
+  "name": "checkpointDigest",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "address",
+      "name": "account",
+      "type": "address"
+     },
+     {
+      "internalType": "uint32",
+      "name": "index",
+      "type": "uint32"
+     },
+     {
+      "internalType": "int128",
+      "name": "balance",
+      "type": "int128"
+     },
+     {
+      "internalType": "uint64",
+      "name": "escapeValue",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "positionsHash",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct PerpsVault.Account",
+    "name": "a",
+    "type": "tuple"
+   },
+   {
+    "internalType": "bytes32[]",
+    "name": "siblings",
+    "type": "bytes32[]"
+   },
+   {
+    "internalType": "uint64",
+    "name": "want",
+    "type": "uint64"
+   }
+  ],
+  "name": "claimEscape",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "committedOut",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "custody",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "decimals",
+  "outputs": [
+   {
+    "internalType": "uint8",
+    "name": "",
+    "type": "uint8"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   },
+   {
+    "internalType": "address",
+    "name": "account",
+    "type": "address"
+   }
+  ],
+  "name": "deposit",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "index",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "depositCount",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "count",
+    "type": "uint64"
+   }
+  ],
+  "name": "depositHead",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "depositTotalAt",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "depositedTotal",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "domainSeparator",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "escapeAt",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "escapeClaimedTotal",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "escapeDelay",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "account",
+    "type": "address"
+   }
+  ],
+  "name": "escapeKey",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "pure",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "escapePayable",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "escapePool",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "escapeReason",
+  "outputs": [
+   {
+    "internalType": "uint8",
+    "name": "",
+    "type": "uint8"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "feeRecipient",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "forcedCount",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "forcedDeadline",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "forcedDelay",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "count",
+    "type": "uint64"
+   }
+  ],
+  "name": "forcedHead",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "guardianBlockedUntil",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "guardian",
+    "type": "address"
+   }
+  ],
+  "name": "guardianCanPause",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "guardianCount",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "guardianLastChain",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "guardianPause",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "name": "guardians",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "hasDeposited",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "inEscape",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "isGuardian",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "isValidator",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "largeDelay",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "largeThreshold",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "lastCheckpointAt",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "lastForcedPlusOne",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "latest",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "height",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "time",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "nextDepositIndex",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "nextForcedIndex",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "withdrawalCount",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "withdrawalsTotal",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint128",
+    "name": "totalEscape",
+    "type": "uint128"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "accountsRoot",
+    "type": "bytes32"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "stateRoot",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "minDeposit",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pauseChain",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pauseCooldown",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pauseCount",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pauseDuration",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "paused",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "pausedUntil",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "name": "payouts",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "internalType": "uint64",
+    "name": "total",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "paid",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint64",
+    "name": "readyAt",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "address",
+      "name": "account",
+      "type": "address"
+     },
+     {
+      "internalType": "uint32",
+      "name": "index",
+      "type": "uint32"
+     },
+     {
+      "internalType": "int128",
+      "name": "balance",
+      "type": "int128"
+     },
+     {
+      "internalType": "uint64",
+      "name": "escapeValue",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "positionsHash",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct PerpsVault.Account",
+    "name": "insurance",
+    "type": "tuple"
+   },
+   {
+    "internalType": "bytes32[]",
+    "name": "insuranceSiblings",
+    "type": "bytes32[]"
+   },
+   {
+    "components": [
+     {
+      "internalType": "address",
+      "name": "account",
+      "type": "address"
+     },
+     {
+      "internalType": "uint32",
+      "name": "index",
+      "type": "uint32"
+     },
+     {
+      "internalType": "int128",
+      "name": "balance",
+      "type": "int128"
+     },
+     {
+      "internalType": "uint64",
+      "name": "escapeValue",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "positionsHash",
+      "type": "bytes32"
+     }
+    ],
+    "internalType": "struct PerpsVault.Account",
+    "name": "backstop",
+    "type": "tuple"
+   },
+   {
+    "internalType": "bytes32[]",
+    "name": "backstopSiblings",
+    "type": "bytes32[]"
+   }
+  ],
+  "name": "proveSystemShares",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "index",
+    "type": "uint64"
+   },
+   {
+    "internalType": "address",
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   }
+  ],
+  "name": "refundDeposit",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "refunded",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "refundedTotal",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   },
+   {
+    "internalType": "uint64",
+    "name": "want",
+    "type": "uint64"
+   }
+  ],
+  "name": "release",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint8",
+    "name": "kind",
+    "type": "uint8"
+   },
+   {
+    "internalType": "uint64",
+    "name": "arg",
+    "type": "uint64"
+   }
+  ],
+  "name": "requestForced",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "index",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "reserved",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "uint64",
+      "name": "height",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "time",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "logHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "accountsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "marketsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "withdrawalsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextDepositIndex",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextForcedIndex",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextOrderId",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint128",
+      "name": "totalEscape",
+      "type": "uint128"
+     },
+     {
+      "internalType": "uint128",
+      "name": "dust",
+      "type": "uint128"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "auxHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "depositsHead",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "forcedHead",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "withdrawalCount",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "withdrawalsTotal",
+      "type": "uint64"
+     }
+    ],
+    "internalType": "struct PerpsVault.Checkpoint",
+    "name": "cp",
+    "type": "tuple"
+   }
+  ],
+  "name": "stateRootOf",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "pure",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "components": [
+     {
+      "internalType": "uint64",
+      "name": "height",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "time",
+      "type": "uint64"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "logHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "accountsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "marketsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "withdrawalsRoot",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextDepositIndex",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextForcedIndex",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "nextOrderId",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint128",
+      "name": "totalEscape",
+      "type": "uint128"
+     },
+     {
+      "internalType": "uint128",
+      "name": "dust",
+      "type": "uint128"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "auxHash",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "depositsHead",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "forcedHead",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "withdrawalCount",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "withdrawalsTotal",
+      "type": "uint64"
+     }
+    ],
+    "internalType": "struct PerpsVault.Checkpoint",
+    "name": "cp",
+    "type": "tuple"
+   },
+   {
+    "internalType": "bytes[]",
+    "name": "signatures",
+    "type": "bytes[]"
+   }
+  ],
+  "name": "submitCheckpoint",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "subordinatedTotal",
+  "outputs": [
+   {
+    "internalType": "uint128",
+    "name": "",
+    "type": "uint128"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "surplusSwept",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "sweepEscapeSurplus",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "systemFunder",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "systemSharesProven",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "threshold",
+  "outputs": [
+   {
+    "internalType": "uint8",
+    "name": "",
+    "type": "uint8"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "token",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "triggerEscape",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "count",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint256",
+    "name": "validUntil",
+    "type": "uint256"
+   },
+   {
+    "internalType": "bytes[]",
+    "name": "signatures",
+    "type": "bytes[]"
+   }
+  ],
+  "name": "unpause",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "count",
+    "type": "uint64"
+   },
+   {
+    "internalType": "uint256",
+    "name": "validUntil",
+    "type": "uint256"
+   }
+  ],
+  "name": "unpauseDigest",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "unpauseThreshold",
+  "outputs": [
+   {
+    "internalType": "uint8",
+    "name": "",
+    "type": "uint8"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "validatorCount",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "name": "validators",
+  "outputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "windowLimit",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "windowSeconds",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "seq",
+    "type": "uint64"
+   },
+   {
+    "components": [
+     {
+      "internalType": "uint64",
+      "name": "withdrawalId",
+      "type": "uint64"
+     },
+     {
+      "internalType": "address",
+      "name": "account",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "recipient",
+      "type": "address"
+     },
+     {
+      "internalType": "uint64",
+      "name": "amount",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "height",
+      "type": "uint64"
+     }
+    ],
+    "internalType": "struct PerpsVault.Withdrawal",
+    "name": "w",
+    "type": "tuple"
+   },
+   {
+    "internalType": "bytes32[]",
+    "name": "siblings",
+    "type": "bytes32[]"
+   },
+   {
+    "internalType": "uint64",
+    "name": "want",
+    "type": "uint64"
+   }
+  ],
+  "name": "withdraw",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "withdrawalCountAt",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "withdrawalId",
+    "type": "uint64"
+   }
+  ],
+  "name": "withdrawalKey",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "pure",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "name": "withdrawalsRootAt",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "withdrawnTotal",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "seq",
+    "type": "uint64"
+   },
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "height",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes32",
+    "name": "stateRoot",
+    "type": "bytes32"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes32",
+    "name": "withdrawalsRoot",
+    "type": "bytes32"
+   }
+  ],
+  "name": "CheckpointAccepted",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "index",
+    "type": "uint64"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "sender",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes32",
+    "name": "head",
+    "type": "bytes32"
+   }
+  ],
+  "name": "Deposit",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "at",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint8",
+    "name": "reason",
+    "type": "uint8"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "checkpointSeq",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "payable_",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint128",
+    "name": "totalEscape",
+    "type": "uint128"
+   }
+  ],
+  "name": "EscapeTriggered",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "index",
+    "type": "uint64"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint8",
+    "name": "kind",
+    "type": "uint8"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "deadline",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "arg",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes32",
+    "name": "head",
+    "type": "bytes32"
+   }
+  ],
+  "name": "ForcedRequest",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "guardian",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "pauseCount",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "pausedUntil",
+    "type": "uint64"
+   }
+  ],
+  "name": "GuardianPaused",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   }
+  ],
+  "name": "Paid",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "total",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "readyAt",
+    "type": "uint64"
+   }
+  ],
+  "name": "PayoutRegistered",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "index",
+    "type": "uint64"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "account",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   }
+  ],
+  "name": "Refunded",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "recipient",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "amount",
+    "type": "uint64"
+   }
+  ],
+  "name": "SurplusSwept",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint64",
+    "name": "pauseCount",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "guardianBlockedUntil",
+    "type": "uint64"
+   }
+  ],
+  "name": "Unpaused",
+  "type": "event"
+ },
+ {
+  "inputs": [],
+  "name": "AlreadyRegistered",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "EscapeActive",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "EscapeNotDue",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "Insolvent",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidCertificate",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidCheckpoint",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidConfiguration",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidDeposit",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidForced",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidPause",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidProof",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidRefund",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidSurplus",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidTransfer",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidWithdrawal",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotEscape",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotGuardian",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotReady",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotRegistered",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "Paused",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "RateLimited",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "Reentrancy",
+  "type": "error"
+ }
+]

@@ -10,6 +10,8 @@ interface ScriptVm {
     function parseJsonString(string calldata json, string calldata key) external pure returns (string memory);
     function parseJsonStringArray(string calldata json, string calldata key) external pure returns (string[] memory);
     function parseJsonUint(string calldata json, string calldata key) external pure returns (uint256);
+    function parseJsonBytes32(string calldata json, string calldata key) external pure returns (bytes32);
+    function toString(bytes32 v) external pure returns (string memory);
     function parseAddress(string calldata s) external pure returns (address);
     function startBroadcast() external;
     function stopBroadcast() external;
@@ -22,8 +24,10 @@ interface ScriptVm {
 ///   VAULT_CONFIG=deploy/vault.config.json forge script script/DeployPerpsVault.s.sol --rpc-url <L2 RPC> --ledger --broadcast
 ///
 /// The script refuses to run unless: the config has no `TBD` value, the RPC's chain id equals the config's, the fee
-/// recipient is the owner's fixed address, and (`MODE=check`, read-only) the deployed vault's immutables and committee
-/// equal the config. It prints every value before the transaction so the owner can compare it with the config file.
+/// recipient is the owner's fixed address, the token's runtime code hash equals the pinned `tokenCodehash`, and
+/// (`MODE=check`, read-only, and after every deployment) the vault's runtime code equals the code this build gives for
+/// this config (R436-9) and its immutables and committee equal the config. It prints every value before the
+/// transaction so the owner can compare it with the config file.
 contract DeployPerpsVault {
     ScriptVm internal constant vm = ScriptVm(address(uint160(uint256(keccak256("hevm cheat code")))));
     address internal constant OWNER_FEE_ADDRESS = 0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544;
@@ -35,7 +39,11 @@ contract DeployPerpsVault {
         PerpsVault.Config memory c = _read(json);
         require(block.chainid == vm.parseJsonUint(json, ".chainId"), "RPC chain id differs from the config");
         require(c.feeRecipient == OWNER_FEE_ADDRESS, "fee recipient is not the owner's fixed address");
+        // Bridge pattern: the collateral token is pinned by its runtime code hash (a `TBD` value does not parse).
+        bytes32 tokenCodehash = vm.parseJsonBytes32(json, ".tokenCodehash");
+        _checkToken(c.token, tokenCodehash);
         _print(c);
+        emit log(string.concat("token runtime code hash ", vm.toString(tokenCodehash)));
         string memory mode = vm.envOr("MODE", "deploy");
         if (keccak256(bytes(mode)) == keccak256("check")) {
             deployed = vm.parseAddress(vm.envString("VAULT"));
@@ -102,8 +110,20 @@ contract DeployPerpsVault {
         emit log(string.concat("pause ", vm.toString(c.pauseDuration), " cooldown ", vm.toString(c.pauseCooldown)));
     }
 
-    function _check(PerpsVault v, PerpsVault.Config memory c) internal view {
+    function _checkToken(address token, bytes32 pinned) internal view {
+        require(token.code.length != 0, "no code at the token address");
+        require(token.codehash == pinned, "token runtime code differs from the pinned tokenCodehash");
+    }
+
+    function _check(PerpsVault v, PerpsVault.Config memory c) internal {
         require(address(v).code.length != 0, "no code at the vault address");
+        // R436-9: the code itself, not only what it answers. A twin built here from the same config has the same
+        // runtime code (immutables included; no metadata hash in this build). The twin exists only in the script's
+        // simulation: it is created outside startBroadcast/stopBroadcast and is never sent.
+        require(
+            address(v).codehash == address(new PerpsVault(c)).codehash,
+            "runtime code differs from this build with this config"
+        );
         require(v.token() == c.token && v.feeRecipient() == c.feeRecipient, "token / fee recipient");
         require(v.threshold() == c.threshold && v.unpauseThreshold() == c.unpauseThreshold, "thresholds");
         require(v.cap() == c.cap && v.minDeposit() == c.minDeposit, "cap / min deposit");
