@@ -19,7 +19,10 @@ describe('market pin = compliance/markets.json (signing fields)', () => {
         step: c.step,
       });
     }
-    expect(pinned.source).toBe(`compliance/markets.json ${compliance.version}`);
+    // The pin names the table it was generated from; a later version of that table that changes no signing field
+    // (435's 0.2.2: oracle exit-band fields only) needs no new pin, so the version itself is not compared.
+    expect(pinned.source).toMatch(/^compliance\/markets\.json \d+\.\d+\.\d+$/);
+    expect(compliance.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
   it('the display precision equals the precision of the tick and the step (SPEC 1)', () => {
     const places = (s: string) => (s.includes('.') ? s.split('.')[1].length : 0);

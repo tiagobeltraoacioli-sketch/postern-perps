@@ -116,17 +116,22 @@ export type Route =
   | { page: 'transfers'; tab: FundsTab }
   | { page: 'history'; tab: HistoryTab }
   | { page: 'funding'; symbol: string }
+  /** The public home page of the site (`#/` and an empty hash). The terminal is `#/trade/<SYMBOL>`. */
+  | { page: 'home' }
   | { page: 'markets' | 'portfolio' | 'agents' | 'system' | 'legal' }
   /** An address this application does not have: the page says so (it never silently shows another page). */
   | { page: 'notfound'; path: string };
-export const PAGES = ['trade', 'markets', 'portfolio', 'transfers', 'history', 'funding', 'agents', 'system', 'legal'] as const;
+export const PAGES = ['home', 'trade', 'markets', 'portfolio', 'transfers', 'history', 'funding', 'agents', 'system', 'legal'] as const;
 const SYMBOL = /^[A-Z0-9]{2,10}-USD$/;
 const FUNDS_TABS: readonly string[] = ['deposit', 'withdraw', 'exit'];
 const HISTORY_TABS: readonly string[] = ['orders', 'fills', 'funding', 'transfers'];
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#\/?/, '');
   const parts = path.split('/');
-  const page = parts[0] || 'trade';
+  // Pass 2: the bare address is the home page. Every address that named a page before still names that page; only
+  // the EMPTY hash changed meaning (it used to open the terminal), and `#/trade` alone still opens the terminal.
+  if (path === '') return { page: 'home' };
+  const page = parts[0];
   const notfound: Route = { page: 'notfound', path: path.slice(0, 80) };
   if (page === 'trade') {
     if (parts.length > 2) return notfound;
@@ -164,14 +169,24 @@ export function routeHash(r: Route): string {
       return `#/funding/${r.symbol}`;
     case 'notfound':
       return `#/${r.path}`;
+    case 'home':
+      return '#/';
     default:
       return `#/${r.page}`;
   }
 }
-export const route = new Store<Route>(typeof location !== 'undefined' ? parseRoute(location.hash) : { page: 'trade', symbol: 'BTC-USD' });
+export const route = new Store<Route>(typeof location !== 'undefined' ? parseRoute(location.hash) : { page: 'home' });
 if (typeof window !== 'undefined') window.addEventListener('hashchange', () => route.set(parseRoute(location.hash)));
 export function go(r: Route) {
   const hash = routeHash(r);
-  if (location.hash !== hash) location.hash = hash;
+  if (location.hash !== hash && !(r.page === 'home' && location.hash === '')) location.hash = hash;
   else route.set(r);
+  // A new page starts at its top (the terminal keeps its own scroll: it fits the viewport).
+  if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    try {
+      window.scrollTo(0, 0);
+    } catch {
+      /* not scrollable here */
+    }
+  }
 }

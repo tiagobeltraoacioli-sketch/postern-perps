@@ -14,6 +14,7 @@ import { TxSheet } from './ui/TxSheet';
 import { Modal } from './ui/Modal';
 import { Toaster } from './ui/toasts';
 import { TradePage } from './trade/TradePage';
+import { Home } from './pages/Home';
 import { Markets } from './pages/Markets';
 import { Portfolio } from './pages/Portfolio';
 import { Funds } from './pages/Funds';
@@ -51,6 +52,7 @@ function routeFor(page: Page, symbol: string): Route {
   if (page === 'transfers') return { page, tab: 'deposit' };
   if (page === 'history') return { page, tab: 'orders' };
   if (page === 'notfound') return { page, path: '' };
+  if (page === 'home') return { page };
   return { page };
 }
 
@@ -80,8 +82,8 @@ function Shell() {
   const vault = useVault(deployment ? account : null, 60_000);
   useProofKeeper(vault.view, account);
   useEffect(() => {
-    const titles: Partial<Record<Page, string>> = { markets: 'Markets', portfolio: 'Portfolio', transfers: 'Funds', history: 'History', funding: 'Funding', agents: 'Agent keys', system: 'System', legal: 'Notices', notfound: 'Not found' };
-    if (route.page !== 'trade') document.title = `${titles[route.page]} · PosternDEX Perpetuals`;
+    const titles: Partial<Record<Page, string>> = { home: 'Perpetual futures, in the open', markets: 'Markets', portfolio: 'Portfolio', transfers: 'Funds', history: 'History', funding: 'Funding', agents: 'Agent keys', system: 'System', legal: 'Notices', notfound: 'Not found' };
+    if (route.page !== 'trade') document.title = route.page === 'home' ? 'PosternDEX · Perpetual futures, in the open' : `${titles[route.page]} · PosternDEX Perpetuals`;
   }, [route.page]);
   const blocked = (verdict === 'restricted' || verdict === 'unknown' || verdict === 'sanctioned') && (route.page === 'trade' || route.page === 'markets') && (verdict === 'sanctioned' || !acknowledged);
   return (
@@ -100,6 +102,7 @@ function Shell() {
             {route.page === 'markets' && <Markets />}
           </>
         )}
+        {route.page === 'home' && <Home />}
         {route.page === 'portfolio' && <Portfolio />}
         {route.page === 'transfers' && <Funds tab={route.tab} />}
         {route.page === 'history' && <History tab={route.tab} />}
@@ -153,7 +156,7 @@ function Header({ route }: { route: Route }) {
   const moreClass = MORE.some((n) => n.page === route.page) ? 'nav-more-current' : SECONDARY.some((n) => n.page === route.page) ? 'nav-more-current-narrow' : '';
   return (
     <header className="header">
-      <button type="button" className="brand" onClick={() => go({ page: 'trade', symbol })} aria-label="PosternDEX Perpetuals, trade">
+      <button type="button" className="brand" onClick={() => go({ page: 'home' })} aria-label="PosternDEX Perpetuals, home">
         <BrandMark size={30} />
         <span className="brand-name">PosternDEX</span>
         <span className="brand-sub">Perpetuals</span>

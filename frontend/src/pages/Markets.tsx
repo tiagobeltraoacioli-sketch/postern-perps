@@ -1,5 +1,5 @@
 /** Markets: every market the exchange publishes, as the exchange reports it. Click a row to trade it. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { feed, go } from '../state/session';
 import { useStore } from '../lib/store';
@@ -7,7 +7,9 @@ import { formatCompactUsd, formatPpm, formatPx, formatRate, DASH } from '../lib/
 import { notional } from '../lib/calc';
 import { AssetMark } from '../trade/AssetMark';
 import { signingProblem } from '../lib/pins';
-import type { Market, Ticker } from '../lib/types';
+import type { Market, Ticker, WireCandle } from '../lib/types';
+import { api } from '../lib/api';
+import { persisted } from '../lib/store';
 
 type SortKey = 'symbol' | 'change' | 'volume' | 'oi' | 'funding';
 const STATUS_WORDS: Record<Market['status'], string> = { active: 'Trading', halted: 'Halted', closeOnly: 'Close only', settled: 'Settled' };
@@ -34,11 +36,69 @@ export function sortMarkets(markets: Market[], tickers: ReadonlyMap<string, Tick
   return out;
 }
 
+/** Geometry of a sparkline: closes mapped into a w x h box (y down), as an SVG path. Null under two points. Pure. */
+export function sparkPath(closes: readonly number[], w: number, h: number): string | null {
+  const pts = closes.filter((c) => Number.isFinite(c));
+  if (pts.length < 2) return null;
+  const lo = Math.min(...pts);
+  const hi = Math.max(...pts);
+  const span = hi - lo;
+  const y = (c: number) => (span === 0 ? h / 2 : h - 1 - ((c - lo) / span) * (h - 2));
+  return pts.map((c, i) => `${i ? 'L' : 'M'}${((i / (pts.length - 1)) * w).toFixed(2)} ${y(c).toFixed(2)}`).join('');
+}
+
+/** The last two days of hourly closes per market (drawing only: no figure is derived from them). */
+function useSparks(symbols: string): ReadonlyMap<string, number[] | 'none'> {
+  const [sparks, setSparks] = useState<ReadonlyMap<string, number[] | 'none'>>(new Map());
+  useEffect(() => {
+    let live = true;
+    const list = symbols ? symbols.split(',') : [];
+    void (async () => {
+      // One market at a time: a page of thirty markets must not open thirty requests at once.
+      for (const symbol of list) {
+        let closes: number[] | 'none' = 'none';
+        try {
+          const r = await api.get<{ candles: WireCandle[] }>(`/v1/markets/${symbol}/candles?interval=1h&limit=48`);
+          const c = r.candles.map((x) => Number(x.c)).filter((x) => Number.isFinite(x) && x > 0);
+          if (c.length >= 2) closes = c;
+        } catch {
+          closes = 'none';
+        }
+        if (!live) return;
+        setSparks((m) => new Map(m).set(symbol, closes));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [symbols]);
+  return sparks;
+}
+
+function Spark({ closes, label }: { closes: number[] | 'none' | undefined; label: string }) {
+  if (closes === undefined) return <span className="skeleton spark-empty" aria-hidden="true" />;
+  const d = closes === 'none' ? null : sparkPath(closes, 120, 32);
+  if (!d || closes === 'none') return <span className="spark-empty">No trades yet</span>;
+  const tone = closes[closes.length - 1] > closes[0] ? 'up' : closes[closes.length - 1] < closes[0] ? 'down' : 'flat';
+  return (
+    <svg className={`spark spark-${tone}`} viewBox="0 0 120 32" preserveAspectRatio="none" role="img" aria-label={label}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+type View = 'cards' | 'table';
+const marketsView = persisted<View | 'auto'>('postern.perps.markets.view.v1', 'auto', (v): v is View | 'auto' => v === 'cards' || v === 'table' || v === 'auto');
+
 export function Markets() {
   const markets = useStore(feed.markets);
   const tickers = useStore(feed.tickers);
   const error = useStore(feed.marketsError);
   const [query, setQuery] = useState('');
+  const chosen = useStore(marketsView);
+  // A handful of markets reads best as cards; a long list as a table. The switch remembers a choice.
+  const view: View = chosen === 'auto' ? (markets.length <= 8 ? 'cards' : 'table') : chosen;
+  const sparks = useSparks(markets.map((m) => m.symbol).join(','));
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: 'symbol', descending: false });
   const rows = useMemo(() => {
     const q = query.trim().toUpperCase();
@@ -95,8 +155,52 @@ export function Markets() {
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" spellCheck={false} />
           </label>
           <span className="fine">Funding is the hourly rate that would be charged at the next funding time. Positive: longs pay shorts.</span>
+          <div className="segmented view-switch" role="group" aria-label="Show markets as">
+            {(['cards', 'table'] as View[]).map((v) => (
+              <button key={v} type="button" aria-pressed={view === v} onClick={() => marketsView.set(v)}>
+                {v === 'cards' ? 'Cards' : 'Table'}
+              </button>
+            ))}
+          </div>
         </header>
-        <div className="table-wrap">
+        {view === 'cards' && rows.length > 0 && (
+          <div className="market-cards chart-pad">
+            {rows.map((m) => {
+              const t = tickers.get(m.symbol);
+              return (
+                <button key={m.symbol} type="button" className="market-card" onClick={() => go({ page: 'trade', symbol: m.symbol })} aria-label={`Trade ${m.symbol}`}>
+                  <span className="market-card-head">
+                    <AssetMark asset={m.base} size={28} />
+                    <strong>{m.symbol}</strong>
+                    <span className="sub">Perp · {m.maxLeverage}x</span>
+                    <span className={`badge ${m.status === 'active' ? 'status-credited' : m.status === 'halted' ? 'badge-danger' : 'badge-warn'}`}>{STATUS_WORDS[m.status]}</span>
+                  </span>
+                  <span className="market-card-px">
+                    <span className="num">{t ? formatPx(t.mark, m.priceDecimals) : DASH}</span>
+                    <span className={`num ${t ? (t.changePpm > 0n ? 'up' : t.changePpm < 0n ? 'down' : '') : ''}`}>{t ? formatPpm(t.changePpm, 2, 'always') : DASH}</span>
+                  </span>
+                  <Spark closes={sparks.get(m.symbol)} label={`${m.symbol}: hourly closes of the last two days`} />
+                  <dl>
+                    <div>
+                      <dt>24 h volume</dt>
+                      <dd className="num">{t ? `$${formatCompactUsd(t.volume24h)}` : DASH}</dd>
+                    </div>
+                    <div>
+                      <dt>Open interest</dt>
+                      <dd className="num">{t ? `$${formatCompactUsd(notional(t.openInterest, t.mark))}` : DASH}</dd>
+                    </div>
+                    <div>
+                      <dt>Funding (1 h)</dt>
+                      <dd className={`num ${t ? (t.fundingRate >= 0n ? 'up' : 'down') : ''}`}>{t ? formatRate(t.fundingRate) : DASH}</dd>
+                    </div>
+                  </dl>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {view === 'cards' && rows.length === 0 && <p className="fine chart-pad">{markets.length ? 'No market matches.' : error ? 'Markets could not be read.' : 'Reading markets…'}</p>}
+        <div className="table-wrap" hidden={view !== 'table'}>
           <table className="markets-table">
             <thead>
               <tr>
@@ -111,6 +215,7 @@ export function Markets() {
                 {head('volume', '24 h volume')}
                 {head('oi', 'Open interest')}
                 {head('funding', 'Funding (1 h)')}
+                <th>Last 48 h</th>
                 <th className="r">Max leverage</th>
                 <th>Status</th>
               </tr>
@@ -134,6 +239,9 @@ export function Markets() {
                     <td className="r num">{t ? `$${formatCompactUsd(t.volume24h)}` : DASH}</td>
                     <td className="r num">{t ? `$${formatCompactUsd(notional(t.openInterest, t.mark))}` : DASH}</td>
                     <td className={`r num ${t ? (t.fundingRate >= 0n ? 'up' : 'down') : ''}`}>{t ? formatRate(t.fundingRate) : DASH}</td>
+                    <td>
+                      <Spark closes={sparks.get(m.symbol)} label={`${m.symbol}: hourly closes of the last two days`} />
+                    </td>
                     <td className="r num">{m.maxLeverage}x</td>
                     <td>
                       <span className={`badge ${m.status === 'active' ? 'status-credited' : m.status === 'halted' ? 'badge-danger' : 'badge-warn'}`}>{STATUS_WORDS[m.status]}</span>
@@ -144,7 +252,7 @@ export function Markets() {
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="empty">
+                  <td colSpan={10} className="empty">
                     {markets.length ? 'No market matches.' : error ? 'Markets could not be read.' : 'Reading markets…'}
                   </td>
                 </tr>
