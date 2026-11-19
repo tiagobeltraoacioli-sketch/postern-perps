@@ -2,7 +2,7 @@
 // account leaves with a Merkle proof against the last accepted checkpoint, system shares last. UNAUDITED prototype.
 import { expect, blockedIf } from '../check.mjs';
 import { usdc, sleep } from '../../lib/client.mjs';
-import { fmtUsdc, SYSTEM, OWNER_FEE_ADDRESS } from '../util.mjs';
+import { fmtUsdc, SYSTEM, OWNER_FEE_ADDRESS, onTick } from '../util.mjs';
 import { user } from '../../lib/keys.mjs';
 import { unhex } from '../../../node/mock/lib/keccak.mjs';
 import { leafHash, root32 } from '../../../node/mock/lib/merkle32.mjs';
@@ -19,6 +19,10 @@ export default async function (ctx) {
   // hides the log, so the two-endpoint watcher of sequencer and validators makes no progress); the request passes its
   // deadline, the vault refuses the next checkpoint and anyone triggers escape with reason 2. Default: silence (reason 1).
   const FORCED = process.env.REHEARSAL_ESCAPE === 'forced';
+  // REHEARSAL_ESCAPE=shortfall: before the silence an account goes UNDER WATER where the engine may not liquidate it
+  // (it also holds a position in a market that is halted), with an insurance fund far smaller than the deficit: the
+  // last checkpoint then promises users more than the vault holds, and the escape must pay them pro rata, first.
+  const SHORT = process.env.REHEARSAL_ESCAPE === 'shortfall';
   const anyone = user('relayer').address;
   const tokenBal = async (a) => BigInt(await chain.callOne(stack.token, 'balanceOf(address)(uint256)', [a]));
   const view = async (sig, args = []) => chain.callOne(stack.vault, sig, args);
@@ -28,6 +32,32 @@ export default async function (ctx) {
   try { const dev = await chain.rpc('eth_accounts'); for (const i of [8, 9]) { const page = dev[i]?.toLowerCase(); if (page && !all.some((a) => a.address === page)) all.push({ label: `page-${i}`, address: page }); } } catch { /* no such account */ }
   let H, proofs = {}, cp, totalEscape, lastCp;
 
+  if (SHORT) await ctx.check('K-00s', 'setup of the shortfall: a 20x long in BTC that also holds ETH; ETH halts (its oracle price is withheld), BTC falls 15%: the account is under water, cannot be liquidated, and the checkpoint\'s escape values exceed what the vault holds', async () => {
+    blockedIf(stack.oracle !== 'replay', 'needs the scripted oracle');
+    const btc = api.market('BTC-USD'), eth = api.market('ETH-USD');
+    const maker = ctx.who('maker'), v = ctx.who('liq-adl');
+    const t = (await api.json('/v1/tickers')).tickers;
+    const ix = (sym) => t.find((x) => x.symbol === sym).indexPrice;
+    const px0 = (m, bps) => onTick(m, ix(m.symbol), bps);   // exact, on the market's tick
+    await api.cancelAll(maker);
+    let r = await api.act(v, 'UpdateLeverage', { marketId: btc.marketId, leverage: 20, isolated: false }); expect(r.body?.result?.ok, JSON.stringify(r.body));
+    r = await api.order(maker, btc, { buy: false, price: px0(btc, 10), size: '1', tif: 2 }); expect(r.body?.result?.ok, JSON.stringify(r.body));
+    r = await api.order(maker, eth, { buy: false, price: px0(eth, 10), size: '1', tif: 2 }); expect(r.body?.result?.ok, JSON.stringify(r.body));
+    r = await api.order(v, eth, { buy: true, price: px0(eth, 10), size: eth.minOrderSize, tif: 1 }); expect(r.body?.result?.orderStatus === 'filled', `ETH: ${JSON.stringify(r.body)}`);
+    r = await api.order(v, btc, { buy: true, price: px0(btc, 10), size: '0.4', tif: 1 }); expect(r.body?.result?.orderStatus === 'filled', `BTC: ${JSON.stringify(r.body)}`);
+    await api.cancelAll(maker);
+    const sol = ix('SOL-USD'), b0 = ix('BTC-USD');
+    const target = onTick(btc, b0, -1500);
+    // ETH is no longer priced (STALE halt after 10 s); BTC goes down in 40 rounds of about 40 bps
+    await ctx.feed('shortfall', [{ p: { 1: b0, 3: sol }, absent: [2] }, { ramp: { 1: target }, rounds: 40 }, { p: {}, repeat: 100000 }]);
+    await api.until(async () => { await api.cancelAll(ctx.who('alice')); return (await api.json('/v1/markets/ETH-USD')).status === 'halted'; }, { ms: 90000, every: 1500, what: 'ETH-USD halted' });
+    const under = await api.until(async () => { const a = await api.account(v.address); return Number(a.equity) < 0 && Math.abs(Number((await api.json('/v1/markets/BTC-USD/ticker')).indexPrice) - Number(target)) < 1 ? a : null; }, { ms: 240000, every: 3000, what: 'the account under water at the end of the fall' });
+    expect(under.positions.length === 2, `the account was liquidated or lost a position: ${JSON.stringify(under.positions.map((p) => [p.symbol, p.size]))}`);
+    const ins = await api.account(SYSTEM.insurance);
+    expect(Number(ins.equity) < -Number(under.equity), `the insurance fund (${ins.equity}) covers the deficit (${under.equity}): no shortfall`);
+    ctx.state.shortfall = { account: v.address, equity: under.equity, insurance: ins.equity };
+    return { victimEquity: under.equity, insuranceFund: ins.equity, btcFrom: b0, btcTo: target, ethStatus: 'halted', victimPositions: under.positions.map((p) => [p.symbol, p.size]) };
+  });
   await ctx.check('K-01', 'before the silence: the vault holds the node\'s latest final checkpoint, and every account\'s escape leaf and 32 siblings for THAT checkpoint are fetched and verified against the root the vault stores', async () => {
     for (const c of CAST.filter((x) => x.key)) await api.cancelAll(c);   // no resting orders: every account as it will escape
     await sleep(1500);
@@ -173,7 +203,11 @@ export default async function (ctx) {
     senior = totalEscape - ins - back;
     const payable = BigInt(await view('escapePayable()(uint64)')), pool = BigInt(await view('escapePool()(uint64)'));
     expect(payable === (pool < senior ? pool : senior), `escapePayable ${fmtUsdc(payable)}, pool ${fmtUsdc(pool)}, senior ${fmtUsdc(senior)}`);
-    expect(payable === senior, `the pool does not cover the users in full: pool ${fmtUsdc(pool)}, users ${fmtUsdc(senior)}`);
+    if (SHORT) {
+      expect(pool < senior && payable === pool, `no shortfall at the vault: pool ${fmtUsdc(pool)}, users ${fmtUsdc(senior)}, payable ${fmtUsdc(payable)}`);
+      ctx.state.haircutPpm = Number((senior - pool) * 1000000n / senior);
+    } else expect(payable === senior, `the pool does not cover the users in full: pool ${fmtUsdc(pool)}, users ${fmtUsdc(senior)}`);
+    ctx.state.escape = { payable, senior };
     const sys = await claim(proofs.insurance, proofs.insurance.leafData.escapeValue);
     expect(!sys.ok, 'the insurance account claimed like a user');
     return { claimBeforeProof: before.error, pool: fmtUsdc(pool), usersSenior: fmtUsdc(senior), insuranceShare: fmtUsdc(ins), backstopShare: fmtUsdc(back), escapePayable: fmtUsdc(payable), insuranceClaim: sys.error };
@@ -184,11 +218,13 @@ export default async function (ctx) {
     expect(senior !== undefined, 'K-06 failed');
     const users = Object.entries(proofs).filter(([k]) => !['insurance', 'backstop'].includes(k));
     for (const [label, p] of users) {
-      const ev = BigInt(p.leafData.escapeValue);
+      const full = BigInt(p.leafData.escapeValue);
+      // VAULT.md 7: floor(escapeValue x escapePayable / senior): the whole value whenever the pool covers the users
+      const ev = (full * ctx.state.escape.payable) / ctx.state.escape.senior;
       const to = label === 'fee' ? OWNER_FEE_ADDRESS : p.address;
       const b0 = await tokenBal(to);
       if (ev === 0n) { paid[label] = 0n; continue; }
-      const r = await claim(p, ev);
+      const r = await claim(p, full);
       expect(r.ok, `${label}: claimEscape: ${r.error}`);
       const key = await view('escapeKey(address)(bytes32)', [p.address]);
       for (let day = 0; day < 8 && (await tokenBal(to)) - b0 < ev; day++) {   // a large payout: delay, then the daily window
@@ -198,12 +234,15 @@ export default async function (ctx) {
       const got = (await tokenBal(to)) - b0;
       expect(got === ev, `${label}: received ${fmtUsdc(got)}, escape value ${fmtUsdc(ev)}`);
       paid[label] = got;
-      const again = await claim(p, ev);
+      const again = await claim(p, full);
       expect(!again.ok && (await tokenBal(to)) - b0 === ev, `${label}: a second claim moved tokens`);
     }
     const total = Object.values(paid).reduce((a, b) => a + b, 0n);
-    expect(total === senior, `users were paid ${fmtUsdc(total)}, their escape values sum to ${fmtUsdc(senior)}`);
-    return { paid: Object.fromEntries(Object.entries(paid).map(([k, v]) => [k, fmtUsdc(v)])), totalPaidToUsers: fmtUsdc(total) };
+    const P = ctx.state.escape.payable;
+    // every share is rounded DOWN: together they are the payable amount less at most one unit per claimant
+    expect(total <= P && P - total <= BigInt(users.length), `users were paid ${fmtUsdc(total)}, the payable amount is ${fmtUsdc(P)} (users' escape values ${fmtUsdc(senior)})`);
+    if (SHORT) expect(total < senior, 'no haircut although the vault held less than the users were promised');
+    return { paid: Object.fromEntries(Object.entries(paid).map(([k, v]) => [k, fmtUsdc(v)])), totalPaidToUsers: fmtUsdc(total), usersEscapeValues: fmtUsdc(senior), payable: fmtUsdc(P), haircutPpm: ctx.state.haircutPpm ?? 0 };
   });
   await ctx.check('K-08', 'the deposit nobody credited is refunded in full from the vault\'s own records, once', async () => {
     const b0 = await tokenBal(esc.address);
@@ -224,7 +263,8 @@ export default async function (ctx) {
     const sub = BigInt(await view('subordinatedTotal()(uint128)'));
     const pool = BigInt(await view('escapePool()(uint64)'));
     const wantSub = ins + back < pool - senior ? ins + back : pool - senior;
-    expect(sub === wantSub, `subordinated ${fmtUsdc(sub)}, expected min(insurance + backstop, pool - users) = ${fmtUsdc(wantSub)}`);
+    const wantSub2 = SHORT ? 0n : wantSub;   // in a shortfall the users take the whole pool: the system accounts get nothing
+    expect(sub === wantSub2, `subordinated ${fmtUsdc(sub)}, expected ${fmtUsdc(wantSub2)}`);
     // certified withdrawal records nobody collected yet stay payable in full in escape (VAULT.md 7): they are part of
     // what the vault still holds (here: the 1 USDC record the conformance suite creates and never collects)
     const unpaid = BigInt((await chain.call(stack.vault, LATEST))[5]) - BigInt(await view('withdrawnTotal()(uint64)'));

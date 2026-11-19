@@ -35,7 +35,7 @@ if grep -q '^dev-clock' $S/node/Cargo.toml 2>/dev/null; then
 fi
 if [ -f $S/node/tests/anvil.rs ]; then
   # the scenario against the real vault on a private anvil (ignored by default: it needs anvil and forge artefacts)
-  (cd $S/node && PATH=$HOME/.foundry/bin:$PATH slot cargo test --locked -j 6 --features dev-oracle --test anvil -- --ignored) > $LOGS/node-anvil.log 2>&1; count node-anvil $LOGS/node-anvil.log $?
+  (cd $S/node && PATH=$HOME/.foundry/bin:$PATH PERPS_ANVIL_DIR=$HOME/.foundry/bin PERPS_CONTRACTS_DIR=$S/contracts PERPS_ANVIL_PORT=53580 slot cargo test --locked -j 6 --features dev-oracle --test anvil -- --ignored) > $LOGS/node-anvil.log 2>&1; count node-anvil $LOGS/node-anvil.log $?
 fi
 suite oracle node/oracle cargo test --release --workspace -j 6 --no-fail-fast
 suite geoblock-rust compliance/geoblock/rust cargo test --release -j 6 --no-fail-fast
