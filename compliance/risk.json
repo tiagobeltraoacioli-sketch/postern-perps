@@ -1,7 +1,7 @@
 {
   "schema": "postern-perps/risk",
-  "version": "0.2.1",
-  "date": "2026-11-17",
+  "version": "0.2.2",
+  "date": "2026-11-18",
   "status": "UNAUDITED prototype. Global risk and fee parameters proposed by agent 392; reasons and sources in docs/MARKETS.md. Values marked TBD-owner need the owner's money or decision.",
   "global": {
     "withdrawalFee": "1",
@@ -58,6 +58,7 @@
     "R-6 mmfPpm of tier 0 >= stress1hBps * 100 / 2 (maintenance covers at least half of the worst observed one-hour adverse move on either venue; the rest is the insurance fund's)",
     "R-7 minSize * reference price >= 10 USD, a multiple of step; maxSize <= oiCap; tick and step exact in the fixed scales",
     "R-8 takerFeePpm >= makerFeePpm >= 0 at every fee tier; tier 0 equals markets.json fees",
-    "R-9 feeRecipient = 0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544"
+    "R-9 feeRecipient = 0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544",
+    "R-10 every market states its exit band (oracle.exitHaircutBps >= jumpBps and >= the calibrated floor BTC 500 / ETH 700 / SOL 1300 bps, exitHaircutPerMinBps >= 1, exitHaircutBps <= exitMaxHaircutBps < 10000, maxStalenessMs <= maxHaltMs <= one day): the price bound for exits from a halted market (SPEC S-4.10, S-9.2, 14) is never left to a default"
   ]
 }

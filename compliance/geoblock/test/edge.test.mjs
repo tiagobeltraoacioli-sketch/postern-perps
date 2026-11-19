@@ -46,7 +46,7 @@ test('blocked country: order answered 451 at the edge, nothing forwarded; cancel
   const b = await r.json();
   assert.equal(b.error.code, 'GEO_RESTRICTED');
   assert.equal(b.error.details.country, 'BR');
-  assert.equal(b.error.details.listVersion, '0.2.1');
+  assert.equal(b.error.details.listVersion, '0.2.2');
   assert.equal(seen.length, 0);
   const c = await handle(post({ type: 'CancelAll', message: { account: A } }), { country: 'BR' });
   assert.equal(c.status, 200);

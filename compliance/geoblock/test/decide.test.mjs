@@ -9,7 +9,7 @@ test('decision conformance vectors', () => {
   const { cases, sanctionsBuiltMs } = readJson('vectors/decision-vectors.json');
   const sanctions = fixtureSanctions();
   assert.equal(sanctions.builtMs, sanctionsBuiltMs);
-  assert.equal(cases.length, 88);
+  assert.equal(cases.length, 90);   // 88 + 2 on the real list 0.2.2 (R436-7)
   for (const c of cases) {
     const list = c.list === null ? null : lists[c.list];
     const d = decide(list, { ...c.request, sanctions: c.sanctions === null ? null : sanctions });
@@ -34,7 +34,7 @@ test('decisions name the list and sanctions versions they were made under', () =
   const d = decide(lists.fixture, { mode: 'live', surface: 'api', kind: 'action', action: { type: 'CancelOrder' },
     geo: { country: 'BR', trusted: true }, signals: { tor: false, vpnProxy: false, hosting: false },
     addresses: [{ role: 'account', address: '0x00000000000000000000000000000000000000a1' }], sanctions: fixtureSanctions(), nowMs: Date.parse('2026-11-17T01:00:00Z') });
-  assert.equal(d.listVersion, '0.2.1');
+  assert.equal(d.listVersion, '0.2.2');
   assert.match(d.listSha256, /^[0-9a-f]{64}$/);
   assert.match(d.sanctionsVersion, /^2026-11-13\+[0-9a-f]{12}$/);
 });
@@ -71,7 +71,7 @@ test('exhaustive over the fixture: only PA, CH and UA (with a known unrestricted
 test('geoStatus matches docs/API.md section 6 shape', () => {
   const g = geoStatus(lists.fixture, { mode: 'live', surface: 'api', geo: { country: 'BR', trusted: true }, signals: { tor: false, vpnProxy: false, hosting: false } });
   assert.equal(g.country, 'BR'); assert.equal(g.restricted, true); assert.equal(g.policy, 'exit_only');
-  assert.equal(g.listVersion, '0.2.1'); assert.equal(g.reasonCode, 'JURISDICTION'); assert.equal(g.sanctioned, false);
+  assert.equal(g.listVersion, '0.2.2'); assert.equal(g.reasonCode, 'JURISDICTION'); assert.equal(g.sanctioned, false);
   assert.match(g.message, /withdraw/);
   const o = geoStatus(lists.fixture, { mode: 'live', surface: 'api', geo: { country: 'PA', trusted: true }, signals: { tor: false, vpnProxy: false, hosting: false } });
   assert.equal(o.restricted, false); assert.equal(o.policy, 'open'); assert.equal(o.message, null);
@@ -93,4 +93,24 @@ test('decide never throws on hostile input', () => {
   const last = decide(lists.fixture, junk.at(-1));
   assert.equal(last.code, 'OK_EXIT_ONLY');
   assert.equal(decide(lists.fixture, { ...junk.at(-1), action: { type: 'PlaceOrder', reduceOnly: false } }).allow, false);
+});
+
+// R436-7 (list 0.2.2). Until 0.2.2 the vector "blocked country BR, revoke agent refused" pinned that an action the
+// list does not name as an exit action is refused for a denied country. The list now names RevokeAgent, so that
+// vector expects the exit; the list-driven refusal it stood for is pinned here against a list WITHOUT the entry.
+test('an action the list does not name as an exit action is refused for a denied country (list-driven, both ways)', async () => {
+  const { loadList } = await import('../src/list.mjs');
+  const json = readJson('fixtures/geoblock.fixture.json');
+  const req = (type) => ({ mode: 'live', surface: 'api', kind: 'action', action: { type }, geo: { country: 'BR', subdivision: null, trusted: true },
+    signals: { tor: false, vpnProxy: false, hosting: false }, addresses: [{ role: 'account', address: '0x00000000000000000000000000000000000000a1' }],
+    sanctions: fixtureSanctions(), nowMs: 1794877200000 });
+  const without = loadList({ ...json, denied_policy: { ...json.denied_policy, exit_only_actions: json.denied_policy.exit_only_actions.filter((a) => a !== 'RevokeAgent') } });
+  const d0 = decide(without, req('RevokeAgent'));
+  assert.deepEqual([d0.allow, d0.code, d0.httpStatus, d0.exitOnly], [false, 'GEO_RESTRICTED', 451, false]);
+  const d1 = decide(lists.fixture, req('RevokeAgent'));
+  assert.deepEqual([d1.allow, d1.code, d1.httpStatus, d1.exitOnly], [true, 'OK_EXIT_ONLY', 200, true]);
+  // opening authority stays refused whatever the list says about revoking it
+  for (const l of [without, lists.fixture, lists.real]) assert.equal(decide(l, req('ApproveAgent')).code, 'GEO_RESTRICTED');
+  // and the loader still refuses a list that tries to name an exposure-opening action as an exit
+  assert.throws(() => loadList({ ...json, denied_policy: { ...json.denied_policy, exit_only_actions: [...json.denied_policy.exit_only_actions, 'ApproveAgent'] } }), /not an exit action/);
 });

@@ -1,7 +1,7 @@
 {
   "schema": "postern-perps/jurisdiction-research",
-  "version": "0.2.1",
-  "date": "2026-11-17",
+  "version": "0.2.2",
+  "date": "2026-11-18",
   "note": "Hand-curated research input of compliance/tools/build_geoblock.py (agent 392). Every entry names its sources (ids in sources.json). Every ISO 3166-1 code NOT listed here becomes restricted-review / not-researched (denied). UNAUDITED; DRAFT FOR COUNSEL; not legal advice.",
   "countries": {
     "US": {

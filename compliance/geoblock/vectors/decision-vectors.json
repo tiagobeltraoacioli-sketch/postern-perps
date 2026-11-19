@@ -534,7 +534,7 @@
    }
   },
   {
-   "name": "blocked country BR, revoke agent refused (not in the 0.2.1 exit list)",
+   "name": "blocked country BR, revoke agent: exit-only since list 0.2.2 (R436-7; refused under 0.2.1, whose exit list did not name it: that list-driven refusal is now pinned by the unit tests \"an action the list does not name as an exit action is refused\")",
    "list": "fixture",
    "sanctions": "fresh",
    "request": {
@@ -571,10 +571,10 @@
     }
    },
    "expect": {
-    "allow": false,
-    "code": "GEO_RESTRICTED",
-    "httpStatus": 451,
-    "exitOnly": false
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
    }
   },
   {
@@ -3313,6 +3313,86 @@
    }
   },
   {
+   "name": "real list 0.2.2 (R436-7): BR revoke agent is an exit action (a denied user can end a leaked agent key)",
+   "list": "real",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "RevokeAgent"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": true,
+    "code": "OK_EXIT_ONLY",
+    "httpStatus": 200,
+    "exitOnly": true
+   }
+  },
+  {
+   "name": "real list 0.2.2 (R436-7): BR approve agent stays refused (only the removal of authority was opened)",
+   "list": "real",
+   "sanctions": "fresh",
+   "request": {
+    "mode": "live",
+    "surface": "api",
+    "kind": "action",
+    "geo": {
+     "country": "BR",
+     "subdivision": null,
+     "trusted": true
+    },
+    "signals": {
+     "tor": false,
+     "vpnProxy": false,
+     "hosting": false
+    },
+    "nowMs": 1794877200000,
+    "action": {
+     "type": "ApproveAgent"
+    },
+    "addresses": [
+     {
+      "role": "account",
+      "address": "0x00000000000000000000000000000000000000a1"
+     }
+    ],
+    "attestation": {
+     "status": "valid",
+     "residenceCountry": "PA"
+    }
+   },
+   "expect": {
+    "allow": false,
+    "code": "GEO_RESTRICTED",
+    "httpStatus": 451,
+    "exitOnly": false
+   }
+  },
+  {
    "name": "real list (392, 0.2.1): UA without subdivision",
    "list": "real",
    "sanctions": "fresh",
@@ -3367,7 +3447,7 @@
     "surface": "api",
     "kind": "action",
     "geo": {
-     "country": "\u00df",
+     "country": "ß",
      "subdivision": null,
      "trusted": true
     },

@@ -1,7 +1,7 @@
 {
   "schema": "postern-perps/geoblock",
-  "version": "0.2.1",
-  "generated_utc": "2026-11-17",
+  "version": "0.2.2",
+  "generated_utc": "2026-11-18",
   "status": "DRAFT FOR COUNSEL. UNAUDITED prototype. Not legal advice. v0.2: every ISO 3166-1 code listed; researched entries carry source ids (compliance/research/sources.json, exact sentences); every unresearched code is restricted-review (denied); no country is allowed until counsel decides (Q-2).",
   "rule": "Deny by default. A request is allowed only if its ISO 3166-1 alpha-2 country is listed with tier 'allowed' AND its ISO 3166-2 subdivision (when known) is not listed in 'subdivisions' as blocked AND no anonymizer rule denies it. Any country not listed, an unknown country (missing header, 'XX', 'T1', private or unresolvable IP), and tier 'restricted-review' are all denied.",
   "tiers": {
@@ -2926,7 +2926,8 @@
       "CancelOrder",
       "CancelAll",
       "PlaceOrder(reduceOnly=true)",
-      "Withdraw"
+      "Withdraw",
+      "RevokeAgent"
     ],
     "refused_actions": "every other action type, deposit credit to a new account included",
     "public_reads": "market data, node status and account reads are not geoblocked",
