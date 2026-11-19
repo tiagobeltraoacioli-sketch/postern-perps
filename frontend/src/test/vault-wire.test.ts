@@ -46,6 +46,6 @@ describe('account proof', () => {
   it('pasted text: JSON only, bounded', () => {
     expect(parsePastedProof(JSON.stringify({ leafData, proof })).leaf.escapeValue).toBe(7_000_000n);
     expect(() => parsePastedProof('not json')).toThrow(/not JSON/);
-    expect(() => parsePastedProof(' '.repeat(70_000))).toThrow(/too long/);
+    expect(() => parsePastedProof(' '.repeat(140_000))).toThrow(/too long/);
   });
 });

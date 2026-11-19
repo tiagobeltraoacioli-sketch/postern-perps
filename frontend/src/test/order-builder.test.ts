@@ -63,7 +63,10 @@ describe('buildOrder', () => {
     expect(build({ price: '67000.3' }).errors.join()).toMatch(/multiple of 0.5/);
     expect(build({ size: '0.00015' }).errors.join()).toMatch(/at most 4 decimal/);
     expect(build({ size: '0' }).errors.join()).toMatch(/above zero/);
-    expect(build({ size: '51' }).errors.join()).toMatch(/largest order is 50/);
+    // The bound is the market table's (compliance/markets.json 0.2.1: 10 BTC; the round-1 fixture said 50).
+    expect(build({ size: '51' }).errors.join()).toMatch(/largest order is 10 BTC/);
+    expect(build({ size: '10.0001' }).errors.join()).toMatch(/largest order is 10 BTC/);
+    expect(build({ size: '10' }).errors.join()).not.toMatch(/largest order/);
     expect(build({ price: '67000.3' }).message).toBeNull();
   });
   it('a stop market order: trigger required, worst price from the trigger, crossed trigger warned', () => {

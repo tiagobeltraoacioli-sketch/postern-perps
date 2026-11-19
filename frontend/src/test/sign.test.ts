@@ -152,7 +152,11 @@ describe('value refusals', () => {
     expect(a({ name: 'bot‮' })).toMatch(/plain characters/);
   });
   it('leverage bounds', () => {
-    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 20/);
+    // The bound is the market table's (compliance/markets.json 0.2.1: SOL 10x, BTC 20x; the round-1 fixture said 20 and 50).
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 10/);
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 11, isolated: false }, markets(), NOW).join()).toMatch(/1 to 10/);
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 1, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 20/);
+    expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 1, leverage: 20, isolated: false }, markets(), NOW)).toEqual([]);
   });
 });
 

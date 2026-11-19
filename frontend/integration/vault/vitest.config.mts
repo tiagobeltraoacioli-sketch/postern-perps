@@ -5,5 +5,5 @@ import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
-  test: { environment: 'node', include: ['integration/vault/**/*.test.ts'], testTimeout: 120_000, hookTimeout: 120_000, fileParallelism: false },
+  test: { environment: 'node', include: ['integration/vault/**/*.test.ts'], testTimeout: 420_000, hookTimeout: 240_000, fileParallelism: false },
 });

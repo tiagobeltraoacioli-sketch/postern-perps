@@ -77,9 +77,9 @@ export function parseAccountProof(proof: unknown): { leaf: AccountLeaf; siblings
   return { leaf, siblings: siblings(p.siblings ?? p.proof) };
 }
 
-/** A pasted proof: JSON text of at most 64 KiB. */
+/** A pasted proof: JSON text of at most 128 KiB (a proof file with the two system proofs is about 9 KiB). */
 export function parsePastedProof(text: string): { leaf: AccountLeaf; siblings: Hex[] } {
-  if (text.length > 65_536) fail('the text is too long to be a proof');
+  if (text.length > 131_072) fail('the text is too long to be a proof');
   let json: unknown;
   try {
     json = JSON.parse(text);

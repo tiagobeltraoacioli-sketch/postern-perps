@@ -112,7 +112,11 @@ const openOf = (p: PositionInput) => p.openNotional ?? p.size * p.entryPx;
 const cross = (p: PositionInput): E.CrossPosition => ({ size: p.size, mark: p.markPx, openNotional: openOf(p), tiers: p.tiers });
 
 export type AccountSummary = {
-  /** Collateral plus all unrealised PnL (isolated margins are part of collateral here). */
+  /**
+   * The cross balance, the margins of isolated positions and all unrealised PnL. `collateral` is the engine's
+   * BALANCE (SPEC 6.1: an isolated position's margin is not part of it), as docs/API.md `Account.collateral` and the
+   * reference mock report it. (Round 1 took isolated margins as part of collateral, before SPEC said otherwise.)
+   */
   equity: bigint;
   unrealised: bigint;
   /** Initial margin held by positions and resting orders. */
@@ -122,7 +126,7 @@ export type AccountSummary = {
   marginRatioPpm: bigint | null;
   /** What a new order can use: cross equity less margin in use, never negative. */
   available: bigint;
-  /** Cross backing: collateral not in isolated positions, plus cross PnL. */
+  /** Cross backing: the balance plus cross PnL. */
   crossEquity: bigint;
   crossMaintenance: bigint;
 };
@@ -149,9 +153,9 @@ export function accountSummary(collateral: bigint, positions: PositionInput[], o
     }
   }
   const unrealised = E.usdcFloor(unrealisedN);
-  const equity = E.usdcFloor(collateral * E.NOTIONAL_PER_USDC + unrealisedN);
+  const equity = E.usdcFloor((collateral + isolatedMargins) * E.NOTIONAL_PER_USDC + unrealisedN);
   const maintenance = E.usdcCeil(maintenanceN);
-  const crossEquity = E.usdcFloor((collateral - isolatedMargins) * E.NOTIONAL_PER_USDC + crossUnrealisedN);
+  const crossEquity = E.usdcFloor(collateral * E.NOTIONAL_PER_USDC + crossUnrealisedN);
   const crossInitial = E.usdcCeil(crossInitialN) + orderMargin;
   return {
     equity,
@@ -173,17 +177,14 @@ export function accountSummary(collateral: bigint, positions: PositionInput[], o
 export function positionLiquidationPrice(collateral: bigint, positions: PositionInput[], index: number): bigint | null {
   const p = positions[index];
   if (p.isolated) return liquidationPrice({ size: p.size, entryPx: p.entryPx, backing: p.isolatedMargin, tiers: p.tiers, tick: p.tick });
-  let balance = collateral;
   const crossed: E.CrossPosition[] = [];
   let at = -1;
   positions.forEach((o, i) => {
-    if (o.isolated) balance -= o.isolatedMargin;
-    else {
-      if (i === index) at = crossed.length;
-      crossed.push(cross(o));
-    }
+    if (o.isolated) return;
+    if (i === index) at = crossed.length;
+    crossed.push(cross(o));
   });
-  const exact = E.liquidationPriceOf(balance, crossed, at);
+  const exact = E.liquidationPriceOf(collateral, crossed, at);
   return exact === null ? null : toTick(exact, p.tick, p.size > 0n ? 'ceil' : 'floor');
 }
 

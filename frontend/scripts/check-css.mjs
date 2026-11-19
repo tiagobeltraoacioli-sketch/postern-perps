@@ -17,7 +17,7 @@ const code = files.filter((f) => /\.tsx?$/.test(f)).map((f) => readFileSync(f, '
 const words = new Set(code.match(/[A-Za-z][A-Za-z0-9_-]*/g));
 // Classes built from a template in the source: `token-${symbol}`, `popover-${align}`.
 // Classes built from a template in the source.
-const TEMPLATED = [/^lamp-(idle|kindling|lit|pending|settled|warn|danger)$/, /^(toast|callout|badge|banner|status|conn|health|review|tone|book)-[a-z]+$/, /^side-(long|short)$/, /^vault-(normal|paused|escapeDue|escapeUnproven|escape|unread)$/, /^flow-(todo|now|done)$/];
+const TEMPLATED = [/^lamp-(idle|kindling|lit|pending|settled|warn|danger)$/, /^(toast|callout|badge|banner|status|conn|health|review|tone|book)-[a-z]+$/, /^side-(long|short)$/, /^vault-(normal|paused|escapeDue|escapeUnproven|escape|unread)$/, /^flow-(todo|now|done)$/, /^swatch-(used|free)$/];
 let dead = 0;
 let classes = 0;
 for (const file of files.filter((f) => f.endsWith('.css') && !f.includes('/src/chart/'))) {

@@ -7,7 +7,7 @@ import { feed, go } from '../state/session';
 import { useStore } from '../lib/store';
 import { useActions } from '../state/actions';
 import { api } from '../lib/api';
-import { formatCountdown, formatDateTime, formatPx, formatRate, formatSize, formatUsd, DASH } from '../lib/format';
+import { formatCountdown, formatDateTime, formatDuration, formatPx, formatRate, formatSize, formatUsd, DASH } from '../lib/format';
 import { parseFixedLoose, RATE_DECIMALS, PX_DECIMALS } from '../lib/fixed';
 import { fundingPayment } from '../lib/calc';
 import { useNow } from '../trade/hooks';
@@ -17,6 +17,7 @@ import type { WireFundingRate } from '../lib/types';
 
 type Settled = { time: number; rate: bigint; markPx: bigint };
 const HOURS_SHOWN = 168;
+const SLOTS_MIN = 72;
 
 /** Geometry of the bar chart: bars grow from a zero baseline; the scale is symmetric around it. Pure, tested. */
 export function fundingBars(rates: readonly bigint[], height: number): { y: number; h: number; positive: boolean }[] {
@@ -63,6 +64,10 @@ export function Funding({ symbol }: { symbol: string }) {
   // What the position would pay or receive at the next funding time if the rate stayed (SPEC funding formula, calc.ts).
   const next = position && ticker ? fundingPayment(position.size, ticker.mark, ticker.fundingRate) : null;
   const shown = hover !== null && settled ? settled[hover] : null;
+  const slots = Math.max(SLOTS_MIN, settled?.length ?? 0);
+  const offset = slots - (settled?.length ?? 0);
+  // The interval is the market's (one hour at launch; a dev stack may run a shorter one): say what it is.
+  const every = market ? (market.fundingIntervalSec === 3600 ? '1 h' : formatDuration(market.fundingIntervalSec * 1000)) : '1 h';
   if (markets.length && !market)
     return (
       <div className="page-message">
@@ -76,7 +81,7 @@ export function Funding({ symbol }: { symbol: string }) {
           <p className="eyebrow">Funding</p>
           <h1 className="display">Funding rates</h1>
           <p className="lead">
-            Every hour, longs and shorts of a market pay each other so its price stays near the oracle index. A positive rate: longs pay shorts. Negative: shorts pay longs. The exchange takes no part of it.
+            Every funding interval (one hour at launch), longs and shorts of a market pay each other so its price stays near the oracle index. A positive rate: longs pay shorts. Negative: shorts pay longs. The exchange takes no part of it.
           </p>
         </div>
         <label className="field field-inline market-select">
@@ -93,7 +98,7 @@ export function Funding({ symbol }: { symbol: string }) {
       <div className="cards cards-4">
         <div className="card">
           <span className="card-label">
-            <AssetMark asset={market?.base ?? ''} size={18} /> {symbol} rate now (1 h)
+            <AssetMark asset={market?.base ?? ''} size={18} /> {symbol} rate now (per {every})
           </span>
           <span className={`card-value num ${ticker ? (ticker.fundingRate >= 0n ? 'up' : 'down') : ''}`}>{ticker ? formatRate(ticker.fundingRate) : DASH}</span>
           <span className="fine">{ticker ? (ticker.fundingRate >= 0n ? 'Longs pay shorts' : 'Shorts pay longs') : ''} if the premium stays as it is.</span>
@@ -104,7 +109,7 @@ export function Funding({ symbol }: { symbol: string }) {
           <span className="fine">{ticker ? `${formatDateTime(ticker.nextFundingTime)} UTC, on the exchange clock` : ''}</span>
         </div>
         <div className="card">
-          <span className="card-label">Cap per hour</span>
+          <span className="card-label">Cap per interval ({every})</span>
           <span className="card-value num">{market ? `±${formatRate(market.maxFundingRate, 'never')}` : DASH}</span>
           <span className="fine">The rate can never exceed this, in either direction.</span>
         </div>
@@ -116,7 +121,7 @@ export function Funding({ symbol }: { symbol: string }) {
       </div>
       <section className="panel" aria-label={`${symbol} settled funding rates`}>
         <header className="panel-head">
-          <h2>Settled hourly rates, oldest to newest</h2>
+          <h2>Settled rates, one per {every}, oldest to newest</h2>
           <span className="fine num" aria-live="polite">
             {shown ? `${formatDateTime(shown.time)} UTC · ${formatRate(shown.rate)} · mark ${market ? formatPx(shown.markPx, market.priceDecimals) : ''}` : 'Point at a bar, or use the table below'}
           </span>
@@ -131,12 +136,13 @@ export function Funding({ symbol }: { symbol: string }) {
           <div className="funding-chart">
             <span className="funding-axis funding-axis-top">Longs pay</span>
             <span className="funding-axis funding-axis-bottom">Shorts pay</span>
-            <svg viewBox={`0 0 ${settled.length * 6} 160`} preserveAspectRatio="none" role="img" aria-label={`${settled.length} settled hourly funding rates of ${symbol}; the table below holds every value`} onMouseLeave={() => setHover(null)}>
-              <line x1="0" x2={settled.length * 6} y1="80" y2="80" className="funding-zero" />
+            {/* A slot per interval; at least SLOTS_MIN slots wide so a short history is thin bars at the right (newest), not slabs. */}
+            <svg viewBox={`0 0 ${slots * 6} 160`} preserveAspectRatio="none" role="img" aria-label={`${settled.length} settled funding rates of ${symbol}; the table below holds every value`} onMouseLeave={() => setHover(null)}>
+              <line x1="0" x2={slots * 6} y1="80" y2="80" className="funding-zero" />
               {bars.map((b, i) => (
                 <g key={settled[i].time} onMouseEnter={() => setHover(i)}>
-                  <rect x={i * 6} y="0" width="6" height="160" className={`funding-hit${hover === i ? ' on' : ''}`} />
-                  <rect x={i * 6 + 1} y={b.y} width="4" height={b.h} rx="1" className={b.positive ? 'funding-up' : 'funding-down'} />
+                  <rect x={(offset + i) * 6} y="0" width="6" height="160" className={`funding-hit${hover === i ? ' on' : ''}`} />
+                  <rect x={(offset + i) * 6 + 1} y={b.y} width="4" height={b.h} rx="1" className={b.positive ? 'funding-up' : 'funding-down'} />
                 </g>
               ))}
             </svg>
@@ -150,7 +156,7 @@ export function Funding({ symbol }: { symbol: string }) {
                 <thead>
                   <tr>
                     <th>Time (UTC)</th>
-                    <th className="r">Rate (1 h)</th>
+                    <th className="r">Rate</th>
                     <th className="r">Mark price</th>
                     <th>Direction</th>
                   </tr>

@@ -303,7 +303,7 @@ try {
     ['21b-history-fills', '#/history/fills', /Fees paid/],
     ['21c-history-funding', '#/history/funding', /Net funding/],
     ['21d-history-transfers', '#/history/transfers', /Recipient/],
-    ['22-funding', '#/funding/BTC-USD', /Longs pay shorts/],
+    ['22-funding', '#/funding/BTC-USD', /Settled rates, one per 1 h/],
     ['23-notfound', '#/no-such-page', /No gate at this address/],
   ];
   for (const [name, hash, pattern] of PAGES) {

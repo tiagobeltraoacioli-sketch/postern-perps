@@ -11,16 +11,21 @@ import { go } from '../state/session';
 import { restrictedText, RESTRICTED_SUMMARY } from './notices';
 import type { WireGeo } from '../lib/types';
 
-export type GeoVerdict = 'pending' | 'open' | 'restricted' | 'unknown' | 'sanctioned';
+/**
+ * 'unreachable': the exchange did not answer the region question at all (API down, offline). That is not a verdict
+ * about the visitor: no restricted screen is shown for it; the banner says the region could not be determined and the
+ * signing guard allows only exits, as before. 'unknown': the exchange answered and could not place the visitor.
+ */
+export type GeoVerdict = 'pending' | 'open' | 'restricted' | 'unknown' | 'sanctioned' | 'unreachable';
 export function geoVerdict(geo: WireGeo | null, read: 'pending' | 'ok' | 'failed'): GeoVerdict {
   if (read === 'pending') return 'pending';
-  if (!geo) return 'unknown';
+  if (!geo) return 'unreachable';
   if (geo.sanctioned) return 'sanctioned';
   if (geo.restricted || geo.policy !== 'open') return geo.country ? 'restricted' : 'unknown';
   return 'open';
 }
 
-export function RestrictedScreen({ verdict, country, onContinue }: { verdict: Exclude<GeoVerdict, 'pending' | 'open'>; country: string | null; onContinue?: () => void }) {
+export function RestrictedScreen({ verdict, country, onContinue }: { verdict: Exclude<GeoVerdict, 'pending' | 'open' | 'unreachable'>; country: string | null; onContinue?: () => void }) {
   const sanctioned = verdict === 'sanctioned';
   return (
     <section className="restricted" aria-labelledby="restricted-title">

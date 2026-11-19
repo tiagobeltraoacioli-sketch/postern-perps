@@ -2,7 +2,7 @@
 // Starts the frontend dev server against a LOCAL stack (loopback only). UNAUDITED prototype; never a deployment.
 //
 //   node scripts/dev-local.mjs --api http://127.0.0.1:49900 --l2 http://127.0.0.1:49901 \
-//        --vault 0x… --token 0x… [--deploy-block N] [--chain 700770] [--port 49920] [--config-out FILE]
+//        --vault 0x… --token 0x… [--deploy-block N] [--chain 700770] [--port 49920] [--config-out FILE] [--proxy]
 //
 // Writes a build configuration shaped like config/production.json (default: .local/stack.json, git-ignored) and runs
 // `vite --host 127.0.0.1 --port P --strictPort` with POSTERN_PERPS_CONFIG pointing at it. Such a build is a "local
@@ -45,10 +45,14 @@ const chain = Number(opt('chain', '700770'));
 const port = Number(opt('port', '49920'));
 if (!Number.isInteger(chain) || chain <= 0) fail('--chain is not a chain id');
 if (!Number.isInteger(port) || port < 1024 || port > 65535) fail('--port is not a port');
+// --proxy: the page talks to the API through this dev server (same origin), which forwards /v1 (REST and WebSocket)
+// to --api. For a node that sends no CORS headers (F434-2). The API URL in the page is then this server's own.
+const proxy = args.includes('--proxy');
+const pageApi = proxy ? `http://127.0.0.1:${port}` : api;
 const config = {
   note: 'LOCAL STACK (loopback). Not for publication. UNAUDITED prototype.',
-  apiUrl: api,
-  wsUrl: `${api.replace(/^http/, 'ws')}/v1/ws`,
+  apiUrl: pageApi,
+  wsUrl: `${pageApi.replace(/^http/, 'ws')}/v1/ws`,
   l2RpcUrl: l2,
   l2ChainId: chain,
   vault: address('vault', opt('vault')),
@@ -63,7 +67,7 @@ process.env.POSTERN_PERPS_CONFIG = out;
 console.log(`dev-local: config ${out}; pid ${process.pid}; http://127.0.0.1:${port}/`);
 
 const { createServer } = await import('vite');
-const server = await createServer({ root: frontend, configFile: resolve(frontend, 'vite.config.ts'), server: { host: '127.0.0.1', port, strictPort: true } });
+const server = await createServer({ root: frontend, configFile: resolve(frontend, 'vite.config.ts'), server: { host: '127.0.0.1', port, strictPort: true, ...(proxy ? { proxy: { '/v1': { target: api, ws: true, changeOrigin: true } } } : {}) } });
 await server.listen();
 const stop = async () => {
   await server.close();

@@ -311,7 +311,7 @@ function Banners({ quiet }: { quiet: boolean }) {
   const restricted = read !== 'pending' && (!geo || geo.restricted || geo.policy !== 'open');
   return (
     <div className="banners">
-      {LOCAL_RENDER && <p className="banner banner-local">Local render build against a loopback mock: not for publication.</p>}
+      {LOCAL_RENDER && <p className="banner banner-local">Local build against a loopback mock or stack: not for publication.</p>}
       {!domain && (
         <p className="banner banner-warn" role="status">
           Not live: the exchange's vault is not deployed, so this page signs nothing. Prices and accounts shown are read only.

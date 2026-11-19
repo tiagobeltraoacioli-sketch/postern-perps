@@ -101,9 +101,12 @@ describe('calc worked examples (round-1 fixture, restated on the engine\'s arith
       { market: 'BTC-USD', size: SZ / 2n, entryPx: 66_800n * PX, markPx: 67_000n * PX, leverage: 10, isolated: false, isolatedMargin: 0n, tiers, tick: PX / 2n },
       { market: 'ETH-USD', size: -SZ, entryPx: 3_500n * PX, markPx: 3_400n * PX, leverage: 5, isolated: true, isolatedMargin: 700n * USDC, tiers, tick: PX / 100n },
     ]);
-    expect(withIsolated.crossEquity).toBe(25_100n * USDC - 700n * USDC);
+    // SPEC 6.1: an isolated position's margin is NOT part of the balance. The cross side is untouched by it; the
+    // account's equity adds the isolated margin and that position's result (short 1 ETH from 3,500 at 3,400: +100).
+    expect(withIsolated.crossEquity).toBe(25_100n * USDC);
+    expect(withIsolated.available).toBe(25_100n * USDC - 3_350n * USDC);
     expect(withIsolated.marginUsed).toBe(3_350n * USDC + 700n * USDC);
-    expect(withIsolated.equity).toBe(25_200n * USDC);
+    expect(withIsolated.equity).toBe(25_000n * USDC + 700n * USDC + 100n * USDC + 100n * USDC);
   });
   it('where round 1 differed from the engine: the leverage fraction rounds UP and the fee is on the exact notional', () => {
     // Leverage 3 is 333,334 ppm (R395-15), not notional / 3: 100.000001 USDC of notional needs 33.333401, not 33.333334.

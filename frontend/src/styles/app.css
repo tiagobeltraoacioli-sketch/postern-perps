@@ -2214,7 +2214,8 @@ td.strong {
   line-height: 1;
 }
 
-.nav-wide {
+/* The two secondary pages sit in the header only when it is wide (below); elsewhere they are inside "More". */
+.nav > .nav-wide {
   display: none;
 }
 .tab-short {
@@ -2271,6 +2272,88 @@ td.strong {
 }
 .vault-word strong {
   color: var(--text);
+}
+
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.portfolio-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--s-3);
+  align-items: stretch;
+}
+.split-bar {
+  height: 10px;
+  margin: var(--s-4) var(--panel-pad) var(--s-2);
+  border-radius: var(--r-arch);
+  background: color-mix(in srgb, var(--net) 26%, var(--surface-3));
+  overflow: hidden;
+}
+.split-used {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  background: var(--text-2);
+  border-right: 2px solid var(--surface);
+}
+.balance-rows {
+  margin: 0;
+  padding: var(--s-2) var(--panel-pad) var(--panel-pad);
+  display: grid;
+}
+.balance-rows > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.balance-rows > div:last-child {
+  border-bottom: 0;
+}
+.balance-rows dt {
+  color: var(--text);
+  font-size: var(--text-ui);
+}
+.balance-rows dt .fine {
+  margin-left: var(--s-2);
+}
+.balance-rows dd {
+  margin: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--s-2);
+  border-radius: 2px;
+}
+.swatch-used {
+  background: var(--text-2);
+}
+.swatch-free {
+  background: color-mix(in srgb, var(--net) 26%, var(--surface-3));
+  outline: 1px solid var(--line-strong);
+}
+.risk-body {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--panel-pad) 0;
+}
+.risk-body .balance-rows {
+  padding-inline: 0;
+}
+.risk-figure {
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* ---------- Round 2: the trading screen fits the viewport on a desktop ---------- */
@@ -2372,6 +2455,18 @@ td.strong {
   .trade-side[data-side-tab='book'] .trade-tape,
   .trade-side[data-side-tab='trades'] .trade-book {
     display: none;
+  }
+  /* The switch names the panel: its own title would say it twice. */
+  .trade-side .panel-head h2 {
+    display: none;
+  }
+  .trade-side .tape .panel-head {
+    display: none;
+  }
+  .trade-side .book .panel-head {
+    justify-content: flex-end;
+    padding-block: var(--s-2);
+    border-bottom: 0;
   }
 }
 @media (max-width: 1279px) {
@@ -2503,7 +2598,7 @@ td.strong {
   }
 }
 @media (min-width: 1440px) {
-  .nav .nav-wide {
+  .nav > .nav-wide {
     display: inline-block;
   }
 }
@@ -2565,6 +2660,13 @@ td.strong {
   }
   .exit-stages {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .portfolio-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .balance-rows dt .fine {
+    display: block;
+    margin-left: 0;
   }
   .exit-panel {
     padding: var(--s-4);

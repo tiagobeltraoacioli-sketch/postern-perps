@@ -12,7 +12,7 @@ import { config } from '../lib/config';
 import { Store, useStore } from '../lib/store';
 import { L2, L2Error } from '../vault/l2';
 import { buildTx, checkEscapeClaim, deploymentOf, describeTx, readVault, sendTx, TxRefused, VaultMismatch, waitReceipt, type Deployment, type Tx, type TxDescription, type TxInput, type VaultView } from '../vault/vault';
-import { keepProof, keptProofFor, type KeptProof } from '../vault/keeper';
+import { BACKSTOP, INSURANCE, keepProof, keptProofFor, keptProofs, type KeptProof, type ProofPair } from '../vault/keeper';
 import { parseAccountProof } from '../vault/wire';
 import { api } from '../lib/api';
 import type { Receipt } from '../vault/l2';
@@ -65,7 +65,12 @@ export function useVault(account: string | null, everyMs = 12_000): { view: Vaul
  * (vault/keeper.ts). `state`: 'kept' with the proof; 'none' when there is nothing to keep yet (no checkpoint, or an
  * account that never deposited); 'missing' when the exchange did not give a usable proof for that checkpoint.
  */
-export type ProofKeeper = { state: 'off' | 'none' | 'kept' | 'missing'; kept: KeptProof | null };
+export type ProofKeeper = {
+  state: 'off' | 'none' | 'kept' | 'missing';
+  kept: KeptProof | null;
+  /** When nothing is kept for the vault's latest checkpoint: the newest OLDER proof on this device, if any. */
+  older?: KeptProof | null;
+};
 export function useProofKeeper(view: VaultView | null, account: string | null): ProofKeeper {
   const [keeper, setKeeper] = useState<ProofKeeper>({ state: 'off', kept: null });
   const root = view?.latest.accountsRoot ?? null;
@@ -82,11 +87,24 @@ export function useProofKeeper(view: VaultView | null, account: string | null): 
       try {
         const proof = parseAccountProof(await api.get<unknown>(`/v1/accounts/${account}/proof?height=${height}`));
         checkEscapeClaim(view, proof.leaf, proof.siblings, account);
-        const stored = keepProof({ chainId: d.chainId, vault: d.vault, account: account.toLowerCase() as Hex, height, accountsRoot: root, leaf: proof.leaf, siblings: proof.siblings });
+        // The two system proofs for the same root (needed once by proveSystemShares before any claim). A failure
+        // here does not lose the user's own proof: it is kept without them and tried again at the next checkpoint.
+        let system: { insurance: ProofPair; backstop: ProofPair } | undefined;
+        try {
+          const [ins, back] = await Promise.all([api.get<unknown>(`/v1/accounts/${INSURANCE}/proof?height=${height}`), api.get<unknown>(`/v1/accounts/${BACKSTOP}/proof?height=${height}`)]);
+          const insurance = parseAccountProof(ins);
+          const backstop = parseAccountProof(back);
+          checkEscapeClaim(view, insurance.leaf, insurance.siblings, INSURANCE);
+          checkEscapeClaim(view, backstop.leaf, backstop.siblings, BACKSTOP);
+          if (insurance.leaf.index === 1 && backstop.leaf.index === 2) system = { insurance, backstop };
+        } catch {
+          system = undefined;
+        }
+        const stored = keepProof({ chainId: d.chainId, vault: d.vault, account: account.toLowerCase() as Hex, height, accountsRoot: root, leaf: proof.leaf, siblings: proof.siblings, system });
         const now = stored ? keptProofFor(d.vault, account, root) : null;
-        if (live) setKeeper(now ? { state: 'kept', kept: now.kept } : { state: 'missing', kept: null });
+        if (live) setKeeper(now ? { state: 'kept', kept: now.kept } : { state: 'missing', kept: null, older: keptProofs(d.vault, account)[0] ?? null });
       } catch {
-        if (live) setKeeper({ state: 'missing', kept: null });
+        if (live) setKeeper({ state: 'missing', kept: null, older: keptProofs(d.vault, account)[0] ?? null });
       }
     })();
     return () => {

@@ -15,7 +15,7 @@ import { geoVerdict } from '../compliance/Restricted';
 import { useStore } from '../lib/store';
 import { useActions } from '../state/actions';
 import { deployment, l2, refreshVault, useFunds, useProofKeeper, useVault } from '../state/funds';
-import { keptProofFor, proofFile } from '../vault/keeper';
+import { keptProofFor, proofFile, systemProofsIn } from '../vault/keeper';
 import { api } from '../lib/api';
 import { config } from '../lib/config';
 import { formatDateTime, formatDuration, formatUsd, shortAddress, DASH } from '../lib/format';
@@ -236,7 +236,11 @@ function DepositTab({ view }: { view: VaultView | null }) {
             {!account && <p className="msg-warn">Connect a wallet to deposit.</p>}
             {verdict !== 'open' && verdict !== 'pending' && (
               <p className="callout callout-warn" role="status">
-                {verdict === 'sanctioned' ? 'This address cannot use PosternDEX Perpetuals.' : 'Trading is not available in your region, so this interface offers no new deposit. Funds already in the vault can leave: use Withdraw or Exit.'}
+                {verdict === 'sanctioned'
+                  ? 'This address cannot use PosternDEX Perpetuals.'
+                  : verdict === 'unreachable'
+                    ? 'The exchange did not answer, so your region is not confirmed and this interface offers no new deposit now. Funds already in the vault can leave: use Withdraw or Exit.'
+                    : 'Trading is not available in your region, so this interface offers no new deposit. Funds already in the vault can leave: use Withdraw or Exit.'}
               </p>
             )}
             <ol className="flow" aria-label="Deposit steps">
@@ -605,7 +609,9 @@ function ExitTab({ view }: { view: VaultView | null }) {
           <header className="panel-head">
             <h2>1 · Make the exchange act</h2>
           </header>
-          {open ? (
+          {escaped ? (
+            <p className="callout callout-warn">The vault is in escape mode: requests are closed for good. Claim on the right.</p>
+          ) : open ? (
             <div className={`callout ${view!.now > open.forcedDeadline! ? 'callout-danger' : 'callout-warn'}`} role="status">
               <strong>Request #{open.forcedIndex!.toString()} is open</strong>
               {view!.now > open.forcedDeadline! ? (
@@ -617,8 +623,6 @@ function ExitTab({ view }: { view: VaultView | null }) {
               )}
               <ForcedWord account={account} index={open.forcedIndex!} />
             </div>
-          ) : escaped ? (
-            <p className="callout callout-warn">The vault is in escape mode: requests are closed. Claim on the right.</p>
           ) : (
             <>
               <fieldset className="radio-cards">
@@ -715,7 +719,10 @@ function KeptProofLine({ view, account }: { view: VaultView | null; account: str
       {keeper.state === 'kept' && keeper.kept && (
         <>
           <span>
-            Saved on this device for the vault's latest checkpoint (exchange height <span className="num">{keeper.kept.height}</span>), checked against the vault. With it you can claim in escape mode even if the exchange's API is gone.
+            Saved on this device for the vault's latest checkpoint (exchange height <span className="num">{keeper.kept.height}</span>), checked against the vault.{' '}
+            {keeper.kept.system
+              ? 'It includes the insurance and backstop proofs the vault needs once before any claim: with this you can exit even if the exchange\'s API is gone.'
+              : 'The insurance and backstop proofs the vault needs once before any claim could not be saved with it: in escape mode someone must still supply those two.'}
           </span>
           <button type="button" className="button button-small" onClick={save}>
             Save it as a file
@@ -723,7 +730,15 @@ function KeptProofLine({ view, account }: { view: VaultView | null; account: str
         </>
       )}
       {keeper.state === 'none' && <span>Nothing to keep yet: the proof exists once this account has deposited and the vault has accepted a checkpoint.</span>}
-      {keeper.state === 'missing' && <span>The exchange gave no usable proof for the vault's latest checkpoint. Without one, an escape claim needs a proof from a validator or an archive. Reopen this page later; it tries at every checkpoint.</span>}
+      {keeper.state === 'missing' && (
+        <span>
+          The exchange gave no usable proof for the vault's latest checkpoint{view ? ` (exchange height ${view.latest.height})` : ''}. Without one, an escape claim needs a proof from a validator or an archive.{' '}
+          {keeper.older
+            ? `The newest proof on this device is for an OLDER checkpoint (exchange height ${keeper.older.height}, saved ${formatDateTime(keeper.older.savedAt)} UTC) and cannot be used for the latest. `
+            : ''}
+          This page tries again at every checkpoint the vault accepts.
+        </span>
+      )}
     </div>
   );
 }
@@ -799,6 +814,7 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [escaped, uncreditedKey, view.block]);
 
+  const saved = account && deployment ? keptProofFor(deployment.vault, account, view.latest.accountsRoot) : null;
   const accept = useCallback(
     (proof: { leaf: AccountLeaf; siblings: Hex[] }) => {
       if (!account) return;
@@ -808,7 +824,6 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
     },
     [view, account],
   );
-  const saved = account && deployment ? keptProofFor(deployment.vault, account, view.latest.accountsRoot) : null;
   const fetchProof = async () => {
     if (!account) return;
     setBusy(true);
@@ -833,15 +848,19 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
   const proveSystem = async () => {
     setBusy(true);
     setMessage(null);
+    const send = (pair: { insurance: { leaf: AccountLeaf; siblings: readonly Hex[] }; backstop: { leaf: AccountLeaf; siblings: readonly Hex[] } }) => {
+      checkEscapeClaim(view, pair.insurance.leaf, pair.insurance.siblings, SYSTEM.insurance);
+      checkEscapeClaim(view, pair.backstop.leaf, pair.backstop.siblings, SYSTEM.backstop);
+      requestTx({ kind: 'proveSystemShares', insurance: pair.insurance.leaf, insuranceSiblings: [...pair.insurance.siblings], backstop: pair.backstop.leaf, backstopSiblings: [...pair.backstop.siblings] });
+    };
     try {
+      // The proofs kept on this device with the user's own, then a pasted proof file, then the exchange API.
+      const local = saved?.system ?? (pasted.trim() ? systemProofsIn(pasted) : null);
+      if (local) return send(local);
       const [ins, back] = await Promise.all([api.get<unknown>(`/v1/accounts/${SYSTEM.insurance}/proof?height=${view.latest.height}`), api.get<unknown>(`/v1/accounts/${SYSTEM.backstop}/proof?height=${view.latest.height}`)]);
-      const insurance = parseAccountProof(ins);
-      const backstop = parseAccountProof(back);
-      checkEscapeClaim(view, insurance.leaf, insurance.siblings, SYSTEM.insurance);
-      checkEscapeClaim(view, backstop.leaf, backstop.siblings, SYSTEM.backstop);
-      requestTx({ kind: 'proveSystemShares', insurance: insurance.leaf, insuranceSiblings: insurance.siblings, backstop: backstop.leaf, backstopSiblings: backstop.siblings });
+      send({ insurance: parseAccountProof(ins), backstop: parseAccountProof(back) });
     } catch (e) {
-      setMessage(e instanceof ClaimRefused ? e.message : e instanceof WireError ? `The proofs from the exchange cannot be used: ${e.message}.` : 'The exchange API did not return the insurance and backstop proofs. Any validator or archive can submit them; this is needed once.');
+      setMessage(e instanceof ClaimRefused ? e.message : e instanceof WireError ? `The proofs from the exchange cannot be used: ${e.message}.` : 'The exchange API did not return the insurance and backstop proofs, and none are kept on this device. Paste a proof file that holds them (below), or wait for anyone who has them: this is needed once for everyone.');
     } finally {
       setBusy(false);
     }
@@ -897,6 +916,16 @@ function Escape({ view, account }: { view: VaultView; account: string | null }) 
           <button type="button" className="button" onClick={() => void proveSystem()} disabled={busy || !account}>
             {busy ? 'Reading proofs…' : 'Review the system proof'}
           </button>
+          <span className="fine">{saved?.system ? 'The two proofs are kept on this device with your own.' : 'Taken from a proof file pasted below when it holds them, else from the exchange API.'}</span>
+          {!saved?.system && (
+            <details className="paste">
+              <summary>Paste a proof file that holds the two system proofs</summary>
+              <label className="field">
+                <span>Proof file (JSON) saved from this page on any device</span>
+                <textarea className="num" rows={4} spellCheck={false} value={pasted} onChange={(e) => setPasted(e.target.value)} />
+              </label>
+            </details>
+          )}
         </div>
       )}
       {phase === 'escape' && payout && mine !== 'none' && (

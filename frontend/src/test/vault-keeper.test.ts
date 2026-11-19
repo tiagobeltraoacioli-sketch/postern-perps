@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Hex } from 'viem';
 import { accountLeaf, SparseTree, type AccountLeaf } from '../vault/merkle';
-import { keepProof, keptProofFor, keptProofs, KEPT, proofFile } from '../vault/keeper';
+import { BACKSTOP, INSURANCE, keepProof, keptProofFor, keptProofs, KEPT, proofFile, systemProofsIn, type KeptProof } from '../vault/keeper';
 import { parsePastedProof } from '../vault/wire';
 import { checkEscapeClaim, type VaultView } from '../vault/vault';
 
@@ -19,7 +19,42 @@ function checkpoint(value: bigint) {
 }
 const entry = (height: bigint, value: bigint) => ({ chainId: 700770, vault: VAULT, account: USER, height, ...checkpoint(value) });
 
+function withSystem(height: bigint, value: bigint) {
+  const leaves = [leafOf(`0x${'0'.repeat(39)}1` as Hex, 0, 0n), leafOf(INSURANCE, 1, 5n), leafOf(BACKSTOP, 2, 5n), leafOf(USER, 3, value), leafOf(OTHER, 4, 9n)];
+  const tree = new SparseTree(leaves.map(accountLeaf));
+  return { chainId: 700770, vault: VAULT, account: USER, height, leaf: leaves[3], siblings: tree.proof(3), accountsRoot: tree.root, system: { insurance: { leaf: leaves[1], siblings: tree.proof(1) }, backstop: { leaf: leaves[2], siblings: tree.proof(2) } } };
+}
+
+const keptOf = (e: ReturnType<typeof entry>): KeptProof => {
+  keepProof(e);
+  return keptProofFor(VAULT, USER, e.accountsRoot)!.kept;
+};
+
 describe('exit proof keeper', () => {
+  // 436's follow-up on R436-11: a user's own proof is unusable until proveSystemShares was sent with the INSURANCE
+  // and BACKSTOP proofs of the same root, so they are kept, exported and read back with it.
+  it('keeps the two system proofs with the user\'s proof; they walk to the same root and survive the file', () => {
+    const e = withSystem(100n, 750_000_000n);
+    expect(keepProof(e, 5)).toBe(true);
+    const hit = keptProofFor(VAULT, USER, e.accountsRoot)!;
+    expect(hit.system!.insurance.leaf).toEqual(e.system.insurance.leaf);
+    const view = { latest: { accountsRoot: e.accountsRoot } } as VaultView;
+    expect(() => checkEscapeClaim(view, hit.system!.insurance.leaf, hit.system!.insurance.siblings, INSURANCE)).not.toThrow();
+    expect(() => checkEscapeClaim(view, hit.system!.backstop.leaf, hit.system!.backstop.siblings, BACKSTOP)).not.toThrow();
+    const file = proofFile(hit.kept).text;
+    const back = systemProofsIn(file)!;
+    expect(back.backstop.leaf).toEqual(e.system.backstop.leaf);
+    expect(back.insurance.siblings).toEqual(e.system.insurance.siblings);
+    expect(parsePastedProof(file).leaf).toEqual(e.leaf);
+  });
+  it('system proofs in the wrong slot (another account or index) are not stored and not read from a file', () => {
+    const e = withSystem(100n, 1n);
+    expect(keepProof({ ...e, system: { insurance: e.system.backstop, backstop: e.system.insurance } })).toBe(false);
+    expect(keepProof({ ...e, system: { insurance: { leaf: e.leaf, siblings: e.siblings }, backstop: e.system.backstop } })).toBe(false);
+    expect(systemProofsIn(JSON.stringify({ system: { insurance: { leafData: {}, proof: [] }, backstop: {} } }))).toBeNull();
+    expect(systemProofsIn('not json')).toBeNull();
+    expect(systemProofsIn(proofFile({ ...keptOf(entry(100n, 5n)) }).text)).toBeNull();
+  });
   it('keeps a proof and returns it for exactly the root it was checked against', () => {
     const e = entry(100n, 750_000_000n);
     expect(keepProof(e, 1_000)).toBe(true);
