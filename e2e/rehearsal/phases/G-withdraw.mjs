@@ -97,4 +97,35 @@ export default async function (ctx) {
     expect((await tokenBal(big)) === large, `paid ${fmtUsdc(await tokenBal(big))}`);
     return { withdrawalId: id, net: fmtUsdc(large), delaySeconds: delay, releasedEarly: early.error, paidAfterDelay: fmtUsdc(large) };
   });
+  // ---- the node's own relayer (the keeper) against a lying or absurd L2 endpoint (R436-15) ----
+  const relayer = async () => (await api.json('/v1/node')).relayer;
+  const fault = async (m) => { const r = await fetch(`${stack.l2Proxy}/__fault`, { method: 'POST', body: JSON.stringify({ mode: m }) }); expect(r.status === 200, `proxy fault ${m}`); };
+  const vaultCount = async () => Number((await chain.call(stack.vault, 'latest()(uint64,uint64,uint64,uint64,uint64,uint64,uint128,bytes32,bytes32)'))[4]);
+  for (const [id, mode, what, pattern, title] of [
+    ['G-06', 'gas', 'names an absurd gas price', /GAS PRICE ABOVE THE CAP/i, 'the relayer signs nothing (gas cap, loud error) while a checkpoint is due; it delivers when the price is sane again'],
+    ['G-07', 'hash', 'reports another block hash', /disagree/i, 'the relayer refuses to act on readings its two endpoints do not agree on; it delivers when they agree again'],
+  ]) {
+    await ctx.check(id, `one L2 endpoint ${what}: ${title}`, async () => {
+      blockedIf(!chain || !stack.relayer, 'the stack runs without the node relayer');
+      const r0 = await relayer();
+      await fault(mode);
+      let during, countDuring, id2;
+      try {
+        const w = await api.withdraw(alice, '10', payee);            // a new record: the keeper must deliver a checkpoint at once
+        expect(w.body?.result?.ok === true, JSON.stringify(w.body));
+        id2 = Number(w.body.result.withdrawalId);
+        await api.until(async () => (await api.json(`/v1/withdrawals/${id2}`)).status === 'certified', { ms: 60000, what: 'certified' });
+        during = await api.until(async () => { const r = await relayer(); return pattern.test(r.lastError ?? '') || pattern.test(r.alarm ?? '') ? r : null; }, { ms: 60000, every: 1000, what: `the relayer reporting ${pattern}` });
+        await sleep(6000);
+        during = await relayer();
+        countDuring = await vaultCount();
+        expect(during.submitted === r0.submitted, `the relayer submitted ${during.submitted - r0.submitted} transaction(s) while one endpoint ${what}`);
+        expect(countDuring <= id2, `the vault received a checkpoint with ${countDuring} records while the relayer should have held`);
+      } finally {
+        await fault('none');
+      }
+      const after = await api.until(async () => { const r = await relayer(); return r.accepted > r0.accepted && (await vaultCount()) > id2 ? r : null; }, { ms: 90000, every: 1500, what: 'delivery after the fault' });
+      return { withdrawalId: id2, whileFaulty: { submitted: during.submitted, gasRefused: during.gasRefused ?? null, lastError: (during.lastError ?? '').slice(0, 200), alarm: during.alarm }, vaultRecordsWhileFaulty: countDuring, afterwards: { submitted: after.submitted, accepted: after.accepted, vaultRecords: await vaultCount() } };
+    });
+  }
 }
