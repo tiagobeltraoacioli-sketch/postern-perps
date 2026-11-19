@@ -94,7 +94,7 @@ export default async function (ctx) {
     expect(down, 'the API still answers');
     return { hostServices: (await ctx.host('svc.sh', 'status')).split('\n') };
   });
-  await ctx.check('K-02b', 'WITHOUT the sequencer: one validator\'s own read service (its own log, its own replay) serves every account\'s escape leaf and siblings for the checkpoint the vault holds; they verify against the vault\'s root and equal the ones fetched before (R436-11)', async () => {
+  await ctx.check('K-02b', (FORCED ? 'not from the sequencer' : 'WITHOUT the sequencer') + ': one validator\'s own read service (its own log, its own replay) serves every account\'s escape leaf and siblings for the checkpoint the vault holds; they verify against the vault\'s root and equal the ones fetched before (R436-11)', async () => {
     if (FORCED) expect((await api.get('/v1/status')).status === 200, 'the sequencer was expected to be alive in this variant');
     blockedIf(!stack.validatorApi, 'no validator read service in this stack (up.sh --validator-read off, or all validators inside the sequencer): the proofs used below were fetched from the sequencer before it stopped');
     const L = await chain.call(stack.vault, LATEST);
