@@ -502,8 +502,9 @@ under the index (test `mark_manipulation_neither_triggers_the_stop_nor_buys_the_
   by rule 1 at most what `2 * buffer` allows above the floor: with one market, notional `<= (E* - floor) / (2 *
   bufferPpm / 10^6)` at takeover; (2) therefore a gap of `g` (as a fraction of the index, beyond the buffer) costs
   it at most `g * notional`, i.e. it falls under the floor by at most `(g / (2 * bufferPpm / 10^6) - 1/2) * (E* -
-  floor)`: with the test market's buffer of 6.05%, a 20% gap costs at most about 1.15 times its budget above the
-  floor, never a multiple of the fund as before; (3) on resume the stop closes it at the new index in that block;
+  floor)` where `E* - floor` is its margin above the floor when it took the position: with the test market's buffer
+  of 6.05%, a 20% gap leaves it under the floor by at most about 1.15 times that margin, not by a multiple of
+  the whole fund as before; (3) on resume the stop closes it at the new index in that block;
   (4) the loss beyond its balance is bad debt (section 8): paid by `INSURANCE` in the same block as far as the
   fund goes; the rest stays a recorded negative balance of `BACKSTOP` (`BadDebt` event every block), is charged
   to `INSURANCE` in the escape values (section 11) and, beyond that, is the pro-rata haircut of the vault's escape:
@@ -521,10 +522,35 @@ under the index (test `mark_manipulation_neither_triggers_the_stop_nor_buys_the_
   so that liquidation remainders reach it while the index moves against it; that costs the trader the
   liquidated margin. Residual, stated: the sequencer chooses the block in which a resume after a halt lands and
   so which resting orders exist at that moment; the price is still the committee's.
-- Measured (436's fuzzer, unchanged generator, instrumented copy in 430's scratch; testkit markets; the same
-  seeds on each engine; USDC): see the table in `agents/430-engine-r2.md` and the cross-area log. In short, worst
-  uncovered system deficit and worst backstop equity fall by one to two orders of magnitude against `5106fea`,
-  the loss socialised to deleveraged users (their ADL fills against the end-of-block mark) is not higher.
+- Measured (436's fuzzer with its generator unchanged, an instrumented copy in 430's scratch; testkit markets,
+  seeds 1000000 to 1001999 x 600 blocks = 1.2 million blocks per engine, the same seeds on each; USDC; 0 hard
+  violations on each). A = `5106fea` (no cap), B = `2843285` (0.2.5), C = this rule:
+
+  | | A | B | C |
+  |---|---|---|---|
+  | blocks with backstop EQUITY < 0 | 12,734 | 2,017 | 134 |
+  | blocks with backstop BALANCE < 0 (a realised loss, reported) | 320 | 2,172 | 127 |
+  | worst backstop equity | -114,838 | -17,878 | -4,685 |
+  | system deficit not covered by INSURANCE: blocks / p50 / p99 / worst | 5,286 / 5,143 / 80,283 / 114,599 | 3,582 / 220 / 17,878 / 17,878 | 1,725 / 32 / 4,685 / 9,885 |
+  | sum of all negative equities, worst | 114,838 | 19,303 | 19,303 |
+  | INSURANCE paid out | 1,805,120 | 1,769,678 | 1,639,745 |
+  | loss of deleveraged users against the mark (of which from a backstop stop) | 648,890 (0) | 667,610 (9,390) | 648,849 (644) |
+  | ADL fills | 8,203 | 8,984 | 9,544 |
+  | backstop stops (closing with a negative balance) | 0 | 188 (15) | 270 (2) |
+
+  Reading: the quantity that matters for solvency is EQUITY (and the sum of negative equities against the
+  insurance fund), not the backstop's balance: B and C turn an unrealised deficit into a realised, reported one,
+  which is why B showed MORE negative-balance blocks than A while its negative-equity blocks fell sixfold. C's two
+  stops that closed negative (-2,342 and -4,685 USDC; seeds 1001045 block 554 and 1001961 block 521) both happened
+  in a block in which halted markets RESUMED: gap cases (below); none of the 270 stops closed negative on the
+  active path. Against A, C lowers the worst uncovered deficit about
+  twelvefold and what INSURANCE pays by 9%, and leaves the loss of deleveraged users unchanged (-0.01%; on the
+  400-seed subset 1001000 to 1001399 it is +1.8%, 144,946 against 142,353, with INSURANCE paying 21% less there:
+  the two samples do not agree on the sign, so "not higher" is the honest reading, not "lower"). The cost: 16%
+  more ADL fills (the backstop carries less, and a stop is an ADL), at prices that are the index or the
+  liquidation bound. With the compliance markets (1,000 seeds x 600 blocks) no engine ever shows a deficit or a
+  stop: that configuration does not stress the backstop. The measure of "loss against the mark" uses the mark at
+  the END of the block of the fill, on one generator: an estimate, not an accounting identity.
 - Not solved, stated: a backstop under its floor does nothing until it is funded again (a deposit to `0x…03`);
   a rule that sells its inventory BEFORE the stop level (392's resting unwind orders) is not built; the buffer
   makes the backstop carry less than before (a 25,000 USDC backstop with floor 15,000 carries about 80,000 USD of
