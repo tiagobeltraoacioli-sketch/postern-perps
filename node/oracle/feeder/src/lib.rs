@@ -6,9 +6,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod health;
 pub mod json;
 pub mod keyfile;
 pub mod pipeline;
+pub mod recording;
+pub mod replay;
+pub mod submit;
+pub mod tape;
 pub mod venues;
 
 #[cfg(feature = "net")]

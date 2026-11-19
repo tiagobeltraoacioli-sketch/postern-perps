@@ -1,0 +1,8 @@
+{"p":{"1":"67250","2":"3480","3":"182.4"},"repeat":10,"note":"30 s calm: the markets leave INIT on the third round"}
+{"ramp":{"1":"59180"},"rounds":40,"note":"BTC -12% in 40 rounds (0.3% per round, far below jumpBps 500): the market stays active, longs are liquidated on the way"}
+{"p":{"1":"59180"},"repeat":10}
+{"p":{"2":"3100"},"repeat":4,"note":"ETH gap of -10.9% (beyond jumpBps 500): JUMP halt, resumed by the third agreeing round at 3100"}
+{"p":{"1":"59200"},"override":{"6":{"1":"70000"},"5":{"1":"50000"}},"repeat":3,"note":"signers 5 and 6 lie in opposite directions: the median stays 59200"}
+{"p":{"1":"59210"},"signers":[0,1,2,3,4],"repeat":3,"note":"exactly the quorum signs"}
+{"silent":5,"note":"15 s without oracle input: every market halts STALE (maxStalenessMs 10 s)"}
+{"p":{"1":"59220"},"repeat":10,"note":"back after three rounds"}

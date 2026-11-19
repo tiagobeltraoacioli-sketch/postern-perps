@@ -7,9 +7,16 @@
 //! perps-oracle replay   --rounds DIR                            (unsigned observations of recorded rounds, in order)
 //! perps-oracle assemble --obs F1 F2 ...                         (OracleUpdate from feeder submissions)
 //! perps-oracle apply    --committee F --updates JSONL           (the engine rule from genesis over updates)
-//! perps-oracle record   --out DIR [--rounds N]                  (net feature: record live venue responses)
-//! perps-oracle run      --signer I --key-file F --vault 0x.. --out JSONL [--rounds N]   (net feature: live feeder)
+//! perps-oracle record   --out FILE.jsonl [--rounds N]           (net feature: record live venue responses)
+//! perps-oracle run      (--signer I --key-file F | --key-dir DIR) --vault 0x.. --out JSONL [--rounds N]
+//!                       [--record FILE.jsonl] [--node http://127.0.0.1:P [--token-file F]]   (net feature: live feeder)
 //! perps-oracle exit     --committee F --updates JSONL --market M --at T  (exit price band after the updates)
+//! perps-oracle committee-gen --n 7 --quorum 5 --out DIR         (run-time THROWAWAY dev committee, keys 0600)
+//! perps-oracle tape     --recording DIR|FILE.jsonl [--every K]  (recorded venue rounds -> replay tape, by the pipeline)
+//! perps-oracle tape-check --tape FILE                           (parse a tape, print its expanded rounds' summary)
+//! perps-oracle replay-feed --tape FILE --vault 0x.. (--key-dir DIR | --node-dev-seed S [--n 7] [--quorum 5])
+//!                       [--node http://127.0.0.1:P [--token-file F]] [--mode updates|observations] [--speed K]
+//!                       [--loop] [--rounds N] [--out JSONL] [--strict]      (the deterministic replay source)
 //!
 //! `--vault` is the PerpsVault address of the deployment: the verifyingContract of the engine signing domain
 //! (SPEC 2.1). An observation signed for one deployment is invalid on every other.
@@ -17,7 +24,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use perps_oracle::committee::{apply_update, begin_block, OracleState};
@@ -56,51 +63,9 @@ fn read_json(p: &Path) -> Result<Value, String> {
     serde_json::from_str(&t).map_err(|e| format!("{}: {e}", p.display()))
 }
 
-/// A recorded round: every `*.json` file of `dir` in the recorder's format
-/// `{"venue","url","sentMs","receivedMs","curlExit"|"error","body"}`. The sampling time is the earliest `sentMs`.
+/// A recorded round in the directory form (see `recording`).
 pub fn load_round(dir: &Path) -> Result<(u64, Vec<Response>), String> {
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
-        .collect();
-    files.sort();
-    let mut out = Vec::new();
-    let mut t0 = u64::MAX;
-    for f in files {
-        let v = read_json(&f)?;
-        let g = |k: &str| v.get(k).ok_or(format!("{}: missing {k}", f.display()));
-        let sent = g("sentMs")?.as_u64().ok_or("sentMs")?;
-        t0 = t0.min(sent);
-        let failed = v
-            .get("curlExit")
-            .and_then(Value::as_i64)
-            .is_some_and(|c| c != 0)
-            || v.get("error").is_some_and(|e| !e.is_null());
-        out.push(Response {
-            source: g("venue")?.as_str().ok_or("venue")?.to_string(),
-            body: if failed {
-                None
-            } else {
-                Some(g("body")?.as_str().ok_or("body")?.to_string())
-            },
-            received_ms: g("receivedMs")?.as_u64().ok_or("receivedMs")?,
-            error: if failed {
-                Some(
-                    v.get("error")
-                        .and_then(Value::as_str)
-                        .unwrap_or("fetch failed")
-                        .to_string(),
-                )
-            } else {
-                None
-            },
-        });
-    }
-    if out.is_empty() {
-        return Err(format!("{}: no recorded responses", dir.display()));
-    }
-    Ok((t0, out))
+    perps_oracle_feeder::recording::load_round_dir(dir)
 }
 
 pub fn vault_arg(v: &str) -> Result<[u8; 20], String> {
@@ -160,19 +125,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
             );
         }
         "replay" => {
-            let root = PathBuf::from(one(&m, "rounds")?);
-            let mut dirs: Vec<PathBuf> = fs::read_dir(&root)
-                .map_err(|e| format!("{}: {e}", root.display()))?
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.is_dir())
-                .collect();
-            dirs.sort();
-            let mut f = Feeder::new(default_config()).map_err(|e| format!("{e:?}"))?;
-            for d in dirs {
-                let (t0, resp) = load_round(&d)?;
+            let rounds =
+                perps_oracle_feeder::recording::load_recording(Path::new(one(&m, "rounds")?))?;
+            let mut f =
+                Feeder::new(default_config().with_kraken_batch()).map_err(|e| format!("{e:?}"))?;
+            for (label, t0, resp) in rounds {
                 let (obs, rep) = f.observe(round_of(t0), t0, &resp);
                 let line = json!({
-                    "dir": d.file_name().unwrap().to_string_lossy(),
+                    "dir": label,
                     "round": rep.round,
                     "prices": obs.map(|o| o.prices.iter().map(json::price_to_json).collect::<Vec<_>>()),
                     "report": json::round_report_to_json(&rep),
@@ -255,6 +215,156 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 println!("{}", serde_json::to_string(&json!({"exit": x.map(|x| json!({
                     "source": format!("{:?}", x.source), "low": x.low.to_string(), "high": x.high.to_string(),
                     "reference": x.reference.to_string(), "settle": x.settle.to_string(), "ageMs": x.age_ms, "settleDue": x.settle_due}))})).unwrap());
+            }
+        }
+        "committee-gen" => {
+            let n: usize = one(&m, "n")?.parse().map_err(|_| "--n: 1..255")?;
+            let q: u8 = one(&m, "quorum")?.parse().map_err(|_| "--quorum: 1..255")?;
+            let c = keyfile::DevCommittee::generate(n, q)?;
+            c.write_dir(Path::new(one(&m, "out")?))?;
+            eprintln!(
+                "THROWAWAY dev oracle committee (random keys generated now; never for real use)"
+            );
+            println!("{}", c.public_json());
+        }
+        "tape" => {
+            let every: usize = match m.get("every") {
+                Some(_) => one(&m, "every")?
+                    .parse()
+                    .ok()
+                    .filter(|k| *k >= 1)
+                    .ok_or("--every: at least 1")?,
+                None => 1,
+            };
+            let rounds =
+                perps_oracle_feeder::recording::load_recording(Path::new(one(&m, "recording")?))?;
+            let mut f =
+                Feeder::new(default_config().with_kraken_batch()).map_err(|e| format!("{e:?}"))?;
+            for (i, (label, t0, resp)) in rounds.iter().enumerate() {
+                // Every round goes through the pipeline (the frozen trackers need the full history); `--every`
+                // only thins what is written.
+                let (obs, rep) = f.observe(round_of(*t0), *t0, resp);
+                if i % every != 0 {
+                    continue;
+                }
+                let prices: BTreeMap<u32, (u64, u8)> = obs
+                    .map(|o| {
+                        o.prices
+                            .iter()
+                            .map(|p| (p.market_id, (p.price, p.sources)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let absent: Vec<u32> = rep
+                    .markets
+                    .iter()
+                    .filter(|x| x.result.is_err())
+                    .map(|x| x.market_id)
+                    .collect();
+                println!(
+                    "{}",
+                    perps_oracle_feeder::tape::row(&prices, &absent, label)
+                );
+            }
+        }
+        "tape-check" => {
+            let text = fs::read_to_string(one(&m, "tape")?).map_err(|e| e.to_string())?;
+            let steps = perps_oracle_feeder::tape::parse(&text)?;
+            let silent = steps.iter().filter(|s| s.silent).count();
+            let mut range: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
+            for s in &steps {
+                for (mk, (p, _)) in &s.prices {
+                    let e = range.entry(*mk).or_insert((*p, *p));
+                    *e = (e.0.min(*p), e.1.max(*p));
+                }
+            }
+            println!(
+                "{}",
+                json!({"rounds": steps.len(), "silent": silent, "seconds": steps.len() as u64 * 3,
+                "markets": range.iter().map(|(mk, (lo, hi))| json!({"marketId": mk,
+                    "low": perps_oracle_feeder::tape::format_price(*lo), "high": perps_oracle_feeder::tape::format_price(*hi)})).collect::<Vec<_>>()})
+            );
+        }
+        "replay-feed" => {
+            use perps_oracle_feeder::replay;
+            let text = fs::read_to_string(one(&m, "tape")?).map_err(|e| e.to_string())?;
+            let steps = perps_oracle_feeder::tape::parse(&text)?;
+            let vault = vault_arg(one(&m, "vault")?)?;
+            let num = |k: &str, default: u64| -> Result<u64, String> {
+                match m.get(k) {
+                    Some(_) => one(&m, k)?.parse().map_err(|_| format!("--{k}: a number")),
+                    None => Ok(default),
+                }
+            };
+            let committee = if m.contains_key("key-dir") {
+                keyfile::DevCommittee::read_dir(Path::new(one(&m, "key-dir")?))?
+            } else {
+                let c = keyfile::DevCommittee::node_dev(
+                    one(&m, "node-dev-seed")?,
+                    num("n", 7)? as usize,
+                    u8::try_from(num("quorum", 5)?).map_err(|_| "--quorum")?,
+                )?;
+                eprintln!("signing with the node's THROWAWAY dev oracle keys (public derivation; dev genesis only)");
+                c
+            };
+            let node = match m.get("node") {
+                None => None,
+                Some(_) => {
+                    let token = match m.get("token-file") {
+                        Some(_) => Some(perps_oracle_feeder::submit::read_token(Path::new(one(
+                            &m,
+                            "token-file",
+                        )?))?),
+                        None => None,
+                    };
+                    Some(perps_oracle_feeder::submit::NodeClient::new(
+                        one(&m, "node")?,
+                        token,
+                    )?)
+                }
+            };
+            let opt = replay::Options {
+                speed: num("speed", 1)?.max(1) as usize,
+                looped: m.contains_key("loop"),
+                mode: match m.get("mode").map(|_| one(&m, "mode")).transpose()? {
+                    None | Some("updates") => replay::Mode::Updates,
+                    Some("observations") => replay::Mode::Observations,
+                    Some(x) => return Err(format!("--mode {x}: updates or observations")),
+                },
+                offset_ms: num("offset-ms", 150)?.min(2000),
+                max_rounds: m.get("rounds").map(|_| num("rounds", 0)).transpose()?,
+            };
+            let mut log: Box<dyn std::io::Write> = match m.get("out") {
+                Some(_) => Box::new(
+                    fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(one(&m, "out")?)
+                        .map_err(|e| e.to_string())?,
+                ),
+                None => Box::new(std::io::stdout()),
+            };
+            eprintln!(
+                "replay-feed: {} tape rounds, committee {} (quorum {}), DEV ONLY",
+                steps.len(),
+                committee.public_json()["committeeArg"]
+                    .as_str()
+                    .unwrap_or_default(),
+                committee.quorum
+            );
+            let sum = replay::run(
+                &steps,
+                &committee.keys,
+                &vault,
+                node.as_ref(),
+                &opt,
+                &mut replay::SystemClock,
+                &mut *log,
+            )?;
+            eprintln!("replay-feed: end of tape {}", replay::summary_json(&sum));
+            if m.contains_key("strict") && node.is_some() && sum.accepted + sum.silent != sum.rounds
+            {
+                return Err("--strict: not every round was accepted by the node".into());
             }
         }
         #[cfg(feature = "net")]

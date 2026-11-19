@@ -33,6 +33,10 @@ pub struct Source {
     /// The venue's own pair code.
     pub pair: String,
     pub url: String,
+    /// Batched request (SOURCES.md, Kraken): the pair codes one request asks for, this source's own among them.
+    /// Empty = one pair per request. Sources that share a `url` are fetched ONCE per round and each parses its own
+    /// pair out of the shared body.
+    pub batch: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +143,7 @@ impl Source {
             quote,
             pair,
             url,
+            batch: Vec::new(),
         }
     }
 
@@ -172,13 +177,33 @@ impl Source {
                     .get("result")
                     .and_then(Value::as_object)
                     .ok_or(ParseError::Missing("result"))?;
-                if res.len() != 1 {
-                    return Err(ParseError::WrongPair(format!("{} result keys", res.len())));
+                // Every key of the result must be a pair this request asked for (its own pair, or one of the
+                // batch), each at most once, and this source's own pair must be there exactly once. A response
+                // for another pair, or one carrying a pair nobody asked for, is refused whole.
+                let mut own = None;
+                let mut seen: Vec<&str> = Vec::new();
+                for (k, t) in res {
+                    let asked = std::iter::once(&self.pair)
+                        .chain(self.batch.iter())
+                        .find(|p| kraken_key_matches(p, k));
+                    let Some(asked) = asked else {
+                        return Err(ParseError::WrongPair(k.clone()));
+                    };
+                    if seen.contains(&asked.as_str()) {
+                        return Err(ParseError::WrongPair(format!("{k} twice")));
+                    }
+                    seen.push(asked.as_str());
+                    if *asked == self.pair {
+                        own = Some(t);
+                    }
                 }
-                let (k, t) = res.iter().next().unwrap();
-                if !kraken_key_matches(&self.pair, k) {
-                    return Err(ParseError::WrongPair(k.clone()));
-                }
+                let t = own.ok_or_else(|| {
+                    ParseError::WrongPair(format!(
+                        "{} missing among {} result keys",
+                        self.pair,
+                        res.len()
+                    ))
+                })?;
                 (arr0(t, "b")?, arr0(t, "a")?, Some(arr0(t, "c")?), None)
             }
             Adapter::Bitstamp => {
@@ -363,6 +388,28 @@ pub fn parse_rfc3339_ms(s: &str) -> Result<u64, ParseError> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
     Ok((days as u64) * 86_400_000 + h * 3_600_000 + mi * 60_000 + se * 1000 + ms)
+}
+
+/// Kraken batching (SOURCES.md, request budget): every Kraken source of `sources` asks for all their pairs in ONE
+/// request (`Ticker?pair=A,B,C,D`), so a feeder makes one Kraken request per round instead of one per pair.
+pub fn batch_kraken(sources: &mut [&mut Source]) {
+    let mut pairs: Vec<String> = Vec::new();
+    for s in sources.iter().filter(|s| s.adapter == Adapter::Kraken) {
+        if !pairs.contains(&s.pair) {
+            pairs.push(s.pair.clone());
+        }
+    }
+    if pairs.len() < 2 {
+        return;
+    }
+    let url = format!(
+        "https://api.kraken.com/0/public/Ticker?pair={}",
+        pairs.join(",")
+    );
+    for s in sources.iter_mut().filter(|s| s.adapter == Adapter::Kraken) {
+        s.url = url.clone();
+        s.batch = pairs.clone();
+    }
 }
 
 /// The default source set (SOURCES.md): five USD venues and two USDT venues per launch market; for the USDT/USD
