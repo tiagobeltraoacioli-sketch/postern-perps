@@ -1,7 +1,7 @@
 // Phase C: orders, fills, exact fees to the fee account, refusals, conservation. UNAUDITED prototype.
 import { expect } from '../check.mjs';
 import { usdc, px, sz, sleep } from '../../lib/client.mjs';
-import { bal, fmtUsdc, tradeFee, onTick, totalBalances, creditedDeposits, withdrawnGross, SYSTEM } from '../util.mjs';
+import { bal, fmtUsdc, tradeFee, onTick, totalBalances, creditedDeposits, withdrawalRecords, SYSTEM } from '../util.mjs';
 import { user } from '../../lib/keys.mjs';
 
 export default async function (ctx) {
@@ -99,7 +99,7 @@ export default async function (ctx) {
     await api.cancelAll(maker);
     await sleep(500);
     // deposits and withdrawals as the ENGINE recorded them (read from the API, never from this run's memory)
-    const deposits = (await creditedDeposits(api, CAST)) - (await withdrawnGross(api, CAST));
+    const deposits = (await creditedDeposits(api, CAST)) - (await withdrawalRecords(api, CAST));
     const tb = await totalBalances(api, CAST);
     expect(tb.total === deposits, `sum of balances ${fmtUsdc(tb.total)} vs deposits ${fmtUsdc(deposits)} (difference ${fmtUsdc(tb.total - deposits)})`);
     // the round trip: alice lost the spread and two taker fees, nothing else

@@ -2,7 +2,7 @@
 // The stack's dev genesis shortens the funding interval (up.sh --funding-ms, default one minute; production 1 h).
 import { expect, blockedIf } from '../check.mjs';
 import { usdc, sleep } from '../../lib/client.mjs';
-import { bal, fmtUsdc, onTick, fundingPayment, totalBalances, creditedDeposits, withdrawnGross } from '../util.mjs';
+import { bal, fmtUsdc, onTick, fundingPayment, totalBalances, creditedDeposits, withdrawalRecords } from '../util.mjs';
 
 export default async function (ctx) {
   const { api, CAST } = ctx;
@@ -91,7 +91,7 @@ export default async function (ctx) {
     await api.cancelAll(maker);
     await sleep(600);
     for (const a of [bob, maker]) expect((await api.account(a.address)).positions.length === 0, `${a.label} still has a position`);
-    const net = (await creditedDeposits(api, CAST)) - (await withdrawnGross(api, CAST));
+    const net = (await creditedDeposits(api, CAST)) - (await withdrawalRecords(api, CAST));
     const tb = await totalBalances(api, CAST);
     expect(tb.total === net, `sum of balances ${fmtUsdc(tb.total)} vs deposits - withdrawals ${fmtUsdc(net)} (difference ${fmtUsdc(tb.total - net)})`);
     return { depositsMinusWithdrawals: fmtUsdc(net), sumOfBalances: fmtUsdc(tb.total), insurance: tb.per.insurance };

@@ -44,3 +44,12 @@ test('the node dev committee derivation is sorted, distinct and stable; user key
   assert.equal(user('alice').address, CAST.find((a) => a.label === 'alice').address);
   assert.equal(new Set(CAST.map((a) => a.address)).size, CAST.length);
 });
+
+test('conservation helpers count withdrawal RECORDS (net), never the fee that stays with the fee account', async () => {
+  const { withdrawalRecords, creditedDeposits } = await import('../rehearsal/util.mjs');
+  const api = { json: async (path) => (path.includes('/withdrawals')
+    ? { withdrawals: path.includes('0xaa') ? [{ status: 'certified', amount: '999.000000', fee: '1.000000' }, { status: 'rejected', amount: '5.000000', fee: '1.000000' }] : [] }
+    : { deposits: path.includes('0xaa') ? [{ status: 'credited', amount: '1000.000000' }, { status: 'seen', amount: '7.000000' }] : [] }) };
+  assert.equal(await withdrawalRecords(api, [{ address: '0xaa' }]), 999000000n);
+  assert.equal(await creditedDeposits(api, [{ address: '0xaa' }]), 1000000000n);
+});

@@ -37,12 +37,12 @@ export async function creditedDeposits(api, CAST) {
   }
   return t;
 }
-/** Sum of the net amounts of every withdrawal record of the rehearsal's accounts plus the flat fees they paid
- *  (gross = what left the balances). */
-export async function withdrawnGross(api, CAST) {
+/** Sum of every withdrawal RECORD (the net amounts that leave the engine: SPEC I-2 counts records; the flat fee of
+ *  a withdrawal never leaves, it moves to the fee account's balance). */
+export async function withdrawalRecords(api, CAST) {
   let t = 0n;
   for (const a of [...CAST.map((c) => c.address), ...Object.values(SYSTEM)]) {
-    for (const w of (await api.json(`/v1/accounts/${a}/withdrawals`)).withdrawals) if (w.status !== 'rejected') t += usdc(w.amount) + (a === SYSTEM.fee ? 0n : usdc(w.fee));
+    for (const w of (await api.json(`/v1/accounts/${a}/withdrawals`)).withdrawals) if (w.status !== 'rejected') t += usdc(w.amount);
   }
   return t;
 }
