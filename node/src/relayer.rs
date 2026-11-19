@@ -15,17 +15,35 @@
 //! Nothing is submitted while the vault has no checkpoint and none of 1 and 2 holds (the silence clock starts with
 //! the first accepted checkpoint), nor when the vault is in escape (checkpoints are refused for good).
 //!
-//! Retry rule: a submission that fails (estimate reverted, send refused, no receipt in time, receipt status 0) is
-//! retried at the next poll with the then-newest final checkpoint, on the next L2 endpoint of the list, after a
-//! backoff that doubles from the poll interval up to 30 s. A submission counts as done when the vault's `latest`
-//! height equals the checkpoint's at the L2's `finalized` tag; until then the rules above keep firing.
+//! THE L2 ENDPOINTS ARE NOT TRUSTED ONE BY ONE (R436-15; the watcher's own standard applied to the relayer):
 //!
-//! Gas (F434-1: the estimate of a vault call can be the exact minimum and the next block needs more):
-//! `gas = estimate * 3 / 2 + 40,000`, at most 15,000,000; gas price = twice the endpoint's `eth_gasPrice`.
-//! Transactions are legacy (EIP-155), chain id 700770.
+//! - what the relayer READS is the vault's state at the L2's `finalized` block, and only when EVERY configured
+//!   endpoint (at least two, of independent operators) names the same finalized block (number and hash) and
+//!   returns the same vault state at it (`read_vault_agreed`). Disagreement is an error: nothing is decided on it;
+//! - what they agree on is then checked against what THIS NODE knows (`plausible`): the vault can only hold a
+//!   checkpoint this node finalized, with that checkpoint's own withdrawal count and forced index. A reading
+//!   that names anything else ("the vault is already ahead") is refused as a lie, however many endpoints tell it;
+//! - the gas price is twice the HIGHEST `eth_gasPrice` any endpoint names, and never above the configured cap
+//!   (`--relay-max-gas-price-gwei`): above it nothing is signed and the relayer alarms (fail closed). With the gas
+//!   limit capped at 15,000,000 one transaction can never cost more than `15,000,000 x cap`;
+//! - a submission counts only when EVERY endpoint returns the transaction's receipt with status 1.
 //!
-//! Alarms (stderr and `/v1/node`): `forcedDelay / 2` of L2 time since an open forced request was posted without the
-//! vault knowing it processed; `escapeDelay / 2` since the vault's last checkpoint.
+//! Retry rule: a submission that fails (estimate reverted, price above the cap, send refused, no receipt on every
+//! endpoint in time, a receipt with status 0) is retried at the next poll with the then-newest final checkpoint,
+//! sent through the next endpoint of the list, after a backoff that doubles from the poll interval up to 30 s.
+//! After a confirmed submission the same checkpoint is not sent again for `resubmit_after_ms` (the finalized
+//! reading lags the transaction); if the finalized vault still does not hold it then, the rules fire again.
+//!
+//! Gas limit (F434-1: the estimate of a vault call can be the exact minimum and the next block needs more):
+//! `gas = estimate * 3 / 2 + 40,000`, at most 15,000,000. Transactions are legacy (EIP-155), chain id 700770.
+//!
+//! ALARMS (stderr and `/v1/node`). R395-19: a silent relayer must be loud, and its alarm must not depend on an
+//! endpoint being honest. Two kinds:
+//! - from the agreed, plausible reading (8a): `forcedDelay / 2` of L2 time since an open forced request was
+//!   posted without the vault knowing it processed; `escapeDelay / 2` since the vault's last checkpoint; escape;
+//! - from THIS NODE'S OWN CLOCK AND KNOWLEDGE, whatever the endpoints say (`local_alarm`): no agreed and plausible
+//!   reading for `stall_alarm_ms` (endpoints down, disagreeing, or lying); a checkpoint this node knows to be due
+//!   (by its own last confirmed delivery) not confirmed for `delivery_alarm_ms`; a gas price above the cap.
 //!
 //! The frame (engine state) of the checkpoint the vault holds is pinned in the sequencer, so the account proofs
 //! users need in escape stay available from this node (`Sequencer::pin_frame`).
@@ -67,6 +85,17 @@ pub struct RelayState {
     pub vault_latest_height: Option<u64>,
     pub vault_latest_height_finalized: Option<u64>,
     pub l2_time_s: Option<u64>,
+    /// wall clock (ms) of the relayer's start and of its last agreed and plausible reading
+    pub started_ms: u64,
+    pub last_good_read_ms: Option<u64>,
+    /// wall clock (ms) since when a checkpoint has been due and not confirmed delivered
+    pub due_since_ms: Option<u64>,
+    /// the 8a alarm of the last agreed and plausible reading
+    pub view_alarm: Option<String>,
+    /// the last gas price refused for being above the cap
+    pub gas_refused: Option<String>,
+    /// (height, wall ms) of the last submission every endpoint confirmed
+    pub confirmed: Option<(u64, u64)>,
 }
 
 impl Default for RelayState {
@@ -88,6 +117,12 @@ impl Default for RelayState {
             vault_latest_height: None,
             vault_latest_height_finalized: None,
             l2_time_s: None,
+            started_ms: 0,
+            last_good_read_ms: None,
+            due_since_ms: None,
+            view_alarm: None,
+            gas_refused: None,
+            confirmed: None,
         }
     }
 }
@@ -98,7 +133,9 @@ impl RelayState {
             "submitted": self.submitted, "accepted": self.accepted, "failures": self.failures, "lastReason": self.last_reason,
             "lastSubmittedHeight": self.last_submitted_height, "lastTx": self.last_tx, "vaultCheckpoints": self.vault_checkpoints,
             "vaultLatestHeight": self.vault_latest_height, "vaultLatestHeightFinalized": self.vault_latest_height_finalized,
-            "l2TimeS": self.l2_time_s, "alarm": self.alarm, "lastError": self.last_error})
+            "l2TimeS": self.l2_time_s, "alarm": self.alarm, "lastError": self.last_error,
+            "lastGoodReadMs": self.last_good_read_ms, "dueSinceMs": self.due_since_ms, "gasRefused": self.gas_refused,
+            "lastConfirmedHeight": self.confirmed.map(|c| c.0)})
     }
 }
 
@@ -369,12 +406,48 @@ pub fn padded_gas(estimate: u64) -> u64 {
 // ------------------------------------------------------------------------------------------------ the loop
 
 pub struct RelayConfig {
-    /// L2 JSON-RPC endpoints (plain http, loopback or a private network), used in turn after a failure
+    /// L2 JSON-RPC endpoints (plain http, loopback or a private network) of INDEPENDENT operators: at least two.
+    /// Every read needs all of them to agree; transactions are sent through them in turn
     pub endpoints: Vec<String>,
     pub key: SigningKey,
     pub vault: Address,
     pub poll_ms: u64,
     pub receipt_timeout_ms: u64,
+    /// the highest gas price (wei) this relayer ever signs
+    pub max_gas_price_wei: u128,
+    /// how long a confirmed submission is trusted before the finalized reading must show it
+    pub resubmit_after_ms: u64,
+    /// alarm when no agreed and plausible reading was had for this long (wall clock)
+    pub stall_alarm_ms: u64,
+    /// alarm when a due checkpoint is not confirmed delivered for this long (wall clock)
+    pub delivery_alarm_ms: u64,
+}
+
+pub const DEFAULT_MAX_GAS_PRICE_WEI: u128 = 50_000_000_000;
+pub const DEFAULT_RESUBMIT_AFTER_MS: u64 = 120_000;
+pub const DEFAULT_STALL_ALARM_MS: u64 = 120_000;
+pub const DEFAULT_DELIVERY_ALARM_MS: u64 = 600_000;
+
+impl RelayConfig {
+    pub fn new(endpoints: Vec<String>, key: SigningKey, vault: Address) -> Result<RelayConfig, String> {
+        let mut distinct = endpoints.clone();
+        distinct.sort();
+        distinct.dedup();
+        if distinct.len() < 2 {
+            return Err("the relayer needs at least two distinct L2 endpoints (independent operators): it decides only on what they agree on (R436-15)".into());
+        }
+        Ok(RelayConfig {
+            endpoints,
+            key,
+            vault,
+            poll_ms: 2000,
+            receipt_timeout_ms: 30_000,
+            max_gas_price_wei: DEFAULT_MAX_GAS_PRICE_WEI,
+            resubmit_after_ms: DEFAULT_RESUBMIT_AFTER_MS,
+            stall_alarm_ms: DEFAULT_STALL_ALARM_MS,
+            delivery_alarm_ms: DEFAULT_DELIVERY_ALARM_MS,
+        })
+    }
 }
 
 /// Reads a hex private key (64 hex digits, optional 0x) from a file readable by its owner only.
@@ -396,44 +469,154 @@ pub fn read_key_file(path: &std::path::Path) -> Result<SigningKey, String> {
     SigningKey::from_slice(&bytes).map_err(|_| "relay key file: not a valid secp256k1 key".to_string())
 }
 
-/// Submits `cp` through `url` and waits for its receipt. Returns the transaction hash.
-pub async fn submit(cfg: &RelayConfig, url: &str, cp: &CheckpointBody, sigs: &[[u8; 65]]) -> Result<String, String> {
+/// The vault's state at the L2's `finalized` block as EVERY endpoint reports it: the same block (number and
+/// hash) and the same state, or an error. Nothing is decided on one endpoint's word.
+pub async fn read_vault_agreed(endpoints: &[String], vault: &Address) -> Result<VaultView, String> {
+    if endpoints.len() < 2 {
+        return Err("at least two L2 endpoints are needed".into());
+    }
+    let mut pinned: Option<(u64, String)> = None;
+    for url in endpoints {
+        let b = rpc(url, "eth_getBlockByNumber", serde_json::json!(["finalized", false])).await.map_err(|e| format!("{url}: {e}"))?;
+        let n = hex_qty(b.get("number").ok_or("finalized block without a number")?)?;
+        let h = b.get("hash").and_then(|h| h.as_str()).ok_or("finalized block without a hash")?.to_string();
+        match &pinned {
+            None => pinned = Some((n, h)),
+            Some(p) if *p != (n, h.clone()) => return Err(format!("the L2 endpoints disagree on the finalized block ({} {} vs {n} {h})", p.0, p.1)),
+            _ => {}
+        }
+    }
+    let (n, _) = pinned.expect("two endpoints");
+    let tag = format!("0x{n:x}");
+    let mut agreed: Option<VaultView> = None;
+    for url in endpoints {
+        let v = read_vault(url, vault, &tag).await.map_err(|e| format!("{url}: {e}"))?;
+        match &agreed {
+            None => agreed = Some(v),
+            Some(a) if *a != v => return Err(format!("the L2 endpoints disagree on the vault's state at finalized block {n}")),
+            _ => {}
+        }
+    }
+    Ok(agreed.expect("two endpoints"))
+}
+
+/// Is the agreed reading something THIS node can have caused? `final_at(height)` gives the node's own final
+/// checkpoint at that height. The vault accepts only checkpoints the committee signed, and this node holds every
+/// one of them: a reading that names a height the node never finalized, or other counts than that checkpoint
+/// carries, is a lie (or another deployment), whoever tells it.
+pub fn plausible(v: &VaultView, final_at: &dyn Fn(u64) -> Option<CheckpointBody>) -> Result<(), String> {
+    if v.checkpoint_count == 0 {
+        if v.latest_height != 0 || v.latest_withdrawal_count != 0 || v.latest_next_forced != 0 || v.last_checkpoint_at != 0 {
+            return Err("the endpoints report no accepted checkpoint and yet a latest checkpoint".into());
+        }
+        return Ok(());
+    }
+    let Some(cp) = final_at(v.latest_height) else {
+        return Err(format!("the endpoints report a vault checkpoint at height {} that this node never finalized: not believed", v.latest_height));
+    };
+    if cp.withdrawal_count != v.latest_withdrawal_count || cp.next_forced_index != v.latest_next_forced {
+        return Err(format!("the endpoints report a vault checkpoint at height {} with other counts than this node's checkpoint there: not believed", v.latest_height));
+    }
+    if v.last_checkpoint_at == 0 || v.last_checkpoint_at > v.l2_time_s {
+        return Err("the endpoints report an acceptance time that is zero or in the L2's future: not believed".into());
+    }
+    Ok(())
+}
+
+/// The alarms that depend on nothing an endpoint says: this node's own clock and what it knows it is owed.
+pub fn local_alarm(r: &RelayState, cfg: &RelayConfig, now_ms: u64) -> Option<String> {
+    if let Some(g) = &r.gas_refused {
+        return Some(format!("NOT SUBMITTING: {g}"));
+    }
+    let last_good = r.last_good_read_ms.unwrap_or(r.started_ms);
+    if now_ms.saturating_sub(last_good) >= cfg.stall_alarm_ms {
+        return Some(format!(
+            "no agreed and plausible reading of the vault from the L2 endpoints for {} s (endpoints down, disagreeing or lying; last error: {}): checkpoints are NOT being delivered",
+            now_ms.saturating_sub(last_good) / 1000,
+            r.last_error.as_deref().unwrap_or("none")
+        ));
+    }
+    if let Some(since) = r.due_since_ms {
+        if now_ms.saturating_sub(since) >= cfg.delivery_alarm_ms {
+            return Some(format!("a checkpoint has been due for {} s and its delivery to the vault is not confirmed (last error: {})", now_ms.saturating_sub(since) / 1000, r.last_error.as_deref().unwrap_or("none")));
+        }
+    }
+    None
+}
+
+/// The gas price to sign: twice the highest price any endpoint names, refused above the cap (R436-15).
+pub async fn capped_gas_price(cfg: &RelayConfig) -> Result<u128, String> {
+    let mut highest = 0u128;
+    for url in &cfg.endpoints {
+        let p = rpc(url, "eth_gasPrice", serde_json::json!([])).await.map_err(|e| format!("{url}: {e}"))?;
+        let s = p.as_str().and_then(|s| s.strip_prefix("0x")).ok_or("eth_gasPrice result")?;
+        // a price that does not even fit 128 bits is above any cap
+        let v = u128::from_str_radix(s, 16).unwrap_or(u128::MAX);
+        highest = highest.max(v);
+    }
+    let price = highest.max(1).saturating_mul(2);
+    if price > cfg.max_gas_price_wei {
+        return Err(format!("GAS PRICE ABOVE THE CAP: the endpoints name {highest} wei (x2 = {price}), the cap is {} wei: nothing is signed", cfg.max_gas_price_wei));
+    }
+    Ok(price)
+}
+
+/// Submits `cp` through `cfg.endpoints[via]` and waits until EVERY endpoint returns its receipt with status 1.
+/// Returns the transaction hash.
+pub async fn submit(cfg: &RelayConfig, via: usize, cp: &CheckpointBody, sigs: &[[u8; 65]]) -> Result<String, String> {
+    if cfg.endpoints.len() < 2 {
+        return Err("at least two L2 endpoints are needed".into());
+    }
+    let url = &cfg.endpoints[via % cfg.endpoints.len()];
     let from = key_address(&cfg.key);
     let data = encode_submit_checkpoint(cp, sigs);
+    let gas_price = capped_gas_price(cfg).await?;
     let call_obj = serde_json::json!({"from": to_hex(&from), "to": to_hex(&cfg.vault), "data": to_hex(&data)});
     let est = hex_qty(&rpc(url, "eth_estimateGas", serde_json::json!([call_obj])).await.map_err(|e| format!("estimate (the vault would refuse it): {e}"))?)?;
-    let gas_price = rpc(url, "eth_gasPrice", serde_json::json!([])).await.and_then(|v| hex_qty(&v))?.max(1) as u128 * 2;
     let nonce = hex_qty(&rpc(url, "eth_getTransactionCount", serde_json::json!([to_hex(&from), "pending"])).await?)?;
     let tx = LegacyTx { nonce, gas_price, gas: padded_gas(est), to: cfg.vault, value: 0, data, chain_id: L2_CHAIN_ID };
     let raw = tx.sign(&cfg.key);
     let hash = rpc(url, "eth_sendRawTransaction", serde_json::json!([to_hex(&raw)])).await?;
     let hash = hash.as_str().ok_or("eth_sendRawTransaction result")?.to_string();
+    // the hash must be the hash of what was signed (an endpoint cannot name another transaction)
+    if hash != to_hex(&keccak(&raw)) {
+        return Err(format!("the endpoint answered eth_sendRawTransaction with {hash}, which is not the hash of the signed transaction"));
+    }
     let deadline = tokio::time::Instant::now() + Duration::from_millis(cfg.receipt_timeout_ms);
     loop {
-        if let Ok(r) = rpc(url, "eth_getTransactionReceipt", serde_json::json!([hash])).await {
-            if !r.is_null() {
-                return match r.get("status").and_then(|s| s.as_str()) {
-                    Some("0x1") => Ok(hash),
-                    other => Err(format!("transaction {hash} failed (status {other:?}, gas used {:?} of {})", r.get("gasUsed"), tx.gas)),
-                };
+        let mut confirmed = 0;
+        for u in &cfg.endpoints {
+            if let Ok(r) = rpc(u, "eth_getTransactionReceipt", serde_json::json!([hash])).await {
+                if !r.is_null() {
+                    match r.get("status").and_then(|s| s.as_str()) {
+                        Some("0x1") => confirmed += 1,
+                        other => return Err(format!("transaction {hash} failed on {u} (status {other:?}, gas used {:?} of {})", r.get("gasUsed"), tx.gas)),
+                    }
+                }
             }
         }
+        if confirmed == cfg.endpoints.len() {
+            return Ok(hash);
+        }
         if tokio::time::Instant::now() >= deadline {
-            return Err(format!("no receipt for {hash} in {} ms", cfg.receipt_timeout_ms));
+            return Err(format!("transaction {hash}: a receipt from {confirmed} of {} endpoints in {} ms (every endpoint must confirm)", cfg.endpoints.len(), cfg.receipt_timeout_ms));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
 
-/// One relayer step: read the vault, decide by the 8a rule, submit if due. Returns the reason when it submitted.
-pub async fn step(app: &Arc<App>, cfg: &RelayConfig, endpoint: usize) -> Result<Option<&'static str>, String> {
-    let url = &cfg.endpoints[endpoint % cfg.endpoints.len()];
-    let v = read_vault(url, &cfg.vault, "latest").await?;
-    let fin = read_vault(url, &cfg.vault, "finalized").await.ok();
-    // this node's newest final checkpoint and its exactly-threshold signatures
+/// One relayer step: the agreed and plausible reading, the 8a rule, a submission if due. Returns the reason when
+/// it submitted. `via` chooses the endpoint a transaction is sent through.
+pub async fn step(app: &Arc<App>, cfg: &RelayConfig, via: usize) -> Result<Option<&'static str>, String> {
+    let now = crate::node::now_ms();
+    let v = read_vault_agreed(&cfg.endpoints, &cfg.vault).await?;
+    // this node's own final checkpoints: what the vault can hold at all, and the newest one to deliver
     let newest = {
         let s = app.seq.lock().unwrap();
-        s.latest_final().and_then(|h| s.aggregator.by_height.get(&h).and_then(|c| c.final_signatures(app.g.threshold).map(|sg| (c.body.clone(), sg.into_iter().map(|(_, x)| x).collect::<Vec<_>>()))))
+        let th = app.g.threshold;
+        let final_at = |h: u64| s.aggregator.by_height.get(&h).filter(|c| c.sigs.len() >= th).map(|c| c.body.clone());
+        plausible(&v, &final_at)?;
+        s.latest_final().and_then(|h| s.aggregator.by_height.get(&h).and_then(|c| c.final_signatures(th).map(|sg| (c.body.clone(), sg.into_iter().map(|(_, x)| x).collect::<Vec<_>>()))))
     };
     {
         // lock order: seq before relay
@@ -445,34 +628,48 @@ pub async fn step(app: &Arc<App>, cfg: &RelayConfig, endpoint: usize) -> Result<
         r.vault_mode = if v.in_escape { "escape" } else if v.paused { "paused" } else { "normal" };
         r.vault_checkpoints = Some(v.checkpoint_count);
         r.vault_latest_height = Some(v.latest_height);
-        r.vault_latest_height_finalized = fin.as_ref().map(|f| f.latest_height);
+        r.vault_latest_height_finalized = Some(v.latest_height);
         r.l2_time_s = Some(v.l2_time_s);
-        let a = alarm(&v);
-        if a != r.alarm {
-            if let Some(text) = &a {
-                eprintln!("RELAYER ALARM: {text}");
-            }
-            r.alarm = a;
-        }
+        r.last_good_read_ms = Some(now);
+        r.view_alarm = alarm(&v);
     }
-    let Some((cp, sigs)) = newest else { return Ok(None) };
-    let Some(reason) = due(&v, &cp) else { return Ok(None) };
+    let reason = newest.as_ref().and_then(|(cp, _)| due(&v, cp));
+    let (Some((cp, sigs)), Some(reason)) = (newest, reason) else {
+        // nothing is due by the agreed reading: nothing is owed
+        app.relay.lock().unwrap().due_since_ms = None;
+        return Ok(None);
+    };
     {
         let mut r = app.relay.lock().unwrap();
+        r.due_since_ms.get_or_insert(now);
+        // every endpoint confirmed this checkpoint (or a newer one) a moment ago: the finalized reading lags it
+        if r.confirmed.is_some_and(|(h, at)| h >= cp.height && now.saturating_sub(at) < cfg.resubmit_after_ms) {
+            return Ok(None);
+        }
         r.submitted += 1;
         r.last_reason = Some(reason);
         r.last_submitted_height = Some(cp.height);
     }
-    let hash = submit(cfg, url, &cp, &sigs).await?;
-    {
-        let mut s = app.seq.lock().unwrap();
-        s.pin_frame(cp.height, PINNED_FRAMES);
-        let mut r = app.relay.lock().unwrap();
-        r.accepted += 1;
-        r.last_tx = Some(hash);
-        r.last_error = None;
+    let sent = submit(cfg, via, &cp, &sigs).await;
+    let mut s = app.seq.lock().unwrap();
+    let mut r = app.relay.lock().unwrap();
+    match sent {
+        Ok(hash) => {
+            s.pin_frame(cp.height, PINNED_FRAMES);
+            r.accepted += 1;
+            r.last_tx = Some(hash);
+            r.last_error = None;
+            r.gas_refused = None;
+            r.confirmed = Some((cp.height, crate::node::now_ms()));
+            Ok(Some(reason))
+        }
+        Err(e) => {
+            if e.starts_with("GAS PRICE ABOVE THE CAP") {
+                r.gas_refused = Some(e.clone());
+            }
+            Err(e)
+        }
     }
-    Ok(Some(reason))
 }
 
 pub async fn run(app: Arc<App>, cfg: RelayConfig, mut stop: tokio::sync::watch::Receiver<bool>) {
@@ -480,11 +677,12 @@ pub async fn run(app: Arc<App>, cfg: RelayConfig, mut stop: tokio::sync::watch::
         let mut r = app.relay.lock().unwrap();
         r.enabled = true;
         r.address = Some(key_address(&cfg.key));
+        r.started_ms = crate::node::now_ms();
     }
-    let mut endpoint = 0usize;
+    let mut via = 0usize;
     let mut backoff = cfg.poll_ms;
     loop {
-        let wait = match step(&app, &cfg, endpoint).await {
+        let wait = match step(&app, &cfg, via).await {
             Ok(_) => {
                 backoff = cfg.poll_ms;
                 cfg.poll_ms
@@ -495,11 +693,22 @@ pub async fn run(app: Arc<App>, cfg: RelayConfig, mut stop: tokio::sync::watch::
                 r.failures += 1;
                 r.last_error = Some(e);
                 // the retry rule: the next endpoint, after a backoff that doubles up to 30 s
-                endpoint = endpoint.wrapping_add(1);
+                via = via.wrapping_add(1);
                 backoff = (backoff * 2).min(30_000);
                 backoff
             }
         };
+        {
+            // the alarm is recomputed on every turn, also when the step failed: the local alarms need no endpoint
+            let mut r = app.relay.lock().unwrap();
+            let a = local_alarm(&r, &cfg, crate::node::now_ms()).or_else(|| r.view_alarm.clone());
+            if a != r.alarm {
+                if let Some(text) = &a {
+                    eprintln!("RELAYER ALARM: {text}");
+                }
+                r.alarm = a;
+            }
+        }
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(wait)) => {}
             _ = stop.changed() => return,
