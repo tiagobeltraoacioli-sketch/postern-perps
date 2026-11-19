@@ -55,7 +55,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A[,http://B] --relay-key-file F [--relay-poll-ms 2000]] [--geoblock FILE] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A[,http://B] --relay-key-file F [--relay-poll-ms 2000]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -321,6 +321,23 @@ async fn dev(a: HashMap<String, String>) {
     let app = App::with(g.clone(), seq, geo, Mode::Dev, seq_view, get(&a, "block-ms", 200), l2.is_some(), token, oracle_token);
     *app.ip_rate.lock().unwrap() = RateLimit::new(get(&a, "ip-rate", 50.0), get(&a, "ip-rate", 50.0) * 2.0);
     *app.read_rate.lock().unwrap() = RateLimit::new(get(&a, "read-rate", 100.0), get(&a, "read-rate", 100.0) * 2.0);
+    // attestation records (397's design): the statement set from compliance/legal/notices.json (or the file named)
+    {
+        let p = a.get("attestation-statements").map(PathBuf::from).unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../compliance/legal/notices.json"));
+        let statements = match std::fs::read(&p).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).map_err(|e| e.to_string())).and_then(|j| perps_node::attest::statements_from_notices(&j)) {
+            Ok(s) => s,
+            Err(e) => {
+                if a.contains_key("attestation-statements") || a.contains_key("require-attestation") {
+                    die(format!("attestation statements ({}): {e}", p.display()));
+                }
+                eprintln!("attestation statements not loaded ({e}): POST /v1/attestations answers 503");
+                Default::default()
+            }
+        };
+        let mut at = perps_node::attest::Attestations::new(statements, &g.vault, Some(data.join("attestations.jsonl")), perps_node::node::now_ms());
+        at.required = a.contains_key("require-attestation");
+        *app.attestations.lock().unwrap() = at;
+    }
     if let Some(o) = a.get("cors-origin") {
         *app.cors_origin.lock().unwrap() = o.clone();
     }

@@ -807,3 +807,104 @@ async fn r436_11_account_proof_at_an_old_final_checkpoint_is_rebuilt_from_the_lo
     assert_eq!(s, 404, "7 is not a checkpoint height");
     let _ = n.stop.send(true);
 }
+
+fn attestation(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, statements: &std::collections::BTreeMap<String, String>, residence: &str, issued: u64, expires: u64) -> serde_json::Value {
+    let (id, hash) = statements.iter().next().unwrap();
+    let msg = serde_json::json!({"account": to_hex(&key_address(key)), "statementId": id, "statementHash": hash, "residenceCountry": residence,
+        "issuedAt": issued.to_string(), "expiresAt": expires.to_string()});
+    let m = postern_geoblock::attestation::parse_message(&msg).unwrap();
+    let d = postern_geoblock::attestation::digest(&m, &g.vault);
+    serde_json::json!({"message": msg, "signature": to_hex(&perps_node::sig::sign(key, &d))})
+}
+
+/// Attestation records (397's design; 434's ask): the signed eligibility record is verified with 397's Rust port,
+/// stored, served, and, with the requirement on, an action that opens exposure needs a valid one; a declared
+/// residence the list denies makes the account exit-only whatever its IP; exits never need one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attestation_records_are_verified_stored_and_enforced_when_required() {
+    let n = start_node("attest").await;
+    let g = n.g.clone();
+    let base = n.url.clone();
+    let notices: serde_json::Value = serde_json::from_slice(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../compliance/legal/notices.json")).unwrap()).unwrap();
+    let statements = perps_node::attest::statements_from_notices(&notices).expect("the statement hash is the hash of its text");
+    let file = tmpdir("attest-file").join("attestations.jsonl");
+    let (u, w) = (user(80), user(81));
+    let (ua, wa) = (key_address(&u), key_address(&w));
+    {
+        let mut v = n.app.view.lock().unwrap();
+        v.deposits.insert(0, deposit(0, ua, 10_000_000_000));
+        v.deposits.insert(1, deposit(1, wa, 10_000_000_000));
+    }
+    let pa = [("X-Mock-Country", "PA")];
+    let t = now();
+    // no statement configured: the endpoint says so
+    let rec = attestation(&g, &u, &statements, "PA", t - 1000, t + 86_400_000);
+    let (s, e) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (503, Some("ATTESTATION_UNAVAILABLE")));
+    *n.app.attestations.lock().unwrap() = perps_node::attest::Attestations::new(statements.clone(), &g.vault, Some(file.clone()), t);
+    let (s, st) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&ua))).await;
+    assert_eq!((s, st["status"].as_str(), st["record"].is_null()), (200, Some("missing"), true));
+
+    // refused records: another signer, an altered message, an outdated statement, too long a validity, extra fields
+    let by_other = serde_json::json!({"message": rec["message"], "signature": attestation(&g, &w, &statements, "PA", t - 1000, t + 86_400_000)["signature"]});
+    let mut altered = rec.clone();
+    altered["message"]["residenceCountry"] = "CH".into();
+    let old: std::collections::BTreeMap<String, String> = [("attest-0.0-old".to_string(), to_hex(&[7u8; 32]))].into_iter().collect();
+    let outdated = attestation(&g, &u, &old, "PA", t - 1000, t + 86_400_000);
+    let too_long = attestation(&g, &u, &statements, "PA", t - 1000, t + 401 * 86_400_000);
+    let mut extra = rec.clone();
+    extra["note"] = "x".into();
+    for (name, bad) in [("another signer", &by_other), ("altered", &altered), ("outdated statement", &outdated), ("validity above 400 days", &too_long), ("extra field", &extra)] {
+        let (s, e) = post_json(&format!("{base}/v1/attestations"), bad, &[]).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (400, Some("ATTESTATION_INVALID")), "{name}: {e}");
+    }
+    assert_eq!(n.app.attestations.lock().unwrap().len(), 0);
+
+    // requirement ON: opening needs a valid attestation; exits do not
+    n.app.attestations.lock().unwrap().required = true;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &place_order(&g, &u, ua, t + 1, 1, 672_505, 2_500, false)), &pa).await;
+    assert_eq!((s, e["error"]["code"].as_str(), e["error"]["details"]["status"].as_str()), (403, Some("ATTESTATION_REQUIRED"), Some("missing")), "{e}");
+    let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &withdraw(&g, &u, ua, t + 2, 1_000_000_000, ua)), &pa).await;
+    assert_eq!(s, 200, "a withdrawal never needs an attestation: {e}");
+    let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &place_order(&g, &u, ua, t + 3, 1, 672_505, 2_500, true)), &pa).await;
+    assert_eq!(s, 200, "a reduce-only order never needs one: {e}");
+    // the valid record: stored, served, and the same order is admitted
+    let (s, st) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
+    assert_eq!((s, st["status"].as_str(), st["residenceCountry"].as_str(), st["account"].as_str()), (200, Some("valid"), Some("PA"), Some(to_hex(&ua).as_str())), "{st}");
+    let (_, st) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&ua))).await;
+    assert_eq!((st["status"].as_str(), st["record"]["signature"].as_str()), (Some("valid"), rec["signature"].as_str()), "the record is served for anyone to re-verify");
+    let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &place_order(&g, &u, ua, t + 4, 1, 672_505, 2_500, false)), &pa).await;
+    assert_eq!(s, 200, "{e}");
+    // an older record does not replace a newer one
+    let older = attestation(&g, &u, &statements, "PA", t - 5000, t + 86_400_000);
+    let (s, _) = post_json(&format!("{base}/v1/attestations"), &older, &[]).await;
+    assert_eq!(s, 400);
+
+    // decision 3: a valid attestation declaring a residence the list denies (BR) makes the account exit-only,
+    // although its IP country (PA) is allowed, and with the requirement off as well
+    let (s, st) = post_json(&format!("{base}/v1/attestations"), &attestation(&g, &w, &statements, "BR", t - 1000, t + 86_400_000), &[]).await;
+    assert_eq!((s, st["status"].as_str()), (200, Some("valid")));
+    for required in [true, false] {
+        n.app.attestations.lock().unwrap().required = required;
+        let nonce = now() + 10 + required as u64;
+        let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &place_order(&g, &w, wa, nonce, 1, 672_505, 2_500, false)), &pa).await;
+        assert_eq!((s, e["error"]["code"].as_str(), e["error"]["details"]["reason"].as_str()), (451, Some("GEO_RESTRICTED"), Some("RESIDENCE_DECLARED_RESTRICTED")), "required={required}: {e}");
+        let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &withdraw(&g, &w, wa, nonce + 100, 1_000_000_000, wa)), &pa).await;
+        assert_eq!(s, 200, "the exit stays open: {e}");
+    }
+    // an expired record is `expired`, and with the requirement on it does not admit
+    let short = attestation(&g, &user(82), &statements, "PA", now() - 1000, now() + 400);
+    let (s, _) = post_json(&format!("{base}/v1/attestations"), &short, &[]).await;
+    assert_eq!(s, 200);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let (_, st) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&key_address(&user(82))))).await;
+    assert_eq!(st["status"], "expired");
+    // records survive a restart of the store (re-verified at load); a tampered line is not loaded
+    let reloaded = perps_node::attest::Attestations::new(statements.clone(), &g.vault, Some(file.clone()), now());
+    assert_eq!(reloaded.len(), 3);
+    assert_eq!(reloaded.status(&ua, now()).status, "valid");
+    let other_vault = perps_node::attest::Attestations::new(statements.clone(), &[0x99; 20], Some(file.clone()), now());
+    assert_eq!(other_vault.len(), 0, "records signed for another deployment do not verify");
+    let _ = n.stop.send(true);
+}

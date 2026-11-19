@@ -19,6 +19,10 @@ path = "src/main.rs"
 name = "perps-loadgen"
 path = "src/bin/loadgen.rs"
 
+[[bin]]
+name = "perps-bench"
+path = "src/bin/bench.rs"
+
 [dependencies]
 # Versions pinned to what the build host already caches; Cargo.lock is committed.
 tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "fs", "signal"] }

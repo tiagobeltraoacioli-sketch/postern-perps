@@ -58,6 +58,8 @@ pub struct App {
     pub collateral_token: crate::util::Address,
     /// Bearer token of the oracle ingest paths (`--oracle-token-file`); `None` = ingest disabled.
     pub oracle_token: Option<Vec<u8>>,
+    /// Attestation records (`crate::attest`)
+    pub attestations: Mutex<crate::attest::Attestations>,
     /// One state rebuild from the log at a time (`api::rebuild_frame`)
     pub rebuild_gate: tokio::sync::Mutex<()>,
     /// `Access-Control-Allow-Origin` of every response (`--cors-origin`; dev default `*`: no cookies, no
@@ -95,6 +97,7 @@ impl App {
             relay: Mutex::new(crate::relayer::RelayState::default()),
             cors_origin: Mutex::new("*".into()),
             rebuild_gate: tokio::sync::Mutex::new(()),
+            attestations: Mutex::new(crate::attest::Attestations::default()),
             g,
             seq: Mutex::new(seq),
             geo,

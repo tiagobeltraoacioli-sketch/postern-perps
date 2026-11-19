@@ -5,6 +5,7 @@
 pub mod actions;
 pub mod api;
 pub mod archive;
+pub mod attest;
 pub mod checkpoint;
 pub mod dev;
 pub mod eip712;

@@ -525,6 +525,19 @@ An agent wallet is a second key that may trade for an account but can never with
   node treats the request as restricted in `live` mode (fail closed) and reports `country: null`.
 - Mock and dev mode: the header `X-Mock-Country: BR` or the query `?country=BR` sets the country for a request
   (for frontend tests). Ignored in `live` mode.
+- **Attestation** (agent 397's design, `compliance/geoblock/DESIGN.md`; the text and its legal weight are for
+  counsel). `POST /v1/attestations` takes the user's signed eligibility record `{"message":{"account","statementId",
+  "statementHash","residenceCountry","issuedAt","expiresAt"},"signature"}`: EIP-712 primary type `Attestation` under
+  the engine domain (times in ms as decimal strings). The node verifies it with 397's Rust port (the statement must
+  be the current text of `compliance/legal/notices.json`; signature strict and by the account; validity at most
+  400 days) and stores the newest valid record per account. `GET /v1/attestations/{address}` returns
+  `AttestationStatus`: `{"account","status":"valid|expired|missing","residenceCountry","statementId","issuedAt",
+  "expiresAt","record"}` (`record` is the signed record itself, re-verifiable by anyone). Refusals:
+  `400 ATTESTATION_INVALID`, `503 ATTESTATION_UNAVAILABLE` (no statement configured). At admission: a valid record
+  that declares a residence the list does not allow makes the account exit-only whatever its IP says (`451
+  GEO_RESTRICTED`, `details.reason` `RESIDENCE_DECLARED_RESTRICTED`); with `--require-attestation` an action that
+  opens or changes exposure needs a valid record of an allowed residence (`403 ATTESTATION_REQUIRED`,
+  `details.status`). `CancelOrder`, `CancelAll`, reduce-only `PlaceOrder`, `Withdraw`, `RevokeAgent` never need one.
 - Geoblocking at this API is a control of the operator's access point. The L2 forced-action path (cancel, close,
   withdraw) is a contract anyone can call and is not, and cannot be, geoblocked by the node.
 
@@ -538,6 +551,8 @@ An agent wallet is a second key that may trade for an account but can never with
 | 400 | `NONCE_USED` | nonce already used or pending for this signer, or not above the lowest of its 64 highest used (SPEC 2.5) |
 | 403 | `UNKNOWN_SIGNER` | signer is neither the account nor an approved agent |
 | 403 | `AGENT_NOT_ALLOWED` | action type requires the main key |
+| 403 | `ATTESTATION_REQUIRED` | section 6: the action needs a valid attestation of the account |
+| 400 | `ATTESTATION_INVALID` | the attestation record does not verify (`message` says why) |
 | 404 | `NOT_FOUND` | unknown market, height, id |
 | 409 | `MARKET_HALTED` | market does not accept this action now |
 | 413 | `TOO_LARGE` | body over 16 KiB |
@@ -652,6 +667,7 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 | 0.1 | 2026-11-17 | first version, written before `docs/SPEC.md` exists: action names and typed fields are provisional and follow the spec |
 | 0.2 | 2026-11-17 | admission nonce errors are SPEC's `NONCE_WINDOW` / `NONCE_USED` (no `BAD_NONCE`); `GET /v1/node` holds node diagnostics outside `Status`; `ActionResult` fields flat (`ok`, `error`, `orderId`, `orderStatus`, `filledSize`, `withdrawalId`) |
 | 0.3 | 2026-11-18 | round 2: positions, margin summary, orders, fills, funding, trades, candles, tickers and the oracle status served from the real engine; rounding and pagination rules stated; `GET /v1/orders/{id}`; `?finalized=true`; `AccountProof` and `WithdrawalProof` (`/v1/withdrawals/{id}/proof`) as the vault's inputs; certificate `proof` = 32 siblings; `ForcedAction` + `arg`, `outcome`, `reason`, `processedHeight`; oracle ingest (2.1); `ActionResult` order and withdrawal ids; WebSocket `trades`, `candles`, `ticker` and full `account` updates; nonce text follows SPEC 2.5 |
+| 0.3 | 2026-11-19 | same version, later the same round: `GET /v1/genesis`; CORS; `Position.openNotional`; read rate limit; proofs for any final checkpoint (rebuilt from the log) and from a validator's own read service; attestation records (`/v1/attestations`); snapshots restore the history |
 | 0.2 | 2026-11-17 | follows SPEC 0.1.1 and VAULT.md 0.1: engine domain chainId 700770 + verifyingContract = vault; FIXED scales (price and size 1e-8, USDC 1e-6; per-market decimals are display only); nonce rule SPEC 2.5 (window and 64-set, errors NONCE_WINDOW / NONCE_USED inside `BAD_NONCE` admissions); checkpoint = VAULT 5.2 13 fields; certificate = VAULT `withdraw` inputs (sum-tree proof); block input tags 0x01-0x04 (SPEC 3.2) |
 
 ## 12. Not done / not proven (v0.3)
@@ -674,5 +690,8 @@ version; clients must ignore unknown fields. Anything else raises the major vers
   fields) are specified here and not yet in that file.
 - A validator's read service has no rate limit and no CORS headers of its own (put it behind the operator's
   proxy); a state rebuild replays from genesis when no nearer state is held (linear in the height).
+- The node's geoblock decision is still the node's own function (round 1) plus the edge assertion and the
+  attestation step; it is not 397's `decide()` port, and its equality with 397's decision vectors is not proven
+  (sanctions-list freshness, subdivision rules and the hosting rule of the design are not in the node).
 - The oracle ingest token is a shared secret over loopback HTTP; a deployment needs TLS or a private network, and
   per-signer credentials are not built (the observation's own signature is the real authentication).

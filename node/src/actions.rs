@@ -77,6 +77,28 @@ pub fn action_digest(g: &Genesis, primary: &str, msg: &Val) -> Result<H256, Stri
     Ok(digest(&g.engine_domain.separator(), &sh))
 }
 
+/// `recover(digest, signature)` with a bounded memo of SUCCESSFUL recoveries. The result is a pure function of the
+/// two inputs, so the memo changes no outcome: it only spares the node repeating the same secp256k1 recovery for
+/// one action at admission, at block building and at acknowledgement (measured: `agents/431-node-r2.md`,
+/// performance). The ENGINE's own verification inside `apply_block` never uses it (another crate, consensus).
+pub fn recover_memo(digest: &H256, signature: &[u8; 65]) -> Result<Address, crate::sig::SigError> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static MEMO: OnceLock<Mutex<HashMap<(H256, [u8; 65]), Address>>> = OnceLock::new();
+    const MEMO_MAX: usize = 200_000;
+    let memo = MEMO.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(a) = memo.lock().unwrap().get(&(*digest, *signature)) {
+        return Ok(*a);
+    }
+    let a = recover(digest, signature)?;
+    let mut m = memo.lock().unwrap();
+    if m.len() >= MEMO_MAX {
+        m.clear();
+    }
+    m.insert((*digest, *signature), a);
+    Ok(a)
+}
+
 /// Signature and shape check. Authority (signer is the account or an approved agent) and the nonce rule need
 /// state and are checked by the engine.
 pub fn verify_signed_action(g: &Genesis, a: &SignedAction) -> Result<VerifiedAction, ActionError> {
@@ -84,7 +106,7 @@ pub fn verify_signed_action(g: &Genesis, a: &SignedAction) -> Result<VerifiedAct
     let account = field_addr(g, &primary, &a.message, "account").ok_or_else(|| ActionError::Malformed("account".into()))?;
     let nonce = field_u(g, &primary, &a.message, "nonce").ok_or_else(|| ActionError::Malformed("nonce".into()))? as u64;
     let d = action_digest(g, &primary, &a.message).map_err(ActionError::Malformed)?;
-    let signer = recover(&d, &a.signature).map_err(ActionError::BadSignature)?;
+    let signer = recover_memo(&d, &a.signature).map_err(ActionError::BadSignature)?;
     let action_hash = keccak_parts(&[&d, &signer]);
     Ok(VerifiedAction { primary, account, signer, nonce, digest: d, action_hash })
 }

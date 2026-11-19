@@ -23,6 +23,9 @@ pub struct RealEngine {
     pub g: Arc<Genesis>,
     pub e: pe::Engine,
     log_hash0: H256,
+    /// The state root of `e`, kept from the engine's own block outcome (the engine recomputes it from every
+    /// account on each call; the state changes only through `apply_block` and `restore`).
+    root: H256,
 }
 
 impl RealEngine {
@@ -43,7 +46,8 @@ impl RealEngine {
         }
         let e = pe::Engine::new(checked);
         let log_hash0 = e.log_hash;
-        Ok(RealEngine { g, e, log_hash0 })
+        let root = e.state_root();
+        Ok(RealEngine { g, e, log_hash0, root })
     }
 
     fn agent_allowed(&self, primary: &str) -> bool {
@@ -56,6 +60,7 @@ impl Engine for RealEngine {
         let bytes = encode_inputs(&self.g.types, inputs)?;
         let theirs = pe::codec::decode_inputs(&bytes).map_err(|e| format!("engine decoder refused the node's encoding: {}", e.0))?;
         let out = self.e.apply_block(&pe::Block { height, time, inputs: theirs }).map_err(|e| format!("engine block error {e:?}"))?;
+        self.root = out.state_root;
         let mut bo = BlockOutcome::default();
         for (inp, r) in inputs.iter().zip(&out.outcomes) {
             let ah = match inp {
@@ -71,13 +76,14 @@ impl Engine for RealEngine {
             if let pe::Event::Withdrawal(w) = ev {
                 bo.withdrawals.push(w.id);
             }
-            bo.events.push(serde_json::Value::String(format!("{ev:?}")));
         }
         bo.typed = out.events;
         Ok(bo)
     }
     fn state_root(&self) -> H256 {
-        self.e.state_root()
+        // every debug build (the whole test suite) proves the kept root against the engine's on each call
+        debug_assert_eq!(self.root, self.e.state_root(), "the kept state root is the engine's");
+        self.root
     }
     fn height(&self) -> u64 {
         self.e.height
@@ -94,6 +100,7 @@ impl Engine for RealEngine {
     /// root logged for that height): `Sequencer::open` does.
     fn restore(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.e = pe::Engine::restore(self.e.g.clone(), bytes, None).map_err(|e| format!("engine snapshot refused: {e:?}"))?;
+        self.root = self.e.state_root();
         Ok(())
     }
     fn next_deposit_index(&self) -> u64 {
@@ -207,7 +214,8 @@ impl Engine for RealEngine {
         (pe::engine::MAX_INPUTS, pe::engine::MAX_BLOCK_BYTES)
     }
     fn with_real_state(&self, state: pe::Engine) -> Option<Box<dyn Engine>> {
-        Some(Box::new(RealEngine { g: self.g.clone(), e: state, log_hash0: self.log_hash0 }))
+        let root = state.state_root();
+        Some(Box::new(RealEngine { g: self.g.clone(), e: state, log_hash0: self.log_hash0, root }))
     }
     fn genesis_document(&self) -> Option<Vec<u8>> {
         Some(self.e.g.g.encoding().into())

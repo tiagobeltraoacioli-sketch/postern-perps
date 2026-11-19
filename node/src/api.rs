@@ -87,6 +87,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/deposits/{tx}", get(deposits_by_tx))
         .route("/v1/forced", get(forced))
         .route("/v1/geo", get(geo))
+        .route("/v1/attestations", post(post_attestation))
+        .route("/v1/attestations/{address}", get(get_attestation))
         .route("/v1/ws", get(ws))
         .route("/v1/oracle/{symbol}", get(oracle_status))
         .fallback(|| async { not_found("unknown endpoint") })
@@ -139,6 +141,8 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
         "oracleIngest": {"enabled": app.oracle_token.is_some(), "pool": s.oracle_pool.to_json(&app.g)},
         "proofFrames": {"held": s.frames.keys().collect::<Vec<_>>(), "pinned": s.pinned_frames.iter().collect::<Vec<_>>()},
         "relayer": app.relay.lock().unwrap().to_json(),
+        "attestations": {"required": app.attestations.lock().unwrap().required, "held": app.attestations.lock().unwrap().len(),
+            "statements": app.attestations.lock().unwrap().statements},
         "validators": vals.values().map(|x| serde_json::json!({"address": x.address, "height": x.height, "signed": x.signed, "last": x.last, "latched": x.latched})).collect::<Vec<_>>(),
         "l2": {"configured": app.l2_configured, "finalizedBlock": v.finalized_block, "scannedTo": v.scanned_to, "l2TimeS": v.l2_time_s,
             "lastDepositIndex": v.deposits.keys().next_back(), "endpointsAgree": v.endpoints_agree, "lastError": v.last_error, "polls": v.polls, "disagreements": v.disagreements},
@@ -692,8 +696,61 @@ pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_co
             ),
         });
     }
+    // 397's decision 3 and step 6 (crate::attest): a valid attestation that declares a residence the list does not
+    // allow makes the account exit-only whatever its IP says; with --require-attestation an action that opens or
+    // changes exposure needs a valid attestation of an allowed residence
+    if !crate::attest::exit_like(&v.primary, ro) {
+        let at = app.attestations.lock().unwrap();
+        let st = at.status(&v.account, now);
+        let residence_allowed = st.residence_country.as_deref().map(|c| app.geo.allowed.contains(c));
+        if st.status == "valid" && residence_allowed == Some(false) {
+            return Err(error(451, "GEO_RESTRICTED", "PosternDEX Perpetuals is not available in the jurisdiction you declared; cancelling, reducing and withdrawing stay open.",
+                serde_json::json!({"country": st.residence_country, "listVersion": app.geo.version, "reason": "RESIDENCE_DECLARED_RESTRICTED", "policy": if app.geo.exit_only {"exit_only"} else {"actions_refused"}})));
+        }
+        if at.required && !(st.status == "valid" && residence_allowed == Some(true)) {
+            return Err(error(403, "ATTESTATION_REQUIRED", "this action needs a valid attestation of the account (POST /v1/attestations)", serde_json::json!({"status": st.status})));
+        }
+    }
     let r = app.seq.lock().unwrap().admit_signed(a, now);
     r.map_err(|e| error(e.http, e.code, &e.message, serde_json::json!({})))
+}
+
+fn attestation_json(account: &Address, st: &crate::attest::Status) -> serde_json::Value {
+    let m = st.record.as_ref().map(|r| &r["message"]);
+    let num = |k: &str| m.and_then(|m| m[k].as_str()).and_then(|s| s.parse::<u64>().ok());
+    serde_json::json!({"account": to_hex(account), "status": st.status, "residenceCountry": st.residence_country,
+        "statementId": m.and_then(|m| m["statementId"].as_str()), "issuedAt": num("issuedAt"), "expiresAt": num("expiresAt"), "record": st.record})
+}
+
+/// `POST /v1/attestations` `{message, signature}`: the signed eligibility record of 397's typed data. Verified
+/// (current statement, strict signature by the account, validity) and stored; the answer is `AttestationStatus`.
+async fn post_attestation(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>) -> Response {
+    let Ok(body) = body else { return error(413, "TOO_LARGE", "body over 16 KiB", serde_json::json!({})) };
+    let now = now_ms();
+    if !app.ip_rate.lock().unwrap().allow(&ip_key(peer.ip()), now) {
+        return error(429, "RATE_LIMITED", "per-IP action rate", serde_json::json!({}));
+    }
+    let rec: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return error(400, "MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
+    };
+    let mut at = app.attestations.lock().unwrap();
+    if at.statements.is_empty() {
+        return error(503, "ATTESTATION_UNAVAILABLE", "this node has no attestation statement configured (--attestation-statements)", serde_json::json!({}));
+    }
+    match at.submit(&rec, now) {
+        Ok(account) => Json(attestation_json(&account, &at.status(&account, now))).into_response(),
+        Err(e) => error(400, "ATTESTATION_INVALID", &e, serde_json::json!({"statements": at.statements})),
+    }
+}
+
+async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
+    let a = match addr_param(&a) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let at = app.attestations.lock().unwrap();
+    Json(attestation_json(&a, &at.status(&a, now_ms()))).into_response()
 }
 
 async fn post_action(
