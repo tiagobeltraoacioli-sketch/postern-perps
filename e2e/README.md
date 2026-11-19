@@ -65,6 +65,13 @@ counted as passed). The evidence file holds every check and the stack descriptio
 | L conformance | the whole shared API conformance suite against this stack with two funded accounts, nothing skipped |
 | K escape (last, one way) | every account's escape leaf fetched and verified for the vault's last checkpoint; sequencer and feeder stopped; the same proofs served by a validator's own read service WITHOUT the sequencer, verified against the vault's root and used for the claims; a late deposit; escape refused early, triggered after `escapeDelay`; vault takes nothing more; claims wait for the system shares; users are senior and paid in full; fee share only to the owner's address; no claim twice; late deposit refunded; books close to the unit; system share locked |
 
+**Variant of phase K (R436-19): `REHEARSAL_ESCAPE=forced node e2e/rehearsal/run.mjs`.** Instead of going silent the
+exchange keeps running but never receives a user's forced withdrawal (one L2 endpoint hides the log, so the
+two-endpoint watchers of the sequencer and of the validators make no progress); the request passes its deadline, the
+vault refuses the next checkpoint, anyone triggers escape with reason 2, and every account claims with proofs served
+by a validator. What it does not show: a sequencer that sees the request and ignores it while HONEST validators see
+it too (they would have to refuse to sign; the node has no fault switch for that).
+
 Arithmetic and key derivations of the rehearsal have their own tests (`e2e/test/`), as does the proxy.
 
 ## Not done / not proven

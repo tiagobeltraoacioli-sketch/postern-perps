@@ -75,6 +75,23 @@ suite; and the escape hatch end to end, with the books closing to the unit.
 
 The counts at the current `main` are in [BRANCHES.md](BRANCHES.md).
 
+## Known open findings (no Critical or High; details in the project's cross-area log and reviewer reports)
+
+| ID | Severity | Area | What |
+|---|---|---|---|
+| R436-14 | Medium (liveness) | node | `/v1/blocks/stream` and the validator read service still do unbounded work for an unauthenticated reader |
+| R436-15 | Medium | node relayer | the checkpoint relayer trusts ONE L2 endpoint at a time (gas price, receipts) |
+| R436-11 | Medium (design) | vault / node / frontend | escape needs the account tree of the last checkpoint; validators serve it from their own log, nothing obliges anyone to keep serving it |
+| R436-16 | Low | node | on snapshot recovery the node compares the log hash of its own wrapper, not the one loaded from the snapshot (SPEC S-16.4) |
+| R436-17 | Low (privacy, for counsel) | node | attestation records are served publicly |
+| R436-18 | Low | frontend | the forced-close text does not say that a close in a halted market executes at the exit band |
+| R436-19 | Low | e2e | the rehearsal's forced-request-to-escape story (added as a variant of phase K; see `e2e/README.md` for what it does and does not show) |
+| R436-5 (residual) | Low | engine | no cap on the backstop's unrealised loss, no unwind of what it takes |
+| R435-2 | Low | node | status endpoints know only in-process validators |
+| R435-3 | Low | node API, SPEC wording | the liquidation fee an account pays is published nowhere; SPEC does not say it is taken on size x mark |
+| R433-3 | Low (liveness) | vault | a backlog of old unrelayed checkpoints postpones escape-by-silence one `escapeDelay` each; a forced request cuts through |
+| R395-9 | Info | oracle | the sequencer's choice among signed observations biases the median inside a stated bound |
+
 ## Not done / not proven
 
 - No external audit. The internal reviews (agents 395 and 436) are recorded in the cross-area log of the project
