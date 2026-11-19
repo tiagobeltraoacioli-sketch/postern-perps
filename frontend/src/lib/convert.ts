@@ -37,6 +37,7 @@ export function market(w: T.WireMarket): T.Market {
     fundingIntervalSec: w.fundingIntervalSec,
     maxFundingRate: p(w.maxFundingRate, RATE_DECIMALS),
     oracle: w.oracle,
+    marketSlippagePpm: typeof w.marketSlippageBps === 'number' && Number.isInteger(w.marketSlippageBps) && w.marketSlippageBps > 0 && w.marketSlippageBps <= 10_000 ? BigInt(w.marketSlippageBps) * 100n : null,
     openInterestCap: sz(w.openInterestCap),
   };
 }
@@ -69,11 +70,28 @@ export function candle(w: T.WireCandle): T.Candle {
   return { t: w.t, o: Number(w.o), h: Number(w.h), l: Number(w.l), c: Number(w.c), v: Number(w.v) };
 }
 
+/**
+ * The node's exact open notional (F434-4), or null. It is taken only when it is a plain signed integer whose sign is
+ * the position's and which lies within one part in a thousand of size x entry price (the entry price on the wire is
+ * that notional divided by the size, rounded to the market's decimals): a figure that fails this is not trusted and
+ * the page falls back to size x entry price, as before the field existed.
+ */
+export function openNotionalOf(raw: unknown, size: bigint, entryPx: bigint): bigint | null {
+  if (typeof raw !== 'string' || !/^-?\d{1,60}$/.test(raw)) return null;
+  const v = BigInt(raw);
+  const approx = size * entryPx;
+  if (v === 0n || approx === 0n || v > 0n !== approx > 0n) return null;
+  const diff = v > approx ? v - approx : approx - v;
+  const bound = (approx < 0n ? -approx : approx) / 1000n;
+  return diff <= bound ? v : null;
+}
+
 export function position(w: T.WirePosition): T.Position {
   return {
     symbol: w.symbol,
     size: sz(w.size),
     entryPx: px(w.entryPrice),
+    openNotional: openNotionalOf(w.openNotional, sz(w.size), px(w.entryPrice)),
     markPx: px(w.markPrice),
     notional: usd(w.notional),
     unrealised: usd(w.unrealizedPnl),

@@ -7,6 +7,7 @@
  * on is also written, as the app formatted it, in a visually hidden summary tied to the plot (screen readers get
  * the liquidation price and the orders, not just a picture).
  */
+import { averageAt, cleanPeriods } from './average';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from 'react';
 import type { ChartInterval, PriceChartProps } from './types';
@@ -67,6 +68,8 @@ export function PriceChart(props: PriceChartProps) {
     onReachStart,
     onPricePick,
     candleStyle = 'hollow',
+    averages,
+    onAveragesToggle,
     wheelZoom = true,
     theme,
     reducedMotion,
@@ -85,7 +88,7 @@ export function PriceChart(props: PriceChartProps) {
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [following, setFollowing] = useState(true);
   const [rejected, setRejected] = useState(0);
-  const [inks, setInks] = useState<{ up: string; down: string } | null>(null);
+  const [inks, setInks] = useState<{ up: string; down: string; averages: readonly string[] } | null>(null);
   const motionReduced = useReducedMotion(reducedMotion);
   // R395-32: levels (and the live mark / index) whose price is not a finite number have no place on the canvas.
   // They are named on screen, never left out in silence.
@@ -115,7 +118,7 @@ export function PriceChart(props: PriceChartProps) {
         onFollowChange: setFollowing,
         onReachStart: (t) => hooksRef.current.onReachStart?.(t),
         onPricePick: (p) => hooksRef.current.onPricePick?.(p),
-        onPalette: (p) => setInks((cur) => (cur && cur.up === p.up && cur.down === p.down ? cur : { up: p.up, down: p.down })),
+        onPalette: (p) => setInks((cur) => (cur && cur.up === p.up && cur.down === p.down && cur.averages === p.averages ? cur : { up: p.up, down: p.down, averages: p.averages })),
       },
     );
     engineRef.current = engine;
@@ -185,9 +188,10 @@ export function PriceChart(props: PriceChartProps) {
       candleStyle,
       wheelZoom,
       pickable: !!onPricePick,
+      averages,
     });
     setRejected(engine.getSeries().rejected);
-  }, [symbol, interval, candles, priceDecimals, sizeDecimals, tickSize, mark, index, levels, fills, stale, candleStyle, wheelZoom, onPricePick]);
+  }, [symbol, interval, candles, priceDecimals, sizeDecimals, tickSize, mark, index, levels, fills, stale, candleStyle, wheelZoom, onPricePick, averages]);
 
   // Wheel needs a non-passive listener to keep the page still while zooming.
   useEffect(() => {
@@ -251,6 +255,18 @@ export function PriceChart(props: PriceChartProps) {
       }
     : null;
 
+  // Moving averages at the shown candle (display only): the same mean the line is drawn from.
+  const periods = useMemo(() => cleanPeriods(averages), [averages]);
+  const shownIndex = useMemo(() => {
+    if (shownTime === null || !periods.length) return -1;
+    if (newest && shownTime === newest.t) return candles.length - 1;
+    return candles.findIndex((c) => c.t === shownTime);
+  }, [candles, shownTime, newest, periods]);
+  const averageValues = periods.map((period) => {
+    const v = shownIndex >= 0 ? averageAt(candles, intervalMs, shownIndex, period) : null;
+    return { period, text: v === null ? '\u2014' : formatNumber(v, priceDecimals) };
+  });
+
   const name = label ?? `${symbol} price chart`;
   const summary = useMemo(() => {
     const parts: string[] = [`${intervalWords(intervalMs)} candles, times in UTC.`];
@@ -261,9 +277,10 @@ export function PriceChart(props: PriceChartProps) {
     }
     if (mark) parts.push(`Mark price ${mark.text}.`);
     if (index) parts.push(`Index price ${index.text}.`);
+    if (periods.length) parts.push(`Moving averages of the closes over ${periods.join(' and ')} candles are drawn for reading only: they are not exchange values.`);
     if (stale) parts.push('The chart may be behind the exchange.');
     return parts.join(' ');
-  }, [intervalMs, newest, mark, index, stale, priceDecimals]);
+  }, [intervalMs, newest, mark, index, stale, priceDecimals, periods]);
 
   const state = !ready ? 'loading' : candles.length === 0 ? 'empty' : null;
 
@@ -273,7 +290,7 @@ export function PriceChart(props: PriceChartProps) {
       className={`pc${className ? ` ${className}` : ''}`}
       data-stale={stale || undefined}
       data-motion={motionReduced ? 'reduced' : undefined}
-      style={inks ? ({ '--pc-up': inks.up, '--pc-down': inks.down } as CSSProperties) : undefined}
+      style={inks ? ({ '--pc-up': inks.up, '--pc-down': inks.down, '--pc-ma-0': inks.averages[0], '--pc-ma-1': inks.averages[1], '--pc-ma-2': inks.averages[2] } as CSSProperties) : undefined}
     >
       <div className="pc-head">
         <div className="pc-readout" aria-hidden="true">
@@ -301,7 +318,7 @@ export function PriceChart(props: PriceChartProps) {
                   {readout.chg}
                 </span>
               )}
-              <span className="pc-ro">
+              <span className="pc-ro pc-vol">
                 <i>V</i>
                 {readout.v}
                 {base ? ` ${base}` : ''}
@@ -311,8 +328,25 @@ export function PriceChart(props: PriceChartProps) {
             <span className="pc-ro pc-gap">No trades in this candle</span>
           ) : null}
           {shownTime !== null && <span className="pc-time">{formatCandleTime(shownTime, intervalMs)} UTC</span>}
+          {averageValues.length > 0 && (
+            <span className="pc-ma" title="Simple moving averages of the candle closes. Display only: not exchange values, never used in a calculation.">
+              {averageValues.map((a, n) => (
+                <span key={a.period} className="pc-ro" data-ma={n}>
+                  <i>MA {a.period}</i>
+                  {a.text}
+                </span>
+              ))}
+              <span className="pc-ma-note">display only</span>
+            </span>
+          )}
           {stale && <span className="pc-stale">stale</span>}
         </div>
+        <div className="pc-tools">
+        {onAveragesToggle && (
+          <button type="button" className="pc-iv pc-ma-toggle" aria-pressed={periods.length > 0} onClick={() => onAveragesToggle(periods.length === 0)} title="Moving averages of the closes (display only)">
+            MA
+          </button>
+        )}
         {onIntervalChange && (
           <div className="pc-intervals" role="group" aria-label="Candle interval">
             {intervals.map((iv: ChartInterval) => (
@@ -328,6 +362,7 @@ export function PriceChart(props: PriceChartProps) {
             ))}
           </div>
         )}
+        </div>
       </div>
       <div
         ref={plotRef}

@@ -26,8 +26,20 @@ export const ALL_INTERVALS: readonly ChartInterval[] = ['1m', '5m', '15m', '1h',
 export const MIN_SPACING = 1;
 export const MAX_SPACING = 64;
 export const DEFAULT_SPACING = 8;
-/** Empty slots kept right of the newest candle in the default view. */
+/** Fewest empty slots kept right of the newest candle in the default view. */
 export const RIGHT_MARGIN_SLOTS = 4;
+/**
+ * Breathing room right of the newest candle, CSS px: the names of the live prices (Last, Mark, Index) and the labels
+ * of the user's levels stand there, so no caption covers the newest price action. Without levels the room holds the
+ * three names; with levels about a quarter of the plot, bounded.
+ */
+export function rightRoomPx(plotW: number, hasLevels: boolean): number {
+  const names = 72;
+  if (!hasLevels || !(plotW > 0)) return names;
+  // A phone-width plot: room for the SHORT labels ("Long 0.5", "Liq."), about a third of the plot.
+  if (plotW < 520) return clamp(Math.round(plotW * 0.36), names, 132);
+  return clamp(Math.round(plotW * 0.27), 128, 236);
+}
 /** At least this many slots of data stay on screen whatever the pan. */
 export const MIN_VISIBLE_SLOTS = 5;
 
@@ -68,8 +80,8 @@ export function clampView(view: View, width: number, first: number, last: number
 }
 
 /** The default view: newest candle near the right edge, RIGHT_MARGIN_SLOTS empty slots after it. */
-export function defaultView(last: number, spacing = DEFAULT_SPACING): View {
-  return { spacing, right: last + RIGHT_MARGIN_SLOTS };
+export function defaultView(last: number, spacing = DEFAULT_SPACING, roomPx = 0): View {
+  return { spacing, right: last + Math.max(RIGHT_MARGIN_SLOTS, Math.ceil(roomPx / spacing)) };
 }
 
 export function clamp(v: number, lo: number, hi: number): number {

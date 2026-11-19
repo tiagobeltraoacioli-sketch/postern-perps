@@ -78,7 +78,7 @@ const ctx = {
 };
 if (ctx.chain) await ctx.chain.init();
 
-const PHASES = ['A-stack', 'B-deposit', 'C-trade', 'D-funding', 'E-liquidation', 'F-finality', 'G-withdraw', 'H-forced', 'I-validators', 'J-geoblock', 'L-conformance', 'K-escape'];
+const PHASES = ['A-stack', 'B-deposit', 'C-trade', 'D-funding', 'E-liquidation', 'F-finality', 'G-withdraw', 'H-forced', 'I-validators', 'J-geoblock', 'L-conformance', 'P-page', 'K-escape'];
 const only = opt('only', null)?.split(',');
 const skip = opt('skip', '')?.split(',').filter(Boolean);
 const started = new Date().toISOString();

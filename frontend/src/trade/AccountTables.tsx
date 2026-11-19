@@ -87,13 +87,13 @@ export function AccountTables({ only }: { only?: string }) {
                 <tr>
                   <th>Market</th>
                   <th className="r">Size</th>
-                  <th className="r">Value</th>
+                  <th className="r c-value">Value</th>
                   <th className="r">Entry</th>
-                  <th className="r">Mark</th>
+                  <th className="r c-mark">Mark</th>
                   <th className="r">Liquidation</th>
                   <th className="r">Margin</th>
                   <th className="r">Unrealised PnL (ROE)</th>
-                  <th className="r">Funding</th>
+                  <th className="r c-funding">Funding</th>
                   <th>
                     <span className="sr-only">Action</span>
                   </th>
@@ -113,12 +113,12 @@ export function AccountTables({ only }: { only?: string }) {
                           {p.symbol}
                         </button>
                         <span className={`badge ${p.size > 0n ? 'badge-long' : 'badge-short'}`}>{p.size > 0n ? 'Long' : 'Short'}</span>
-                        <span className="badge">{p.leverage}x {p.isolated ? 'isolated' : 'cross'}</span>
+                        <span className="badge c-lev">{p.leverage}x {p.isolated ? 'isolated' : 'cross'}</span>
                       </td>
                       <td className="r num">{formatSize(p.size < 0n ? -p.size : p.size, m?.sizeDecimals ?? 4)} {m?.base}</td>
-                      <td className="r num">{formatUsd(p.notional)}</td>
+                      <td className="r num c-value">{formatUsd(p.notional)}</td>
                       <td className="r num">{formatPx(p.entryPx, dp)}</td>
-                      <td className="r num">{formatPx(mark, dp)}</td>
+                      <td className="r num c-mark">{formatPx(mark, dp)}</td>
                       <td className="r num liq">{p.liquidationPx === null ? 'None' : formatPx(p.liquidationPx, dp)}</td>
                       <td className="r num">
                         {formatUsd(margin)}
@@ -131,10 +131,12 @@ export function AccountTables({ only }: { only?: string }) {
                       <td className={`r num ${p.unrealised >= 0n ? 'up' : 'down'}`}>
                         {formatUsd(p.unrealised, { sign: 'always' })} {roe !== null && <span className="sub">({formatPpm(roe, 2, 'always')})</span>}
                       </td>
-                      <td className={`r num ${p.funding >= 0n ? 'up' : 'down'}`}>{formatUsd(p.funding, { sign: 'always' })}</td>
+                      <td className={`r num c-funding ${p.funding >= 0n ? 'up' : 'down'}`}>{formatUsd(p.funding, { sign: 'always' })}</td>
                       <td className="r">
-                        <button type="button" className="button button-small" onClick={() => close(p)}>
-                          Close at market
+                        <button type="button" className="button button-small" onClick={() => close(p)} aria-label={`Close ${p.symbol} at market`}>
+                          <span>
+                            Close<span className="c-words"> at market</span>
+                          </span>
                         </button>
                       </td>
                     </tr>

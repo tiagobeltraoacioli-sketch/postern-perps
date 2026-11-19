@@ -19,7 +19,7 @@ import { keptProofFor, proofFile, systemProofsIn } from '../vault/keeper';
 import { api } from '../lib/api';
 import { config } from '../lib/config';
 import { formatDateTime, formatDuration, formatPx, formatUsd, shortAddress, DASH } from '../lib/format';
-import { allBandsWords, bandWords, ESCAPE_VALUATION_WORDS, exitBand, exitPrice, FORCED_CLOSE_WORDS } from '../lib/exit-band';
+import { allBandsWords, bandFor, bandWords, currentBand, ESCAPE_VALUATION_WORDS, exitPrice, FORCED_CLOSE_WORDS } from '../lib/exit-band';
 import { USDC_DECIMALS } from '../lib/fixed';
 import { parseAt } from '../trade/order-builder';
 import { validAddress } from '../wallet/wallet';
@@ -603,6 +603,21 @@ function ExitTab({ view }: { view: VaultView | null }) {
   const tickers = useStore(feed.tickers);
   const haltedAny = markets.filter((m) => m.status === 'halted').map((m) => m.symbol);
   const haltedHere = haltedAny.filter((s) => accountState?.account.positions.some((p) => p.symbol === s && p.size !== 0n));
+  // The engine's CURRENT exit band of each halted market the account is in, as the exchange reports it (F434-6).
+  const haltedKey = haltedHere.join(',');
+  const [engineBands, setEngineBands] = useState<Record<string, ReturnType<typeof currentBand>>>({});
+  useEffect(() => {
+    if (!haltedKey) return;
+    let live = true;
+    const read = () =>
+      void Promise.all(haltedKey.split(',').map((s) => api.get<unknown>(`/v1/oracle/${s}`).then((o) => [s, currentBand(o)] as const, () => [s, null] as const))).then((all) => live && setEngineBands(Object.fromEntries(all)));
+    read();
+    const id = setInterval(read, 15_000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [haltedKey]);
   const open = view?.account?.forcedOpen ? view.account : null;
   const escaped = phase === 'escape' || phase === 'escapeUnproven';
   return (
@@ -663,16 +678,25 @@ function ExitTab({ view }: { view: VaultView | null }) {
                   <p>{FORCED_CLOSE_WORDS}</p>
                   <ul>
                     {haltedHere.map((symbol) => {
-                      const band = exitBand(symbol);
+                      const found = bandFor(symbol);
                       const position = accountState?.account.positions.find((p) => p.symbol === symbol);
                       const m = markets.find((x) => x.symbol === symbol);
                       const index = tickers.get(symbol)?.index;
-                      if (!band || !position || !m) return <li key={symbol}>{symbol}: the launch table states no exit band for this market.</li>;
+                      if (!found || !position || !m) return <li key={symbol}>{symbol}: neither the exchange nor the launch table states an exit band for this market.</li>;
+                      const band = found.band;
                       const long = position.size > 0n;
+                      const engine = engineBands[symbol] ?? null;
                       return (
                         <li key={symbol}>
-                          {bandWords(band)}.{' '}
-                          {index !== undefined && (
+                          {bandWords(band)} ({found.source === 'exchange' ? 'as the exchange publishes' : 'from the launch table: the exchange published no band here'}
+                          {found.differs ? '; the launch table states other figures, the exchange\'s are used' : ''}).{' '}
+                          {engine && (
+                            <>
+                              The exchange's engine values your {long ? 'long' : 'short'} now at <strong className="num">{long ? engine.low : engine.high}</strong> (its own exit band at {new Date(engine.asOf).toISOString().slice(11, 19)} UTC
+                              {engine.settleDue ? `; the halt has passed its limit and the market settles at ${engine.settlePrice}` : ''}). It widens while the halt lasts.{' '}
+                            </>
+                          )}
+                          {!engine && index !== undefined && (
                             <>
                               From the index the exchange last reported ({formatPx(index, m.priceDecimals)}), your {long ? 'long' : 'short'} would close at about{' '}
                               <strong className="num">{formatPx(exitPrice(band, index, long, 0), m.priceDecimals)}</strong> now and{' '}

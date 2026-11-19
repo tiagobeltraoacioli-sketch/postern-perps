@@ -4,7 +4,7 @@
  * amber on a warning, red on an error or a refusal). Every figure is computed by calc.ts from integers and labelled
  * an estimate; the review sheet shows the signed values.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { feed, geo as geoStore } from '../state/session';
 import { useActions } from '../state/actions';
 import { useStore, persisted } from '../lib/store';
@@ -12,7 +12,7 @@ import { BASE_FEES, orderPreview, sizeForBudget, accountSummary, health } from '
 import { formatPpm, formatPx, formatSize, formatUsd, DASH } from '../lib/format';
 import { SZ_DECIMALS, toDecimalString } from '../lib/fixed';
 import { buildOrder, DEFAULT_SLIPPAGE_PPM, isMarketKind, isTriggerKind, newClientOrderId, parseAt, priceText, type OrderForm } from './order-builder';
-import { orderSide, positionInputs, pricePick, useAccountState } from './hooks';
+import { orderSide, positionInputs, pricePick, useAccountState, useScrollMore } from './hooks';
 import type { Market, OrderType, Ticker, TimeInForce } from '../lib/types';
 import { storedAttestation } from '../compliance/eligibility';
 import { Attestation } from '../compliance/Attestation';
@@ -135,6 +135,8 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
   };
 
   const verb = side === 'buy' ? 'Long' : 'Short';
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const more = useScrollMore(bodyRef);
   return (
     <section className={`panel order-panel lamp-${lamp}`} aria-label="Place order">
       <div className="gate-head" aria-hidden="true">
@@ -168,11 +170,17 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
         </button>
       </div>
       </div>
-      {/* The body scrolls when the panel is shorter than its content; the action below never leaves the screen. */}
-      <div className="gate-body">
-
+      {/* The body holds the form and fits the fitted screen from 720 px of height; where it still has to scroll (a
+          long statement, a list of refusals) its last lines fade into the action bar instead of being cut. The
+          account's own figures and the action stand in the foot: nothing of them is ever under anything. */}
+      <div className="gate-body" ref={bodyRef} data-more={more ? 'true' : undefined}>
+      {account && !acknowledged ? (
+        /* Before the first order the gate shows the statement and nothing else: no order can be built yet. */
+        <Attestation account={account} onDone={() => setAckTick((t) => t + 1)} />
+      ) : (
+      <>
       {mode === 'trigger' && (
-        <label className="field">
+        <label className="field field-inline">
           <span>Trigger order</span>
           <select value={triggerKind} onChange={(e) => setTriggerKind(e.target.value as OrderType)}>
             {(['stopMarket', 'stopLimit', 'takeProfitMarket', 'takeProfitLimit'] as OrderType[]).map((k) => (
@@ -183,6 +191,7 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
           </select>
         </label>
       )}
+      <div className={isTriggerKind(kind) && !isMarketKind(kind) ? 'amount-pair' : 'amount-single'}>
       {isTriggerKind(kind) && (
         <Amount label="Trigger price (mark)" unit="USD" value={trigger} onChange={setTrigger} placeholder={ticker ? formatPx(ticker.mark, market.priceDecimals).replace(/,/g, '') : ''} hint={`Tick ${formatPx(market.tick, market.priceDecimals)}`} />
       )}
@@ -202,6 +211,7 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
           }
         />
       )}
+      </div>
       <Amount label="Size" unit={market.base} value={size} onChange={setSize} placeholder="0" hint={`Step ${toDecimalString(market.step / 10n ** BigInt(SZ_DECIMALS - market.sizeDecimals), market.sizeDecimals)}`} />
       <div className="fractions" role="group" aria-label={reduce ? 'Part of the position' : 'Part of available margin'}>
         {[25n, 50n, 75n, 100n].map((p) => (
@@ -213,7 +223,7 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
 
       <div className="options">
         {mode === 'limit' && (
-          <label className="field field-inline">
+          <label className="field field-inline tif">
             <span>Time in force</span>
             <select value={tif} onChange={(e) => setTif(e.target.value as TimeInForce)}>
               <option value="GTC">Good till cancelled</option>
@@ -273,7 +283,40 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
         </div>
       </dl>
 
-      {(built.errors.length > 0 && size) || problems.length > 0 || built.warnings.length > 0 ? (
+      <p className="fine estimate-note">
+        <span className="note-long">Estimates from integer arithmetic on the exchange's published values; the engine's result is final. Leveraged positions can be liquidated.</span>
+        <span className="note-short">Estimates; the engine's result is final.</span>
+      </p>
+      </>
+      )}
+      </div>
+      <div className="gate-foot">
+      {summary && (
+        <dl className="account-mini">
+          <div>
+            <dt>
+              Equity<span className="unit-dt"> (USDC)</span>
+            </dt>
+            <dd className="num">
+              {formatUsd(summary.equity)} <span className="unit">USDC</span>
+            </dd>
+          </div>
+          <div>
+            <dt>Available</dt>
+            <dd className="num">
+              {formatUsd(summary.available, { rounding: 'floor' })} <span className="unit">USDC</span>
+            </dd>
+          </div>
+          <div className="mini-ratio">
+            <dt>Margin ratio</dt>
+            <dd className={`num health-${health(summary.marginRatioPpm)}`}>
+              <HealthMeter ppm={summary.marginRatioPpm} />
+              {summary.marginRatioPpm === null ? DASH : formatPpm(summary.marginRatioPpm, 2)}
+            </dd>
+          </div>
+        </dl>
+      )}
+      {!(account && !acknowledged) && ((built.errors.length > 0 && size) || problems.length > 0 || built.warnings.length > 0) ? (
         <ul className="form-messages" aria-live="polite">
           {size && built.errors.map((e) => <li key={e} className="msg-danger">{e}</li>)}
           {problems.map((p) => (
@@ -288,31 +331,6 @@ export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker
           ))}
         </ul>
       ) : null}
-
-      {account && !acknowledged && <Attestation account={account} onDone={() => setAckTick((t) => t + 1)} />}
-      <p className="fine">Estimates from integer arithmetic on the exchange's published values; the engine's result is final. Leveraged positions can be liquidated.</p>
-
-      {summary && (
-        <dl className="account-mini">
-          <div>
-            <dt>Equity</dt>
-            <dd className="num">{formatUsd(summary.equity)} USDC</dd>
-          </div>
-          <div>
-            <dt>Available</dt>
-            <dd className="num">{formatUsd(summary.available, { rounding: 'floor' })} USDC</dd>
-          </div>
-          <div>
-            <dt>Margin ratio</dt>
-            <dd className={`num health-${health(summary.marginRatioPpm)}`}>
-              <HealthMeter ppm={summary.marginRatioPpm} />
-              {summary.marginRatioPpm === null ? DASH : formatPpm(summary.marginRatioPpm, 2)}
-            </dd>
-          </div>
-        </dl>
-      )}
-      </div>
-      <div className="gate-foot">
         {account && !acknowledged ? (
           <p className="gate-foot-note">Read and sign the statement above to place your first order.</p>
         ) : (
@@ -349,12 +367,12 @@ function Amount({ label, unit, value, onChange, placeholder, hint, action }: { l
       <div className="amount-label">
         <label htmlFor={id}>{label}</label>
         {action}
+        {hint && <span className="amount-hint">{hint}</span>}
       </div>
       <div className="amount-box">
         <input id={id} className="num" inputMode="decimal" autoComplete="off" spellCheck={false} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value.replace(/[^\d.,]/g, ''))} />
         <span className="amount-unit">{unit}</span>
       </div>
-      {hint && <span className="amount-hint">{hint}</span>}
     </div>
   );
 }

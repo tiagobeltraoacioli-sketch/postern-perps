@@ -5,10 +5,11 @@
  *
  * Only this file is the public surface; everything else in this directory is internal and may change.
  */
-export const CHART_INTERFACE_VERSION = '0.1.0';
+export const CHART_INTERFACE_VERSION = '0.2.0';
 
 export { PriceChart } from './PriceChart';
 export { chartStats, resetChartStats } from './engine';
+export { averageAt } from './average';
 
 export type {
   CandleStyle,

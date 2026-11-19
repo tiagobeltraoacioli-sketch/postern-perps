@@ -7,6 +7,7 @@
  * no audit, licence, volume or user that does not exist. Notices and risk wording are 392's drafts for counsel
  * (compliance/notices.ts). The gate and the lamp carry the page: no stock imagery, no third-party asset.
  */
+import { useLayoutEffect, useRef } from 'react';
 import risk from '../../../compliance/risk.json';
 import launch from '../../../compliance/markets.json';
 import vault from '../../../contracts/deploy/vault.config.json';
@@ -47,11 +48,29 @@ export function Home() {
   const tickers = useStore(feed.tickers);
   const error = useStore(feed.marketsError);
   const status = useStore(feed.status);
+  // The first screen (hero and, where the window is tall enough, the live markets) is sized against what stands
+  // above it: the header and however many notices are shown. CSS cannot know that height; it is measured.
+  const firstRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = firstRef.current;
+    if (!el) return;
+    const measure = () => el.style.setProperty('--first-top', `${Math.round(el.getBoundingClientRect().top + window.scrollY)}px`);
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    const banners = document.querySelector('.banners');
+    if (banners) ro?.observe(banners);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
   const first = markets[0]?.symbol ?? 'BTC-USD';
   const launchApp = () => go({ page: 'trade', symbol: first });
   const v = VAULT_PROPOSAL;
   return (
     <div className="home">
+      <div className="home-first" ref={firstRef}>
       <section className="hero" aria-labelledby="hero-title">
         <div className="hero-copy">
           <p className="eyebrow hero-eyebrow">
@@ -118,6 +137,8 @@ export function Home() {
           {status ? `Read live from the exchange${status.mode !== 'live' ? ` (a ${status.mode} instance, not a live market)` : ''}.` : 'Figures appear when the exchange answers.'} Marks follow an oracle index, never the last trade alone.
         </p>
       </section>
+
+      </div>
 
       <section className="pillars" aria-label="What it is">
         <article>

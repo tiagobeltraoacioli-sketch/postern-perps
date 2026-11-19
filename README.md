@@ -79,13 +79,9 @@ The counts at the current `main` are in [BRANCHES.md](BRANCHES.md).
 
 | ID | Severity | Area | What |
 |---|---|---|---|
-| R436-14 | Medium (liveness) | node | `/v1/blocks/stream` and the validator read service still do unbounded work for an unauthenticated reader |
-| R436-15 | Medium | node relayer | the checkpoint relayer trusts ONE L2 endpoint at a time (gas price, receipts) |
 | R436-11 | Medium (design) | vault / node / frontend | escape needs the account tree of the last checkpoint; validators serve it from their own log, nothing obliges anyone to keep serving it |
-| R436-16 | Low | node | on snapshot recovery the node compares the log hash of its own wrapper, not the one loaded from the snapshot (SPEC S-16.4) |
-| R436-17 | Low (privacy, for counsel) | node | attestation records are served publicly |
 | R436-18 | Low | frontend | the forced-close text does not say that a close in a halted market executes at the exit band |
-| R436-19 | Low | e2e | the rehearsal's forced-request-to-escape story (added as a variant of phase K; see `e2e/README.md` for what it does and does not show) |
+| R436-19 (residue) | Low | e2e | the forced-request-to-escape story is rehearsed with an exchange that never SEES the request; a sequencer that sees it and ignores it while honest validators see it is not shown |
 | R436-5 (residual) | Low | engine | no cap on the backstop's unrealised loss, no unwind of what it takes |
 | R435-2 | Low | node | status endpoints know only in-process validators |
 | R435-3 | Low | node API, SPEC wording | the liquidation fee an account pays is published nowhere; SPEC does not say it is taken on size x mark |
@@ -93,9 +89,15 @@ The counts at the current `main` are in [BRANCHES.md](BRANCHES.md).
 | R395-9 | Info | oracle | the sequencer's choice among signed observations biases the median inside a stated bound |
 
 ## Not done / not proven
+- The page has not yet placed an order or made a withdrawal against the real node: the harness
+  `frontend/integration/browser/stack-write.mjs`, run once against the stack (rehearsal phase P), got the page's
+  DEPOSIT through (vault and node), then stopped on two defects of the harness itself (a wrong `deposit` signature
+  in its own ABI list; no reconnect after a page reload). The page, the node and the vault were not at fault.
 
 - No external audit. The internal reviews (agents 395 and 436) are recorded in the cross-area log of the project
   folder; their open items are listed in BRANCHES.md.
+- Not rehearsed: the fee sweep at the UTC day boundary (the engine clock cannot be moved in a local run) and a
+  shortfall escape (insurance first, then pro rata: covered by the vault's forge tests on engine vectors only).
 - The L2 in every run is a local anvil, not the Bloch L2 (no proof-based finality, no real bUSDC bytecode).
 - One sequencer; a BFT sequencer set is designed for, not built. The committee (5 of 7) is trusted for safety, as
   docs/VAULT.md section 8 states.
