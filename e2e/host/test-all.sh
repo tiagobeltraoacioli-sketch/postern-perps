@@ -28,6 +28,15 @@ suite node-release node cargo test --release --locked -j 6 --no-fail-fast
 suite node-dev-oracle node cargo test --locked -j 6 --no-fail-fast --features dev-oracle
 (cd $S/node && slot cargo build --release --locked -j 6 --features dev-oracle) > $LOGS/gate.log 2>&1
 if [ $? -ne 0 ]; then echo "dev-oracle-release-gate: refused to compile (as required)" >> $R; else echo "dev-oracle-release-gate: COMPILED (gate broken)" >> $R; fi
+if grep -q '^dev-clock' $S/node/Cargo.toml 2>/dev/null; then
+  suite node-dev-clock node cargo test --locked -j 6 --no-fail-fast --features dev-oracle,dev-clock
+  (cd $S/node && slot cargo build --release --locked -j 6 --features dev-clock) > $LOGS/gate-clock.log 2>&1
+  if [ $? -ne 0 ]; then echo "dev-clock-release-gate: refused to compile (as required)" >> $R; else echo "dev-clock-release-gate: COMPILED (gate broken)" >> $R; fi
+fi
+if [ -f $S/node/tests/anvil.rs ]; then
+  # the scenario against the real vault on a private anvil (ignored by default: it needs anvil and forge artefacts)
+  (cd $S/node && PATH=$HOME/.foundry/bin:$PATH slot cargo test --locked -j 6 --features dev-oracle --test anvil -- --ignored) > $LOGS/node-anvil.log 2>&1; count node-anvil $LOGS/node-anvil.log $?
+fi
 suite oracle node/oracle cargo test --release --workspace -j 6 --no-fail-fast
 suite geoblock-rust compliance/geoblock/rust cargo test --release -j 6 --no-fail-fast
 touch $D/run/test-$L.done

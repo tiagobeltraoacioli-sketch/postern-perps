@@ -11,7 +11,8 @@ rm -f $D/build-$L.done $D/build-$L.failed
 rc=0
 for w in "$@"; do
   case $w in
-    node-debug)     (cd $D/src-$L/node && $HOME/l2dexbridge-20261030/build-slot.sh cargo build -j 6 --locked --features dev-oracle --bins) >> $LOG 2>&1 || rc=1 ;;
+    node-debug)     F=dev-oracle; grep -q '^dev-clock' $D/src-$L/node/Cargo.toml && F=dev-oracle,dev-clock   # the dev clock too, where the tree has it
+                    (cd $D/src-$L/node && $HOME/l2dexbridge-20261030/build-slot.sh cargo build -j 6 --locked --features $F --bins) >> $LOG 2>&1 || rc=1 ;;
     node-release)   (cd $D/src-$L/node && $HOME/l2dexbridge-20261030/build-slot.sh cargo build -j 6 --locked --release --bins) >> $LOG 2>&1 || rc=1 ;;
     engine-release) (cd $D/src-$L/engine && $HOME/l2dexbridge-20261030/build-slot.sh cargo build -j 6 --release --bins) >> $LOG 2>&1 || rc=1 ;;
     oracle-release) (cd $D/src-$L/node/oracle && $HOME/l2dexbridge-20261030/build-slot.sh cargo build -j 6 --release --locked -p postern-perps-oracle-feeder --bins) >> $LOG 2>&1 || rc=1 ;;

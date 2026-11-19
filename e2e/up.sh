@@ -14,10 +14,12 @@
 #   THROWAWAY key generated on the host at run time (file 0600, never printed), funded with anvil_setBalance.
 # --validator-read on (default): every separate validator serves blocks, the genesis and account proofs from its OWN
 #   log on its own port (R436-11: escape proofs without the sequencer); off for a tree whose validator has no --listen.
+# --clock-offset MS: the node's DEV engine clock offset (debug build with the dev-clock feature; implies --oracle dev,
+#   the only oracle valid under an offset); every process gets the same offset. For the fee-sweep story (phase S).
 # --keep restarts the node on its existing data directory (recovery) instead of a fresh one.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/config.sh"
-LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000; RELAYER=on; VREAD=on
+LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000; RELAYER=on; VREAD=on; CLOCK=
 TREE=$HOME/worktrees/perps-e2e-r2-int-20261118; [ -d "$TREE" ] || TREE=$(cd "$HERE/.." && pwd)
 while [ $# -gt 0 ]; do
   case $1 in
@@ -30,6 +32,7 @@ while [ $# -gt 0 ]; do
     --tree) TREE=$2; shift 2 ;;
     --funding-ms) FUNDING_MS=$2; shift 2 ;;
     --relayer) RELAYER=$2; shift 2 ;;
+    --clock-offset) CLOCK=$2; ORACLE=dev; shift 2 ;;
     --validator-read) VREAD=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
@@ -64,6 +67,7 @@ say "tunnel up: API http://127.0.0.1:$M_API, L2 http://127.0.0.1:$M_ANVIL"
 # GENESIS flags: every process of the deployment (sequencer, validators) gets the same ones or logHash(0) differs
 GEN="--seed $E2E_SEED --checkpoint-interval 10"
 [ "$FUNDING_MS" != 0 ] && GEN="$GEN --dev-funding-interval-ms $FUNDING_MS"
+[ -n "$CLOCK" ] && GEN="$GEN --dev-clock-offset-ms $CLOCK"
 NODE_ARGS="--listen 127.0.0.1:$H_API --block-ms 200 --dev-default-country ZZ"
 L2_ARGS=
 PROFILE=release
@@ -135,6 +139,7 @@ cat > "$RUN/stack.json" <<JSON
  "hostApi": "http://127.0.0.1:$H_API", "vault": "$VAULT", "token": "$TOKEN", "frontend": $( [ "$FRONTEND" = 1 ] && echo "\"http://127.0.0.1:$M_FRONTEND\"" || echo null ),
  "oracleCommittee": $( [ -n "${ORACLE_LIST:-}" ] && printf '["%s"]' "$(printf '%s' "$ORACLE_LIST" | sed 's/,/","/g')" || echo null ), "oracleQuorum": 5,
  "validatorApi": $( [ "$LOCALV" != 7 ] && [ "$VREAD" = on ] && echo "\"http://127.0.0.1:$M_VALIDATOR\"" || echo null ), "validatorApiIndex": $LOCALV,
+ "clockOffsetMs": ${CLOCK:-null},
  "relayer": $( [ -n "${RELAY_ADDR:-}" ] && echo "\"$RELAY_ADDR\"" || echo null ),
  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
