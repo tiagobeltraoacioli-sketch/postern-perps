@@ -142,7 +142,7 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
         "validators": vals.values().map(|x| serde_json::json!({"address": x.address, "height": x.height, "signed": x.signed, "last": x.last, "latched": x.latched})).collect::<Vec<_>>(),
         "l2": {"configured": app.l2_configured, "finalizedBlock": v.finalized_block, "scannedTo": v.scanned_to, "l2TimeS": v.l2_time_s,
             "lastDepositIndex": v.deposits.keys().next_back(), "endpointsAgree": v.endpoints_agree, "lastError": v.last_error, "polls": v.polls, "disagreements": v.disagreements},
-        "recovery": {"snapshotHeight": s.recovered.snapshot_height, "replayedBlocks": s.recovered.replayed_blocks,
+        "recovery": {"snapshotHeight": s.recovered.snapshot_height, "indexRestored": s.recovered.index_restored, "replayedBlocks": s.recovered.replayed_blocks,
             "tornTailBytes": s.recovered.torn_tail_bytes, "checkpointsLoaded": s.recovered.checkpoints_loaded},
         "genesisLogHash": to_hex(&app.g.genesis_log_hash()), "typedDataHash": to_hex(&app.g.typed_data_hash),
         "committeeSetHash": to_hex(&app.g.committee_set_hash()),
@@ -1055,7 +1055,7 @@ async fn forced(State(app): State<Arc<App>>, q: Q) -> Response {
             // the engine's own verdict (SPEC 14): served, rejected (consumed, user-caused), pending (waits at the
             // head of the queue: the vault's deadline keeps running)
             let outcome = s.index.as_ref().and_then(|ix| ix.forced_outcome(f.index));
-            let done = matches!(outcome, Some(("served", _, _)) | Some(("rejected", _, _)));
+            let done = matches!(outcome.as_ref().map(|o| o.0), Some("served") | Some("rejected"));
             let status = if !done && l2_time_s > f.deadline {
                 "expired"
             } else if f.index < next {
@@ -1067,8 +1067,8 @@ async fn forced(State(app): State<Arc<App>>, q: Q) -> Response {
                 "forcedId": f.index.to_string(), "account": to_hex(&f.account), "kind": f.kind.name(), "l2TxHash": to_hex(&f.l2_tx_hash),
                 "l2Block": f.l2_block, "deadlineTime": f.deadline.saturating_mul(1000), "status": status,
                 "includedHeight": s.forced_heights.get(&f.index).copied(),
-                "arg": f.arg.to_string(), "outcome": outcome.map(|o| o.0), "reason": outcome.and_then(|o| o.1),
-                "processedHeight": outcome.filter(|_| done).map(|o| o.2),
+                "arg": f.arg.to_string(), "outcome": outcome.as_ref().map(|o| o.0), "reason": outcome.as_ref().and_then(|o| o.1.clone()),
+                "processedHeight": outcome.as_ref().filter(|_| done).map(|o| o.2),
             })
         })
         .collect();

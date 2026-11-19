@@ -4,9 +4,11 @@
 //! The same log gives the same index on every machine (`digest()`; test `index_is_a_function_of_the_log`), so a
 //! restarted node serves the same history it served before.
 //!
-//! What the engine's events do not carry in 0.1.6 and how it is recovered (each is cross-checked every block
-//! against the engine's own state; a difference increments `mismatches`, is logged, and the shadow is re-read
-//! from the engine, so the index can lag the truth for one block but never drift):
+//! Since engine 0.2.3 the engine's events carry what this index had to recover in 0.1.6 (cross-area ask of
+//! 2026-11-18): `Accepted { order, account }` ties a PlaceOrder input to its id, `Fill` carries each side's
+//! realised amount, `Funding` the mark and the premium it used. The index takes these values from the ENGINE and
+//! keeps its own recoveries as cross-checks, compared on every block: a difference increments `mismatches`, is
+//! logged, and (for positions) the shadow is re-read from the engine. The recoveries, for the record:
 //! - realised PnL per fill: shadow positions updated with the engine's `trade_position` formula;
 //! - order ids of the block's PlaceOrder actions: the K highest NEW ids named by a non-liquidation event, K = the
 //!   block's accepted PlaceOrders. Proof: (1) the engine allocates ids in execution order: forced closes (before
@@ -47,6 +49,20 @@ pub const PAYMENTS_KEEP: usize = 10_000;
 pub const ORDERS_KEEP: usize = 5_000;
 pub const FUNDING_KEEP: usize = 20_000;
 
+/// serde form of a map whose keys are tuples or byte arrays (not JSON object keys): a list of `[key, value]`.
+mod pairs {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<K: Serialize, V: Serialize, S: Serializer>(m: &BTreeMap<K, V>, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(m.iter())
+    }
+
+    pub fn deserialize<'de, K: Deserialize<'de> + Ord, V: Deserialize<'de>, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<K, V>, D::Error> {
+        Ok(Vec::<(K, V)>::deserialize(d)?.into_iter().collect())
+    }
+}
+
 pub fn interval_index(name: &str) -> Option<usize> {
     INTERVALS.iter().position(|(n, _)| *n == name)
 }
@@ -79,7 +95,7 @@ impl PreInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Trade {
     pub id: u64,
     pub market: u32,
@@ -97,7 +113,7 @@ pub const KIND_BACKSTOP: u8 = 2;
 pub const KIND_ADL: u8 = 3;
 pub const KIND_SETTLEMENT: u8 = 4;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct FillRec {
     pub id: u64,
     pub trade_id: u64,
@@ -123,7 +139,7 @@ pub const ST_FILLED: u8 = 2;
 pub const ST_CANCELED: u8 = 3;
 pub const ST_REJECTED: u8 = 4;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct OrderRec {
     pub id: u64,
     pub account: Address,
@@ -143,7 +159,7 @@ pub struct OrderRec {
     pub created_at: u64,
     pub updated_at: u64,
     pub height: u64,
-    pub reason: Option<&'static str>,
+    pub reason: Option<String>,
 }
 
 impl OrderRec {
@@ -152,7 +168,7 @@ impl OrderRec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct FundingRec {
     pub market: u32,
     /// the block time of the settlement (the first block at or after the interval boundary)
@@ -163,7 +179,7 @@ pub struct FundingRec {
     pub index: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct FundingPay {
     pub seq: u64,
     pub market: u32,
@@ -175,7 +191,7 @@ pub struct FundingPay {
     pub payment: i128,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Candle {
     pub t: u64,
     pub o: u64,
@@ -189,7 +205,7 @@ pub struct Candle {
     pub n: u64,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 struct Shadow {
     size: i64,
     open_notional: i128,
@@ -197,13 +213,14 @@ struct Shadow {
     funding: i128,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 struct AccountIdx {
     fills: VecDeque<FillRec>,
     payments: VecDeque<FundingPay>,
     /// every order id of the account, oldest first
     orders: VecDeque<u64>,
     /// agent -> (approvedAt ms, height)
+    #[serde(with = "pairs")]
     agents: BTreeMap<Address, (u64, u64)>,
 }
 
@@ -223,26 +240,29 @@ pub struct IndexDelta {
     pub results: BTreeMap<usize, serde_json::Value>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct MarketMeta {
     pub symbol: String,
     pub price_decimals: u32,
     pub size_decimals: u32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
 pub struct Indexer {
     pub markets: BTreeMap<u32, MarketMeta>,
     trades: BTreeMap<u32, VecDeque<Trade>>,
+    #[serde(with = "pairs")]
     candles: BTreeMap<(u32, usize), BTreeMap<u64, Candle>>,
     funding: BTreeMap<u32, VecDeque<FundingRec>>,
     orders: BTreeMap<u64, OrderRec>,
+    #[serde(with = "pairs")]
     accounts: BTreeMap<Address, AccountIdx>,
+    #[serde(with = "pairs")]
     shadow: BTreeMap<(u32, u32), Shadow>,
     /// forced request index -> kind (0 CancelAll, 1 CloseAll, 2 Withdraw), from the forced inputs
     forced_kinds: BTreeMap<u64, u8>,
     /// forced request index -> the engine's last verdict (served | rejected | pending, reason, height)
-    forced_outcomes: BTreeMap<u64, (&'static str, Option<&'static str>, u64)>,
+    forced_outcomes: BTreeMap<u64, (u8, Option<String>, u64)>,
     pub next_trade_id: u64,
     pub next_fill_id: u64,
     pub next_payment_seq: u64,
@@ -506,12 +526,15 @@ impl Indexer {
                 visible.insert(id);
             }
         }
-        let ids: Vec<u64> = visible.iter().rev().take(placed.len()).rev().copied().collect();
-        let contiguous = ids.windows(2).all(|w| w[1] == w[0] + 1);
-        if ids.len() != placed.len() || !contiguous || ids.last().is_some_and(|l| *l >= post.next_order_id) {
+        let recovered: Vec<u64> = visible.iter().rev().take(placed.len()).rev().copied().collect();
+        // the engine's own announcement, in execution order = input order
+        let announced: Vec<(u64, u32)> = events.iter().filter_map(|ev| match ev { pe::Event::Accepted { order, account } => Some((*order, *account)), _ => None }).collect();
+        let ids: Vec<u64> = announced.iter().map(|x| x.0).collect();
+        let accounts_agree = announced.len() == placed.len() && announced.iter().zip(&placed).all(|((_, ai), p)| post.accounts.get(*ai as usize).map(|a| a.address) == Some(p.account));
+        if !accounts_agree || recovered != ids {
             self.mismatches += 1;
-            let m = format!("height {height}: {} accepted PlaceOrders, new ids seen {:?}", placed.len(), ids);
-            eprintln!("index: order id recovery mismatch: {m}");
+            let m = format!("height {height}: {} accepted PlaceOrders, engine announced {:?}, recovered from events {:?}", placed.len(), announced, recovered);
+            eprintln!("index: order id mismatch: {m}");
             self.last_mismatch = Some(m);
         }
         for (p, id) in placed.iter().zip(&ids) {
@@ -549,7 +572,7 @@ impl Indexer {
         let mut withdrawal_ids: Vec<(u64, Address)> = Vec::new();
         for ev in events {
             match ev {
-                pe::Event::Fill { market, kind, taker, maker, taker_order, maker_order, taker_is_buy, price, size, taker_fee, maker_fee, .. } => {
+                pe::Event::Fill { market, kind, taker, maker, taker_order, maker_order, taker_is_buy, price, size, taker_fee, maker_fee, taker_realized, maker_realized, .. } => {
                     let q = *size as i128;
                     let p = *price as i128;
                     let dsz = if *taker_is_buy { q } else { -q };
@@ -582,6 +605,13 @@ impl Indexer {
                             self.shadow.remove(&k);
                         }
                     }
+                    // the ENGINE's realised amounts are what is reported; the shadow's are the cross-check
+                    let (er_t, er_m) = (div_floor(*taker_realized, N_PER_USDC), div_floor(*maker_realized, N_PER_USDC));
+                    if (er_t, er_m) != (tr, mr) {
+                        self.mismatches += 1;
+                        self.last_mismatch = Some(format!("height {height}: fill realised amounts: engine ({er_t}, {er_m}), shadow ({tr}, {mr})"));
+                    }
+                    let (tr, mr) = (er_t, er_m);
                     let k = match kind {
                         FillKind::Book => KIND_BOOK,
                         FillKind::Liquidation => KIND_LIQUIDATION,
@@ -627,7 +657,7 @@ impl Indexer {
                     let r = *reason;
                     self.touch_order(&mut d, *order, time, |o| {
                         o.status = ST_CANCELED;
-                        o.reason = if r == pe::Error::Cancelled { None } else { Some(r.name()) };
+                        o.reason = if r == pe::Error::Cancelled { None } else { Some(r.name().to_string()) };
                     })
                 }
                 pe::Event::RemainderCancelled { order, reason, .. } => {
@@ -635,14 +665,20 @@ impl Indexer {
                     self.touch_order(&mut d, *order, time, |o| {
                         // a taker whose remainder did not rest: canceled with the engine's reason; what filled stays
                         o.status = ST_CANCELED;
-                        o.reason = Some(r.name());
+                        o.reason = Some(r.name().to_string());
                     })
                 }
-                pe::Event::Funding { market, rate, .. } => {
+                pe::Event::Funding { market, rate, mark, premium, .. } => {
+                    // the ENGINE's mark and premium are what is reported; the step-4 replica is the cross-check
                     let pm = pre.markets.get(market).cloned().unwrap_or_default();
                     let (index, band) = post.markets.get(market).map(|m| (m.oracle.index, m.p.mark_band_bps)).unwrap_or((0, 0));
-                    let mark = view::step4_mark(index, pm.best_bid, pm.best_ask, pm.last_trade, band, time);
-                    let premium = post.markets.get(market).and_then(|m| view::funding_rate_of(&pm.samples, &m.p)).map(|x| x.1).unwrap_or(0);
+                    let replica_mark = view::step4_mark(index, pm.best_bid, pm.best_ask, pm.last_trade, band, time);
+                    let replica_premium = post.markets.get(market).and_then(|m| view::funding_rate_of(&pm.samples, &m.p)).map(|x| x.1).unwrap_or(0);
+                    let (mark, premium) = (*mark, *premium);
+                    if (replica_mark, replica_premium) != (mark, premium) {
+                        self.mismatches += 1;
+                        self.last_mismatch = Some(format!("height {height}: funding of market {market}: engine mark {mark} premium {premium}, replica {replica_mark} {replica_premium}"));
+                    }
                     let rec = FundingRec { market: *market, time, rate: *rate, premium, mark, index };
                     let hist = self.funding.entry(*market).or_default();
                     hist.push_back(rec.clone());
@@ -695,13 +731,13 @@ impl Indexer {
                     if self.forced_kinds.get(index) == Some(&2) {
                         forced_withdrawals += 1;
                     }
-                    self.forced_outcomes.insert(*index, ("served", None, height));
+                    self.forced_outcomes.insert(*index, (0, None, height));
                 }
                 pe::Event::ForcedRejected { index, reason } => {
-                    self.forced_outcomes.insert(*index, ("rejected", Some(reason.name()), height));
+                    self.forced_outcomes.insert(*index, (1, Some(reason.name().to_string()), height));
                 }
                 pe::Event::ForcedPending { index, reason } => {
-                    self.forced_outcomes.insert(*index, ("pending", Some(reason.name()), height));
+                    self.forced_outcomes.insert(*index, (2, Some(reason.name().to_string()), height));
                 }
                 pe::Event::Withdrawal(w) => {
                     withdrawal_ids.push((w.id, w.account));
@@ -716,7 +752,7 @@ impl Indexer {
                 pe::Event::Halt { market } | pe::Event::Resume { market } => {
                     d.markets.insert(*market);
                 }
-                pe::Event::Launched => {}
+                pe::Event::Launched | pe::Event::Accepted { .. } => {}
                 // an event kind of a newer engine: nothing to index until this file learns it
                 #[allow(unreachable_patterns)]
                 _ => {}
@@ -904,8 +940,8 @@ impl Indexer {
         (out.into_iter().map(|o| self.order_json(o)).collect(), cursor)
     }
 
-    pub fn forced_outcome(&self, index: u64) -> Option<(&'static str, Option<&'static str>, u64)> {
-        self.forced_outcomes.get(&index).copied()
+    pub fn forced_outcome(&self, index: u64) -> Option<(&'static str, Option<String>, u64)> {
+        self.forced_outcomes.get(&index).map(|(k, r, h)| (["served", "rejected", "pending"][(*k as usize).min(2)], r.clone(), *h))
     }
 
     pub fn agent_meta(&self, account: &Address, agent: &Address) -> Option<(u64, u64)> {
@@ -927,6 +963,16 @@ impl Indexer {
         }
         let ago = series.range(..start).next_back().map(|(_, c)| c.c).or(first_open);
         (vol, hi, lo, ago)
+    }
+
+    /// The whole index as bytes (JSON; 128-bit integers as JSON numbers, read back exactly by `from_bytes`), for
+    /// the index file written next to an engine snapshot.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        serde_json::to_vec(self).map_err(|e| format!("index serialization: {e}"))
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Result<Indexer, String> {
+        serde_json::from_slice(b).map_err(|e| format!("index file: {e}"))
     }
 
     /// A commitment to everything the index holds (test of determinism across replay).
@@ -955,6 +1001,36 @@ mod tests {
         // buy back 2 @ 80: realised (-2 * 80) - (-180) = 20
         assert_eq!(shadow_trade(&mut s, 2, 80), 20);
         assert_eq!((s.size, s.open_notional), (0, 0));
+    }
+
+    /// The index file form is exact: every field, 128-bit extremes included, survives the round trip.
+    #[test]
+    fn index_bytes_round_trip_is_exact() {
+        let mut ix = Indexer { next_trade_id: 7, next_fill_id: 9, next_payment_seq: 3, from_height: 1, height: 44, time: 1_800_000_000_123, ..Default::default() };
+        ix.markets.insert(1, MarketMeta { symbol: "BTC-USD".into(), price_decimals: 1, size_decimals: 4 });
+        let t = Trade { id: 6, market: 1, price: u64::MAX, size: 1, taker_is_buy: true, time: 5, height: 44, liquidation: true };
+        ix.trades.entry(1).or_default().push_back(t);
+        ix.candles.entry((1, 5)).or_default().insert(86_400_000, Candle { t: 86_400_000, o: 1, h: 2, l: 1, c: 2, v: u128::MAX, q: u128::MAX - 1, n: 3 });
+        ix.funding.entry(1).or_default().push_back(FundingRec { market: 1, time: 9, rate: -500_000, premium: i128::MIN, mark: 3, index: 4 });
+        let a = [0xab; 20];
+        let o = OrderRec { id: 5, account: a, market: 1, is_buy: false, order_type: 3, tif: 0, price: 10, size: 20, filled: 20, filled_notional: u128::MAX, reduce_only: true, trigger_price: 9, client_order_id: [7; 32], status: ST_CANCELED, created_at: 1, updated_at: 2, height: 3, reason: Some("SELF_TRADE".into()) };
+        ix.orders.insert(5, o);
+        let acc = ix.accounts.entry(a).or_default();
+        acc.orders.push_back(5);
+        acc.agents.insert([0xcd; 20], (11, 12));
+        acc.fills.push_back(FillRec { id: 8, trade_id: 6, order_id: 5, market: 1, is_buy: false, price: 10, size: 20, fee: i128::MAX, maker: true, realized: i128::MIN, liquidation: false, kind: KIND_ADL, time: 5, height: 44 });
+        acc.payments.push_back(FundingPay { seq: 2, market: 1, time: 9, rate: -1, size: i64::MIN, mark: 3, payment: -170141183460469231731687303715884105728 });
+        ix.shadow.insert((3, 1), Shadow { size: -14_000_000, open_notional: -94_150_000_000_000_000_000, realized: -5, funding: 6 });
+        ix.forced_kinds.insert(0, 2);
+        ix.forced_outcomes.insert(0, (2, Some("POSITION_IN_HALTED_MARKET".into()), 40));
+        ix.last.insert(1, (u64::MAX, 5));
+        ix.mismatches = 0;
+        let bytes = ix.to_bytes().unwrap();
+        let back = Indexer::from_bytes(&bytes).unwrap();
+        assert_eq!(format!("{ix:?}"), format!("{back:?}"), "every field equal");
+        assert_eq!(ix.digest(), back.digest());
+        assert_eq!(back.to_bytes().unwrap(), bytes, "re-serialization is byte-identical");
+        assert!(Indexer::from_bytes(&bytes[..bytes.len() - 1]).is_err());
     }
 
     #[test]

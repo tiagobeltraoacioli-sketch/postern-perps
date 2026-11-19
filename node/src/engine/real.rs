@@ -4,8 +4,8 @@
 //! its own strict decoder (`codec::decode_inputs`, which also re-encodes and compares). A difference between the
 //! node's and the engine's canonical form is therefore a refused block, never a silent reinterpretation.
 //!
-//! Engine 0.1 has no snapshot/restore: `snapshot()` is empty and the sequencer then recovers by replaying the
-//! log from genesis (correct, slower; stated).
+//! Snapshots are the engine's own (SPEC 16): `snapshot()` / `restore()` pass through, and the sequencer checks the
+//! restored root against the root its log holds for that height before it trusts one.
 //!
 //! UNAUDITED PROTOTYPE.
 
@@ -85,11 +85,16 @@ impl Engine for RealEngine {
     fn time(&self) -> u64 {
         self.e.time
     }
+    /// The engine's canonical snapshot (SPEC 16, format version 1).
     fn snapshot(&self) -> Vec<u8> {
-        Vec::new()
+        self.e.snapshot()
     }
-    fn restore(&mut self, _bytes: &[u8]) -> Result<(), String> {
-        Err("engine 0.1 has no snapshot format: replay from genesis".into())
+    /// Loads a snapshot taken under THIS genesis (the engine's strict decoder: checksum, genesis hash, canonical
+    /// re-encoding, structural invariants). The caller compares the restored state root with one it trusts (the
+    /// root logged for that height): `Sequencer::open` does.
+    fn restore(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.e = pe::Engine::restore(self.e.g.clone(), bytes, None).map_err(|e| format!("engine snapshot refused: {e:?}"))?;
+        Ok(())
     }
     fn next_deposit_index(&self) -> u64 {
         self.e.next_deposit

@@ -130,13 +130,14 @@ fn cancel(g: &Genesis, key: &SigningKey, nonce: u64, market: u32, order_id: u64)
 /// The engine's public `free_collateral` recomputed from the DISPLAY replica of SPEC 6.2 (valid while every
 /// market of the account is active): floor((E - IR) / N), at most the balance, at least 0.
 fn replica_free(e: &pe::Engine, ai: u32) -> i128 {
-    let (ir, _) = view::account_req(e, ai);
+    let (ir, _) = view::account_req_replica(e, ai);
     pe::num::div_floor(e.equity(ai) - ir, pe::num::N_PER_USDC).min(e.accounts[ai as usize].balance).max(0)
 }
 
 fn assert_replica_matches_engine(e: &pe::Engine) {
     for ai in 0..e.accounts.len() as u32 {
         assert_eq!(replica_free(e, ai), e.free_collateral(ai), "account #{ai}: SPEC 6.2 replica vs the engine's free_collateral");
+        assert_eq!(view::account_req_replica(e, ai), e.account_req(ai, None), "account #{ai}: SPEC 6.2 replica vs the engine's own account_req");
     }
 }
 
@@ -537,4 +538,86 @@ fn account_and_withdrawal_proofs_verify_against_final_checkpoints() {
     assert_eq!(check_account(&n.seq, &ua, Some(h3), "4000000000"), h3);
     // ?finalized=true reads the state of the latest final checkpoint
     assert_eq!(n.seq.account_view(&ua, true).unwrap()["collateral"], "4000.000000");
+}
+
+/// Snapshot recovery with engine 0.2's snapshot format (SPEC 16): the node restarts from the newest snapshot the
+/// log confirms and replays only the blocks after it; the market-data index comes back from its own file, so the
+/// history served before the restart is served after it; a damaged index file costs the history before the
+/// snapshot (stated), never the state; a damaged engine snapshot is skipped for an older one.
+#[test]
+fn snapshot_recovery_restores_the_state_and_the_history() {
+    let (mut s, a, b) = start("snap", DevOptions { funding_interval_ms: Some(60_000), ..Default::default() });
+    s.seq.snapshot_every = 7;
+    let (aa, ba) = (key_address(&a), key_address(&b));
+    trade(&mut s, &a, &b);
+    for _ in 0..24 {
+        s.round(&[(BTC, P)]);
+    }
+    let h = s.seq.log.last_height;
+    assert!(h >= 28, "{h}");
+    let snap_h = h - h % 7;
+    let ix = s.seq.index.as_ref().unwrap();
+    let (digest, root) = (ix.digest(), s.seq.engine.state_root());
+    let fills_b = ix.fills(&ba, None, 10, None).0;
+    let pays_a = ix.payments(&aa, None, 10, None).0;
+    assert!(!fills_b.is_empty() && !pays_a.is_empty(), "there is history to lose");
+    let acct_b = s.account(&ba);
+    let (g, key, dir, checked) = (s.g.clone(), s.keys.sequencer.clone(), s.dir.clone(), s.checked.clone());
+    let oracle_keys = s.keys.oracle.clone();
+    let mut t = s.t;
+    drop(s);
+    let open = || Sequencer::open(g.clone(), key.clone(), Box::new(RealEngine::new(g.clone(), checked.clone()).unwrap()), dir.clone(), view()).unwrap();
+
+    // 1. intact files: state from the snapshot + the log tail, history from the index file
+    let mut s1 = open();
+    assert_eq!((s1.recovered.snapshot_height, s1.recovered.replayed_blocks, s1.recovered.index_restored), (Some(snap_h), h - snap_h, true), "{:?}", s1.recovered);
+    assert_eq!(s1.engine.state_root(), root);
+    let ix1 = s1.index.as_ref().unwrap();
+    assert_eq!((ix1.digest(), ix1.from_height, ix1.mismatches), (digest, 1, 0), "the same index as before the restart");
+    assert_eq!(ix1.fills(&ba, None, 10, None).0, fills_b);
+    assert_eq!(s1.account_view(&ba, false).unwrap(), acct_b, "positions with realised PnL and funding since open included");
+    // it keeps working: one more round, no mismatch between the restored index and the engine
+    t += 3000;
+    let last = s1.engine.last_oracle_round();
+    for (i, k) in oracle_keys.iter().enumerate() {
+        s1.oracle_pool.offer(&g, t / 3000, observation(&g, k, i as u8, t, &[(BTC, P)]), last, t).unwrap();
+    }
+    s1.produce(t + 5).unwrap().unwrap();
+    assert_eq!(s1.index.as_ref().unwrap().mismatches, 0);
+    let (h2, root2) = (s1.log.last_height, s1.engine.state_root());
+    let acct_after = s1.account_view(&ba, false).unwrap();
+    drop(s1);
+
+    // 2. a damaged index file: the state is recovered all the same; history starts after the snapshot
+    let snap2 = h2 - h2 % 7;
+    let ipath = perps_node::sequencer::index_path(&dir, snap2);
+    let mut bytes = std::fs::read(&ipath).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0x01;
+    std::fs::write(&ipath, &bytes).unwrap();
+    let s2 = open();
+    assert_eq!((s2.recovered.snapshot_height, s2.recovered.index_restored, s2.engine.state_root()), (Some(snap2), false, root2));
+    let ix2 = s2.index.as_ref().unwrap();
+    assert_eq!((ix2.from_height, ix2.mismatches), (snap2 + 1, 0));
+    assert!(ix2.fills(&ba, None, 10, None).0.is_empty(), "fills before the snapshot are not served from a damaged file");
+    // the positions (engine state) are whole; only the since-open totals restart
+    let v = s2.account_view(&ba, false).unwrap();
+    for k in ["collateral", "equity", "initialMargin", "maintenanceMargin", "freeCollateral"] {
+        assert_eq!(v[k], acct_after[k], "{k}");
+    }
+    assert_eq!((v["positions"][0]["size"].as_str(), v["positions"][0]["openNotional"].as_str()), (acct_after["positions"][0]["size"].as_str(), acct_after["positions"][0]["openNotional"].as_str()));
+    assert_eq!(v["positions"][0]["fundingSinceOpen"], "0.000000", "the since-open totals restart with the index");
+    drop(s2);
+
+    // 3. a damaged engine snapshot is skipped: the older one (or genesis) is used, the root is the same
+    let snaps = perps_node::log::list_snapshots(&dir);
+    let newest = snaps.iter().max_by_key(|x| x.0).unwrap();
+    let mut bytes = std::fs::read(&newest.1).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0x01;
+    std::fs::write(&newest.1, &bytes).unwrap();
+    let s3 = open();
+    assert_eq!(s3.engine.state_root(), root2);
+    assert!(s3.recovered.snapshot_height < Some(newest.0), "{:?}", s3.recovered);
+    assert_eq!(s3.index.as_ref().unwrap().mismatches, 0);
 }

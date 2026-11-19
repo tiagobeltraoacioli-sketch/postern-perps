@@ -197,6 +197,8 @@ pub const REBUILT_KEEP: usize = 4;
 
 #[derive(Clone, Debug, Default)]
 pub struct RecoveryReport {
+    /// the market-data index came from the index file written with the snapshot (else it starts after it)
+    pub index_restored: bool,
     pub snapshot_height: Option<u64>,
     pub replayed_blocks: u64,
     pub torn_tail_bytes: u64,
@@ -287,9 +289,25 @@ impl Sequencer {
         if let Some(e) = s.engine.real() {
             let mut ix = Indexer::new(&g);
             if start > 0 {
-                // recovered from a snapshot: the index covers the blocks after it (history before it is not served)
-                ix.from_height = start + 1;
-                ix.resync_shadow(e);
+                // recovered from a snapshot: the index (and the heights at which deposits, forced requests and
+                // withdrawals entered) comes from the index file written with it, when that file is intact and
+                // belongs to this log; else the index covers only the blocks after the snapshot
+                let want = s.log.read(start)?.map(|b| b.header.log_hash).ok_or("log read")?;
+                match read_index_file(&s.data_dir, start, &want) {
+                    Ok(f) => {
+                        ix = f.index;
+                        s.deposit_heights = f.deposit_heights;
+                        s.forced_heights = f.forced_heights;
+                        s.withdrawal_heights = f.withdrawal_heights;
+                        s.recovered.index_restored = true;
+                    }
+                    Err(why) => {
+                        eprintln!("index file of snapshot {start} not used ({why}): history before it is not served");
+                        ix.from_height = start + 1;
+                        ix.height = start;
+                        ix.resync_shadow(e);
+                    }
+                }
             }
             s.index = Some(ix);
         }
@@ -492,6 +510,45 @@ impl Sequencer {
         while self.pending_oracle.len() > 16 {
             let k = *self.pending_oracle.keys().next().unwrap();
             self.pending_oracle.remove(&k);
+        }
+        Ok(())
+    }
+
+    /// Writes the market-data index next to the engine snapshot of the same height (`index-<height>.json`: a
+    /// header line binding height and logHash, the index, a keccak line over both; temporary name, fsync,
+    /// rename), and removes index files whose snapshot is gone.
+    fn write_index_file(&self, meta: &SnapshotMeta) -> Result<(), String> {
+        let Some(ix) = &self.index else { return Ok(()) };
+        let header = serde_json::json!({"version": 1, "height": meta.height, "logHash": to_hex(&meta.log_hash),
+            "depositHeights": self.deposit_heights, "forcedHeights": self.forced_heights, "withdrawalHeights": self.withdrawal_heights})
+        .to_string();
+        let mut body = header.into_bytes();
+        body.push(b'\n');
+        body.extend_from_slice(&ix.to_bytes()?);
+        let sum = to_hex(&crate::util::keccak(&body));
+        body.push(b'\n');
+        body.extend_from_slice(sum.as_bytes());
+        let tmp = self.data_dir.join(format!("index-{:012}.tmp", meta.height));
+        let fin = index_path(&self.data_dir, meta.height);
+        {
+            let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            f.write_all(&body).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&tmp, &fin).map_err(|e| e.to_string())?;
+        if let Ok(d) = std::fs::File::open(&self.data_dir) {
+            let _ = d.sync_all();
+        }
+        let kept: BTreeSet<u64> = list_snapshots(&self.data_dir).into_iter().map(|x| x.0).collect();
+        if let Ok(rd) = std::fs::read_dir(&self.data_dir) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                if let Some(h) = n.strip_prefix("index-").and_then(|s| s.strip_suffix(".json")).and_then(|s| s.parse::<u64>().ok()) {
+                    if !kept.contains(&h) {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -701,10 +758,18 @@ impl Sequencer {
             }
         }
         self.after_apply(&b, &inputs, &out, pre.as_ref());
-        if self.snapshot_every > 0 && height % self.snapshot_every == 0 && !self.engine.snapshot().is_empty() {
-            let meta = SnapshotMeta { height, time, log_hash: lh, state_root: b.header.state_root };
-            if let Err(e) = write_snapshot(&self.data_dir, &meta, self.engine.name(), &self.engine.snapshot(), 2) {
-                eprintln!("snapshot at {height} failed (log is intact, recovery replays further): {e}");
+        if self.snapshot_every > 0 && height % self.snapshot_every == 0 {
+            let snap = self.engine.snapshot();
+            if !snap.is_empty() {
+                let meta = SnapshotMeta { height, time, log_hash: lh, state_root: b.header.state_root };
+                match write_snapshot(&self.data_dir, &meta, self.engine.name(), &snap, 2) {
+                    Ok(_) => {
+                        if let Err(e) = self.write_index_file(&meta) {
+                            eprintln!("index file at {height} failed (the snapshot is intact; a recovery from it serves history only after it): {e}");
+                        }
+                    }
+                    Err(e) => eprintln!("snapshot at {height} failed (log is intact, recovery replays further): {e}"),
+                }
             }
         }
         Ok(self.recent.back().cloned())
@@ -987,6 +1052,39 @@ pub fn build_account_proof(e: &postern_perps_engine::Engine, addr: &Address, acc
             "positionsHash": to_hex(positions_hash), "encoded": to_hex(&data)},
         "proof": siblings.iter().map(|s| to_hex(s)).collect::<Vec<_>>(), "index": index.to_string(),
     }))
+}
+
+pub fn index_path(dir: &std::path::Path, height: u64) -> PathBuf {
+    dir.join(format!("index-{height:012}.json"))
+}
+
+struct IndexFile {
+    index: Indexer,
+    deposit_heights: BTreeMap<u64, u64>,
+    forced_heights: BTreeMap<u64, u64>,
+    withdrawal_heights: BTreeMap<u64, u64>,
+}
+
+/// Reads the index file of the snapshot at `height`; refused unless its checksum holds, its header names this
+/// height and the logHash this node's log holds for it, and the index inside is at this height.
+fn read_index_file(dir: &std::path::Path, height: u64, log_hash: &H256) -> Result<IndexFile, String> {
+    let raw = std::fs::read(index_path(dir, height)).map_err(|e| format!("read: {e}"))?;
+    let cut = raw.iter().rposition(|c| *c == b'\n').ok_or("no checksum line")?;
+    let (body, sum) = (&raw[..cut], &raw[cut + 1..]);
+    if to_hex(&crate::util::keccak(body)).as_bytes() != sum {
+        return Err("checksum".into());
+    }
+    let nl = body.iter().position(|c| *c == b'\n').ok_or("no header line")?;
+    let h: serde_json::Value = serde_json::from_slice(&body[..nl]).map_err(|e| format!("header: {e}"))?;
+    if h["version"] != 1 || h["height"].as_u64() != Some(height) || h["logHash"].as_str() != Some(to_hex(log_hash).as_str()) {
+        return Err("the file belongs to another height, log or format version".into());
+    }
+    let map = |k: &str| -> Result<BTreeMap<u64, u64>, String> { serde_json::from_value(h[k].clone()).map_err(|e| format!("{k}: {e}")) };
+    let index = Indexer::from_bytes(&body[nl + 1..])?;
+    if index.height != height {
+        return Err(format!("the index inside is at height {}", index.height));
+    }
+    Ok(IndexFile { index, deposit_heights: map("depositHeights")?, forced_heights: map("forcedHeights")?, withdrawal_heights: map("withdrawalHeights")? })
 }
 
 fn read_pinned(dir: &std::path::Path) -> BTreeSet<u64> {

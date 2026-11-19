@@ -2,16 +2,18 @@
 //! ticker, oracle status). Nothing here is consensus: no value computed in this file enters a block, a state
 //! root or a checkpoint. The engine decides; this file only shows.
 //!
-//! DISPLAY REPLICAS (stated, cross-checked, to be replaced by the engine's own functions when agent 430 makes
-//! them public; cross-area ask of 2026-11-18):
-//! - `tier_req`, `market_req_at`, `account_req`: SPEC 6.2 requirements, copied from engine 0.1.6
-//!   (`engine.rs` `tier_req` / `market_req_at` / `account_req`, private there). Cross-check in
-//!   `tests/api_views.rs`: `floor((E - IR) / N)` clamped as the engine clamps equals the engine's public
-//!   `free_collateral` for accounts whose markets are all active, on every account after every block of a
-//!   randomised run, and the liquidation estimate brackets the engine's own liquidation decision.
-//! - `step4_mark`: the mark of block step 4 (SPEC 5.2 median3 with the band), used only to state the mark a
-//!   funding settlement used (the engine's `Event::Funding` does not carry it in 0.1.6).
-//! - `predicted_funding_rate`: SPEC 7.2 applied to the samples collected so far.
+//! WHAT COMES FROM THE ENGINE (since engine 0.2.3, which made them public on this node's request): the initial and
+//! maintenance requirements of the account and of each position (`Engine::account_req`, `Engine::market_req`),
+//! the leverage setting (`Engine::leverage_of`), the free collateral (`Engine::free_collateral`).
+//!
+//! DISPLAY REPLICAS that remain (stated, cross-checked in `tests/api_views.rs`):
+//! - `tier_req`, `market_req_at`, `account_req_replica`: SPEC 6.2 at a HYPOTHETICAL price, which the liquidation
+//!   estimate needs and the engine does not expose (`market_req_at` is private there). Cross-checks: at the mark
+//!   the replica equals the engine's `account_req` for every account after every block of the tests, and the
+//!   estimate is the engine's own boundary (one price unit above it no liquidation, at it liquidation).
+//! - `step4_mark`: the mark of block step 4 (SPEC 5.2), now only a TEST ORACLE: the index takes the mark of a
+//!   funding settlement from the engine's `Event::Funding` and compares it with this replica every time.
+//! - `predicted_funding`: SPEC 7.2 applied to the samples collected so far (a forecast, not an engine value).
 //!
 //! Rounding of displayed USDC values (6 decimals), stated once: amounts OWED TO the account (equity, PnL,
 //! notional) are floored; requirements (initial / maintenance margin) are rounded up; `freeCollateral` and
@@ -96,7 +98,7 @@ pub fn tier_req(n: i128, tiers: &[Tier], frac: impl Fn(&Tier) -> i128) -> i128 {
 }
 
 pub fn leverage_of(e: &pe::Engine, ai: u32, mid: u32) -> u32 {
-    e.accounts[ai as usize].leverage.get(&mid).copied().unwrap_or(e.markets[&mid].p.default_leverage)
+    e.leverage_of(ai, mid)
 }
 
 /// REPLICA of engine `market_req_at` without the hypothetical extra order: (IR, MR) of one market in notional
@@ -142,8 +144,14 @@ pub fn account_markets(e: &pe::Engine, ai: u32) -> BTreeSet<u32> {
     mids
 }
 
-/// REPLICA of engine `account_req(ai, None)`: (IR, MR) over all markets at the mark, notional units.
+/// (IR, MR) of the account over all markets at the mark, notional units: the ENGINE's own `account_req`.
 pub fn account_req(e: &pe::Engine, ai: u32) -> (i128, i128) {
+    e.account_req(ai, None)
+}
+
+/// REPLICA of engine `account_req(ai, None)` (test oracle for `market_req_at`, which the liquidation estimate
+/// uses at hypothetical prices).
+pub fn account_req_replica(e: &pe::Engine, ai: u32) -> (i128, i128) {
     let a = &e.accounts[ai as usize];
     let (mut ir, mut mr) = (0, 0);
     for mid in account_markets(e, ai) {
@@ -286,7 +294,7 @@ pub fn positions_json(e: &pe::Engine, ai: u32, extras: &dyn Fn(u32) -> PositionE
         let abs = pos.size.unsigned_abs() as i128;
         let entry = (pos.open_notional.abs() / abs.max(1)).min(u64::MAX as i128) as u64; // truncated to 1e-8
         let upnl = (pos.size as i128) * (m.mark as i128) - pos.open_notional;
-        let (ir, mr) = market_req_at(e, ai, *mid, pos.size, m.mark);
+        let (ir, mr) = e.market_req(ai, *mid, pos.size, None);
         let x = extras(*mid);
         out.push(serde_json::json!({
             "symbol": m.p.symbol, "size": exact8_signed(pos.size), "entryPrice": exact8(entry), "markPrice": exact8(m.mark),

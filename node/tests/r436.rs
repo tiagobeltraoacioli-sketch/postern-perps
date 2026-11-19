@@ -19,13 +19,125 @@ fn poison(g: &perps_node::genesis::Genesis, k: &k256::ecdsa::SigningKey, nonce: 
     )
 }
 
+/// An engine whose decoder refuses a WHOLE block for one input, as engine 0.1.6 did for an agent name above 32
+/// bytes (R436-4). Since engine 0.2.3 the real decoder has no such per-input rule (the action reaches
+/// `apply_action` and is MALFORMED there: test `r436_4_with_the_fixed_engine_...` below), so the node's two lines
+/// of defence are tested against this stand-in: the real engine underneath, plus the old refusal.
+struct Refusing(Box<dyn perps_node::engine::Engine>, std::sync::Arc<perps_node::genesis::Genesis>);
+
+impl Refusing {
+    fn refuses(&self, i: &perps_node::types::Input) -> bool {
+        let perps_node::types::Input::Action(a) = i else { return false };
+        if self.1.types.name(a.type_index) != Some("ApproveAgent") {
+            return false;
+        }
+        matches!(perps_node::actions::field(&self.1, "ApproveAgent", &a.message, "name"), Some(perps_node::eip712::Val::Str(s)) if s.len() > 32)
+    }
+}
+
+impl perps_node::engine::Engine for Refusing {
+    fn apply_block(&mut self, height: u64, time: u64, inputs: &[perps_node::types::Input]) -> Result<perps_node::engine::BlockOutcome, String> {
+        if inputs.iter().any(|i| self.refuses(i)) {
+            return Err("engine decoder refused the node's encoding: agent name > 32 bytes".into());
+        }
+        self.0.apply_block(height, time, inputs)
+    }
+    fn precheck_input(&self, input: &perps_node::types::Input) -> Result<(), String> {
+        if self.refuses(input) {
+            return Err("agent name > 32 bytes".into());
+        }
+        self.0.precheck_input(input)
+    }
+    fn clone_box(&self) -> Box<dyn perps_node::engine::Engine> {
+        Box::new(Refusing(self.0.clone_box(), self.1.clone()))
+    }
+    fn state_root(&self) -> perps_node::util::H256 {
+        self.0.state_root()
+    }
+    fn height(&self) -> u64 {
+        self.0.height()
+    }
+    fn time(&self) -> u64 {
+        self.0.time()
+    }
+    fn snapshot(&self) -> Vec<u8> {
+        self.0.snapshot()
+    }
+    fn restore(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.0.restore(bytes)
+    }
+    fn next_deposit_index(&self) -> u64 {
+        self.0.next_deposit_index()
+    }
+    fn next_forced_index(&self) -> u64 {
+        self.0.next_forced_index()
+    }
+    fn forced_processed(&self) -> u64 {
+        self.0.forced_processed()
+    }
+    fn last_oracle_round(&self) -> u64 {
+        self.0.last_oracle_round()
+    }
+    fn authority(&self, account: &perps_node::util::Address, signer: &perps_node::util::Address, primary: &str, time: u64) -> Result<(), perps_node::engine::AuthorityError> {
+        self.0.authority(account, signer, primary, time)
+    }
+    fn highest_nonce(&self, signer: &perps_node::util::Address) -> Option<u64> {
+        self.0.highest_nonce(signer)
+    }
+    fn genesis_log_hash(&self) -> perps_node::util::H256 {
+        self.0.genesis_log_hash()
+    }
+    fn withdrawal_count(&self) -> u64 {
+        self.0.withdrawal_count()
+    }
+    fn withdrawal(&self, id: u64) -> Option<perps_node::engine::WithdrawalRecord> {
+        self.0.withdrawal(id)
+    }
+    fn state_parts(&self) -> perps_node::engine::StateParts {
+        self.0.state_parts()
+    }
+    fn withdrawal_proof(&self, id: u64, count: u64) -> Option<Vec<perps_node::util::H256>> {
+        self.0.withdrawal_proof(id, count)
+    }
+    fn nonce_ok(&self, signer: &perps_node::util::Address, nonce: u64, time: u64) -> Result<(), &'static str> {
+        self.0.nonce_ok(signer, nonce, time)
+    }
+    fn account_json(&self, a: &perps_node::util::Address) -> serde_json::Value {
+        self.0.account_json(a)
+    }
+    fn orders_json(&self, a: &perps_node::util::Address) -> serde_json::Value {
+        self.0.orders_json(a)
+    }
+    fn agents_json(&self, a: &perps_node::util::Address) -> serde_json::Value {
+        self.0.agents_json(a)
+    }
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn real(&self) -> Option<&postern_perps_engine::Engine> {
+        self.0.real()
+    }
+    fn block_limits(&self) -> (usize, usize) {
+        self.0.block_limits()
+    }
+}
+
+/// The network of `net_real`, every engine wrapped in `Refusing`.
+fn net_refusing(name: &str, ci: u64) -> Net {
+    let (g, keys, checked) = perps_node::dev::dev_genesis_real(&format!("test-{name}"), 7, 5, ci, 0);
+    net_with(name, g, keys, &move |g| Box::new(Refusing(Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked.clone()).unwrap()), g.clone())))
+}
+
 /// R436-4 (High): one signed `ApproveAgent` with a 33-byte name was admitted, drained into a block the engine's
 /// decoder refuses as a whole, and the sequencer halted for good (and again after every restart). Property:
-/// admission runs the ENGINE's own decoder on every action, so such an action never enters the mempool, the
-/// honest actions around it are included, and the sequencer keeps producing.
+/// admission asks the ENGINE (its decoder) about every action, so an action the engine would refuse a block for
+/// never enters the mempool, the honest actions around it are included, and the sequencer keeps producing.
+/// RESTATED after the engine's own fix (0.2.3) removed the refusal from the real decoder: the same assertions now
+/// run against `Refusing` (the real engine with 0.1.6's refusal), because the real engine no longer offers a
+/// refusable action; what the real engine does with the action is the third test below.
 #[test]
 fn r436_4_an_action_the_engine_decoder_refuses_is_refused_at_admission() {
-    let mut n = net_real("r436-4", 10);
+    let mut n = net_refusing("r436-4", 10);
     let g = n.g.clone();
     let (k, honest) = (user(7), user(8));
     let ha = key_address(&honest);
@@ -55,11 +167,12 @@ fn r436_4_an_action_the_engine_decoder_refuses_is_refused_at_admission() {
 
 /// R436-4, second line of defence: if an input the engine's decoder refuses reaches the mempool anyway (a future
 /// admission gap), `produce` drops THAT action (acknowledged as rejected, with the reason), includes the rest and
-/// does not halt. A sequencer that halted on its own block here lost every action drained with it.
+/// does not halt. A sequencer that halted on its own block here lost every action drained with it. (Restated on
+/// `Refusing` for the same reason as the test above.)
 #[cfg(feature = "dev-oracle")]
 #[test]
 fn r436_4_produce_drops_an_input_the_engine_refuses_instead_of_halting() {
-    let mut n = net_real("r436-4b", 10);
+    let mut n = net_refusing("r436-4b", 10);
     let g = n.g.clone();
     let (k, honest) = (user(7), user(8));
     let ha = key_address(&honest);
@@ -82,6 +195,30 @@ fn r436_4_produce_drops_an_input_the_engine_refuses_instead_of_halting() {
     assert!(b.result.as_ref().unwrap()["error"].as_str().unwrap().starts_with("MALFORMED"), "{:?}", b.result);
     assert_eq!(n.seq.engine.withdrawal_count(), 2);
     assert_eq!(n.seq.mempool_len(), 0);
+}
+
+/// R436-4 end to end with the engine's own fix (0.2.3: no per-input rule in the block decoder): the 33-byte agent
+/// name is admitted, included, and refused by the engine for THAT action only (MALFORMED); the honest action in
+/// the same block is applied, every validator signs, nothing halts.
+#[test]
+fn r436_4_with_the_fixed_engine_the_action_is_malformed_alone() {
+    let mut n = net_real("r436-4c", 10);
+    let g = n.g.clone();
+    let (k, honest) = (user(7), user(8));
+    let (ka, ha) = (key_address(&k), key_address(&honest));
+    n.deposit_everywhere(deposit(0, ha, 1_000_000_000));
+    n.deposit_everywhere(deposit(1, ka, 1_000_000_000));
+    n.step();
+    let t = now();
+    let good = n.seq.admit_signed(withdraw(&g, &honest, ha, t + 1, 2_000_000, ha), t).unwrap();
+    let bad = n.seq.admit(&request(&g, &poison(&g, &k, t + 2)), t).expect("the real engine's decoder takes it");
+    let rs = n.step();
+    assert!(n.seq.halted.is_none());
+    assert!(rs.iter().all(|r| matches!(r, VResult::Applied { checkpoint: Some(_) })), "{rs:?}");
+    assert_eq!(n.seq.acks[&good.action_hash].result.as_ref().unwrap()["ok"], true);
+    let b = n.seq.acks[&bad.action_hash].result.clone().unwrap();
+    assert_eq!((b["ok"].as_bool(), b["error"].as_str()), (Some(false), Some("MALFORMED")), "{b}");
+    assert!(n.seq.agents_view(&ka)["agents"].as_array().unwrap().is_empty(), "no agent was approved");
 }
 
 /// R436-3 (Medium): `produce` took EVERY pending finalized deposit and forced request with no cap; above the
