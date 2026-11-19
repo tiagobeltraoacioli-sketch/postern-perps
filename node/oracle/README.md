@@ -1,6 +1,10 @@
 # PosternDEX Perpetuals: price oracle (`node/oracle/`)
 
-UNAUDITED PROTOTYPE. Owned by agent 394. Nothing here is deployed. Version 0.2 (2026-11-17): code in `core/` and `feeder/` implements every rule below.
+UNAUDITED PROTOTYPE. Nothing here is deployed. Version 0.3 (2026-11-18, agent 432, round 2; versions 0.1 and 0.2 by
+agent 394): code in `core/` and `feeder/` implements every rule below. Round 2 added: the engine price scale
+(R432-1), the node ingest (section 4a), the selection bound of R395-9 (section 5a), the drop rule for a failing
+venue and Kraken batching (section 7a), the deterministic replay source (section 7b), a one-hour live run and the
+calibration of the parameters on public minute candles (section 8a, `calibration/`).
 
 The oracle gives the engine one USD index price per market. It never trusts one venue and never trusts one
 signer: every index value is a median of medians (venues inside each validator's feeder, then validators inside the
@@ -9,7 +13,8 @@ engine), and every step has a stated bound, a halt condition and a test.
 Files: this document (design and normative rules), `SOURCES.md` (venues per market, endpoints, terms of use with the
 read date), `core/` (deterministic rules in Rust: the engine's acceptance rule and the feeder's aggregation rule),
 `feeder/` (venue adapters, fetch loop, signer, CLI), `fixtures/` (recorded venue responses and adversarial cases),
-`vectors/` (EIP-712 and encoding test vectors shared with the engine).
+`vectors/` (EIP-712 and encoding test vectors shared with the engine), `tapes/` (replay tapes), `calibration/`
+(scripts, results and evidence of the live run and of the parameter calibration).
 
 ## 1. Trust model
 
@@ -18,7 +23,7 @@ read date), `core/` (deterministic rules in Rust: the engine's acceptance rule a
 | One venue (lies, freezes, flash-crashes, goes down) | report any price for its own pair | move a validator's observation outside the range of the honest venues while honest venues are a strict majority of the valid readings | feeder rule F4 to F6 (median, outlier rejection, strict-majority rule), frozen and staleness checks |
 | A majority of the venues of one market (coordinated manipulation) | move every honest validator's observation | move the index by more than `jumpBps` per round without `confirmRounds` stable rounds | committee rule C5 (jump halt and confirmation) |
 | One oracle signer (validator's feeder key) | sign any price | move the committee median outside the honest range while at most `(q-1)/2` signers lie | committee rule C3 (median of at least `q` signed observations) and C4 (agreement band) |
-| The sequencer | choose which valid observations of a round to include (at least `q`), delay or withhold updates | forge or alter an observation (signed), replay an old round (C1), move the median outside the range of the honest observations it includes | C1 to C4; withholding only halts the market (fail closed, `STALE`) |
+| The sequencer | choose which valid observations of a round to include (at least `q`), delay or withhold updates | forge or alter an observation (signed), replay an old round (C1), move the median outside the range of the honest observations it includes, or (alone) outside the order statistics of section 5a | C1 to C4, section 5a (R395-9: the exact reach of the choice, measured size, what detects it); withholding only halts the market (fail closed, `STALE`) |
 
 Liveness needs `q` honest, online signers whose feeders reach at least `minSources` venues, and an honest sequencer.
 Safety (the index is inside the honest range) needs at most `(q-1)/2` lying signers among the included observations
@@ -56,7 +61,7 @@ OracleObservation(uint64 round,uint64 timeMs,OraclePrice[] prices)OraclePrice(ui
 | `round` | the round of `timeMs`: `timeMs / 3000` (integer division) |
 | `timeMs` | the signer's sampling time, inside the round |
 | `prices` | one entry per market observed this round, `marketId` strictly ascending, 1 to 256 entries; a market the signer cannot price is absent (it abstains) |
-| `price` | USD per one whole base unit, as an integer in the market's price scale (the scale of `PlaceOrder.price` in `docs/SPEC.md`), rounded half up from the exact value; never 0 |
+| `price` | USD per one whole base unit, as an integer at the ENGINE's price scale, `PRICE_SCALE = 10^8` for every market (`docs/SPEC.md` section 1: 1 unit = 1e-8 USD), rounded half up from the exact value; never 0. NOT on the market's tick and NOT at its display `priceDecimals` (R432-1: the round-1 feeder used the display decimals, which the engine would have read 10^5 to 10^7 times too small; fixed with a failing-first test, `feeder/tests/r2.rs`) |
 | `sources` | number of venues that survived the feeder's rule F5 (informational, and checked: the engine ignores an entry below the market's `minSources`) |
 
 Signature: 65 bytes `r || s || v`, `s <= n/2` (low-s), `v` in `{27, 28}`, over
@@ -74,7 +79,7 @@ to the sequencer):
 
 ```json
 {"round":598295763,"observations":[{"signer":0,"timeMs":1794887290471,
-  "prices":[{"marketId":1,"price":"649924","sources":7}],"signature":"0x…(65 bytes)"}]}
+  "prices":[{"marketId":1,"price":"6499240000000","sources":7}],"signature":"0x…(65 bytes)"}]}
 ```
 
 Canonical bytes (proposal for `inputsEncoded`; `docs/SPEC.md` decides the envelope and the input tag):
@@ -87,6 +92,28 @@ OraclePrice       = marketId:u32be  price:u64be  sources:u8
 
 No trailing bytes; `count`, `priceCount` and every ordering rule below are part of the canonical form.
 
+## 4a. Ingest: from the feeders to the sequencer (agreed with 431, cross-area log 2026-11-18)
+
+The node (431, `docs/API.md`) takes signed observations on an operator channel, not behind the geoblock and not
+public:
+
+- `POST /v1/oracle/observations`, body `{"round":R,"observation":{"signer","timeMs","prices","signature"}}`: ONE
+  signer's observation. This is the production shape: each validator's feeder posts its own.
+- `POST /v1/oracle/updates`, body = the whole `OracleUpdate` JSON of section 4. For a process that holds a whole
+  DEV committee (the replay source of section 7b, `run --key-dir`); never a production shape.
+- `Authorization: Bearer <token>`, the token read by both sides from a file (never an argument, never logged).
+- JSON forms sent by this feeder: `round`, `signer`, `timeMs`, `marketId`, `sources` as JSON numbers; `price` as
+  the canonical decimal string of the 1e-8 USD integer; `signature` as `0x` + 130 lowercase hex characters.
+- The node only relays: it pre-filters (round of `timeMs`, signer index, signature recovers to the genesis oracle
+  committee member under the engine domain), keeps one observation per `(round, signer)` (first wins, a different
+  second one is refused and logged) and builds the block input from EVERY observation it holds for the round,
+  signer ascending (never a subset: section 5a). The engine decides C1 to C5.
+
+The feeder's client (`feeder/src/submit.rs`) speaks plain HTTP/1.1 to a LOOPBACK address only (`http://127.x.y.z`,
+`http://[::1]`, `http://localhost`; anything else is refused before a byte is sent), never retries (the next round is
+the retry: an observation is useless once its round has passed), and reads the token from a 0600 file. A feeder on
+another host than its sequencer needs an authenticated and encrypted channel: not built (section 9).
+
 ## 5. The engine's acceptance rule (normative; deterministic integer arithmetic)
 
 Parameters per engine: oracle committee `signers[0..n)` (set once), quorum `q`; per market: `minSources`,
@@ -98,20 +125,33 @@ distinct and non-zero, markets strictly ascending (1 to 256), `minSources >= 1`,
 
 Validity of the whole input (any failure: the input is rejected with the named error and NO state changes). Error
 order, normative so every implementation reports the same error: C1; then C2 over the whole input; then for each
-observation in input order C2c before C2b; the first failing check is reported:
+observation in input order C2c, then C2b, then the C2d mark; then the C2d count; the first failing check is reported:
 
 - C1 `ORACLE_ROUND_NOT_NEW`: `round > lastOracleRound`.
 - C2 `ORACLE_MALFORMED`: `q <= count <= n`; `signer` strictly ascending and `< n`; every `prices` list strictly
   ascending by `marketId`, 1 to 256 entries, every `price > 0`.
+- C2c `ORACLE_TIME`: every `timeMs` is inside the round (`timeMs / 3000 = round`). A fact of the observation alone.
 - C2b `ORACLE_BAD_SIGNATURE`: every signature is 65 bytes, low-s, `v` in `{27, 28}`, and recovers to
   `signers[signer]`.
-- C2c `ORACLE_TIME`: every `timeMs` is inside the round, `timeMs <= T + maxFutureMs` and `T - timeMs <= maxAgeMs`.
+- C2d (round 2, R436-12): an observation with `timeMs > T + maxFutureMs` or `T - timeMs > maxAgeMs` is IGNORED for
+  this input: it is not a refusal, its prices enter no market's `V`, and the report lists its signer. If fewer than
+  `q` observations remain, the whole input is refused with `ORACLE_TIME` (reporting the first ignored observation)
+  and NO state changes: the round is not consumed and may be presented again at a later block time. Version 0.2
+  refused the whole input for one observation outside these two bounds; with a sequencer that includes every
+  observation it holds (section 5a) one signer with a clock a second fast, or a hostile one, vetoed every round
+  and every market went STALE. Only these two bounds depend on the block time, which no signer controls; every
+  other defect stays a whole-input refusal, so a block can never carry an unsigned or misplaced observation.
+  Tests `core/tests/committee.rs::r436_12_*`; the round-1 tests of the two bounds (all observations outside them)
+  hold unchanged.
 
 Then `lastOracleRound = round`, and for each market `m` the engine knows (entries for unknown markets are ignored),
 in ascending `marketId` order:
 
 - A round rejected by C3 or C4 for a market still consumes the round number (C1 is about the input).
-- C3 values `V` = the `price` of `m` in each observation whose entry has `sources >= minSources(m)`. If `|V| < q`:
+- C3 values `V` = the `price` of `m` in each observation NOT ignored by C2d whose entry has `sources >= minSources(m)`
+  and `price <= MAX_PRICE = 10^15` (10,000,000 USD at 1e-8; `docs/SPEC.md` S-5.1.1, 430's R430-2, adopted here in
+  round 2 so that this document and the engine are one rule: a larger value is not a price and its entry does not
+  count; the update itself stays valid). If `|V| < q`:
   no change for `m` (`NO_QUORUM`). Else `M = sort(V)[|V| / 2]` (the median; the upper median when `|V|` is even).
 - C4 `A` = the number of `v` in `V` with `|v - M| * 10000 <= agreeBps * M` (u128). If `A < q`: no change for `m`
   (`DISAGREE`). Else `M` is the committee price of `m` for round `round`, at time `tau = round * 3000`.
@@ -120,6 +160,68 @@ in ascending `marketId` order:
 Why the median is safe: with `|V| >= q = 2f + 1` and at most `f` lying values, `sort(V)[|V|/2]` has at least `f`
 values on each side, so it lies between two honest values. C4 refuses a round in which honest signers disagree
 (a sign that venues diverge or that sampling times are too far apart).
+
+## 5a. What the sequencer's choice of observations can do (R395-9)
+
+The engine sees only the observations the sequencer included; with `n = 7`, `q = 5` the sequencer may leave out up
+to two valid ones and nobody can tell from the block.
+
+**Bound (exact, tested).** Let `x[0] <= ... <= x[n-1]` be ALL valid values of one market in one round (every signer
+honest). Every subset of at least `q` of them has its C3 median between `x[q/2]` and `x[n-q+q/2]`, and both ends are
+reached (drop the `n-q` highest, or the `n-q` lowest). Default committee: between the THIRD and the FIFTH lowest of
+the seven; a sequencer that includes everything gets the fourth. So the choice moves the index by at most one order
+statistic of the honest observations either way, per round, and it can lean the same way every round.
+`core/src/selection.rs::selection_range` is this bound; the test `selection_range_is_exact` checks it against every
+subset for every committee size up to 9 and every strict-majority quorum (more than 20,000 subsets, ties included).
+With `f <= (q-1)/2` LYING signers colluding with the sequencer the reach is the whole range of the honest values it
+includes (section 5, "why the median is safe"): still never outside the honest range.
+
+**Size (measured, section 8a).** Honest feeders read the same venues in the same round, so their observations
+differ only by when inside the 3 s round each one sampled and by which venues answered. The move of one feeder's
+observation from one round to the next is an upper proxy for the spread between two feeders of the same round: in
+the live hour of 2026-11-18 it was at the median below 1 bps and at the 99th percentile below 10 bps for the three
+markets (exact figures in section 8a). The hard cap in a round that passes C4 is `agreeBps` (100 bps) from the
+included values. For comparison, the mark may already differ from the index by `markBandBps = 50` (SPEC S-5.3) and
+tier-0 maintenance is 250 bps or more: the bias cannot by itself liquidate an account that is not already within a
+few bps of maintenance, but it is a free, repeatable edge for whoever orders the liquidations. It is stated here
+and must be stated in SPEC section 12 (cross-area line to 430).
+
+**What is implemented against it.**
+
+1. The sequencer never selects: 431's ingest (section 4a) builds the update from every observation it holds. This
+   makes an honest sequencer unbiased; it does not bind a dishonest one.
+2. Detection: `core/src/selection.rs::omitted(update, round, held)` names the signers whose observation a
+   validator KNOWS the sequencer received in time (its own, with the sequencer's 200 answer) and that the block
+   left out. A validator that finds its own acknowledged observation missing has proof of selection.
+
+**Why the round digest over the full observation set (a second signature of the committee over the set the
+sequencer assembled) is NOT implemented.** A signer knows only its own observation. If each signer countersigns the
+set only when its own observation is in it, a sequencer that leaves out two signers still collects the five
+countersignatures of the signers it kept: the rule accepts exactly the subsets the present rule accepts. Any
+threshold on countersignatures that an honest round with two signers offline can meet, a selected round with two
+signers left out meets as well, because the engine cannot tell "offline" from "left out". A countersignature only
+adds a round trip. It would help only if signers refused to countersign a set that misses observations OF OTHERS
+that they have seen, which needs the observations to be broadcast among the committee (a network plane the node
+does not have); with it, the simpler rule 3 below does the same job without a new signed message.
+
+**What would close it (not built; for 431/430, each with its cost).**
+
+3. Validators refuse the checkpoint over a block whose oracle update leaves out an observation they hold
+   (`omitted` non-empty). With only their OWN observation known, leaving out two signers leaves exactly five
+   validators willing to sign: the checkpoint threshold (5 of 7) is still met, so this alone does not prevent
+   selection, it makes it attributable (the two omitted operators hold the sequencer's acknowledgements) and
+   removes every liveness margin of the sequencer that does it. With observations gossiped among validators every
+   honest validator refuses, and selection stops finality (prevention), at the price of a gossip plane and of one
+   lost observation costing a checkpoint when the gossip and the sequencer disagree by timing.
+4. A median that selection cannot push: accept as the committee price only the value closest to the previous index
+   inside the interval of medians that ANY completion of the missing `n - |V|` observations could give
+   (`[V[k-(n-|V|)], V[k]]`, `k = n/2`). Then leaving observations out can only make the index LAG (which the
+   sequencer can already do by withholding), never lead. Not adopted: it changes consensus rule C3 (430's engine
+   and the shared vectors), it makes two lying signers able to hold the index back by up to `agreeBps` whenever two
+   others are missing (today they can only move it inside the honest range), and a flat price with two signers
+   offline needs an extra freshness rule. The trade is not clearly safer; recorded for the next design round.
+5. Requiring more observations (`|V| >= 6`) narrows the reach to `[x[3], x[4]]` but halts the market when two
+   feeders are down: liveness for a bias of a few bps. Not proposed.
 
 ## 6. Halt and resume (per market, normative)
 
@@ -162,11 +264,23 @@ price. `exit_price(params, state, market, T)` (`core/src/committee.rs`) defines 
   of the canonical state bytes. `settle` = the latest committee price since the halt, else the last good index.
 - X3 `settleDue` when `age >= maxHaltMs`.
 
-Proposed use by the engine (388 decides and writes it into SPEC): a withdrawal of free collateral values every
-position in a halted market at the side of the band worse for its holder (long at `low`, short at `high`); a forced
-close of a position in a halted market settles at `settle` and is checked against the band (a forced close is
-never refused for a halt); after `settleDue` every position of the market is settled at `settle`, and a forced
-request that still cannot be served is not consumed (the vault's deadline then fires escape).
+Use by the engine (430 owns SPEC 14; restated in round 2 after R436-10, High, reviewer 436):
+
+- ONE account leaving during a halt is priced at the side of the band worse for it, whatever the path: a
+  withdrawal of free collateral values every position in a halted market at that side (long at `low`, short at
+  `high`), and a FORCED CLOSE of a position in a halted market executes at that side too
+  (`ExitPrice::close_price`); a forced close is never refused for a halt. Version 0.2 of this document said a
+  forced close "settles at `settle`": that was wrong. With nothing signed since the halt `settle` is the frozen
+  index, so whoever controls the halt (the sequencer, by withholding oracle inputs) could stop the oracle when the
+  market turned against its own position and leave at the pre-move price against the other side. Tests
+  `core/tests/exit.rs::r436_10_*`.
+- `settle` is for X3 ONLY: after `settleDue` every position of the market is settled at `settle`, all at once.
+  `settle_committee_time_ms` says whether `settle` is a price the committee signed since the halt (and when) or
+  only the pre-halt index. Proposed to 430 (cross-area 2026-11-18): X3 fires only when it is a committee price;
+  with none the market stays halted, single-account exits keep working at the band, and a sequencer that withholds
+  for good ends in the vault's escape. Otherwise withholding oracle inputs for `maxHaltMs` settles the whole
+  market at the pre-move index (the same option, for every position at once).
+- A forced request that still cannot be served is not consumed (the vault's deadline then fires escape).
 
 Why this is safe for the other users: the band covers the last good index and every price the committee has
 signed since, widened by at least one permitted step (`exitHaircutBps >= jumpBps`) and by a further amount per
@@ -175,8 +289,10 @@ the sequencer cannot narrow it (X2 only widens; withholding only ages the index,
 during a long halt honest users can withdraw less than their mark-to-market equity, and `settle` after a halt
 without any committee price is the pre-halt index (the only price the protocol stands behind).
 
-Defaults (section 8): `exitHaircutBps = jumpBps`, `exitHaircutPerMinBps = 100`, `exitMaxHaircutBps = 5000`,
-`maxHaltMs = 3600000` (one hour, well inside the vault's one-day forced-request delay).
+Defaults (section 8): `exitHaircutBps` BTC 500, ETH 700, SOL 1300 (never below `jumpBps`; calibrated in section
+8a so that the band is at least 1.3 times the largest recorded move at every horizon from 1 to 60 minutes),
+`exitHaircutPerMinBps = 100`, `exitMaxHaircutBps = 5000`, `maxHaltMs = 3600000` (one hour, well inside the vault's
+forced-request delay).
 - Stated limit: the halt machine bounds the size of one step (`jumpBps` per round from a fresh index), not the
   level. A coordinated manipulation of a majority of a market's venues that creeps in steps below `jumpBps`, or
   holds a new level for `confirmRounds` rounds, reaches the index. The defences against that are the choice of
@@ -204,6 +320,68 @@ Defaults (section 8): `exitHaircutBps = jumpBps`, `exitHaircutPerMinBps = 100`, 
 - F6 the observation price is `sort(survivors)[survivors / 2]`, rounded half up to the market's price scale;
   `sources = survivors`.
 
+## 7a. A venue that fails: the drop rule, and batching (`feeder/src/health.rs`, `venues.rs`)
+
+A venue that LIES is not dropped: its price stays in the round as an outlier (F4) where every report shows it.
+The drop rule is about a venue that does not answer, answers with an error, or answers something its adapter
+refuses; asking again every 3 s gains nothing and, when the venue is rate-limiting, makes it worse.
+
+- D1 a fetch unit (one URL: one pair of one venue, or one batched request) FAILS in a round when the request fails
+  (timeout after `fetchTimeoutMs`, TLS, any HTTP status other than 200) or every source reading that body is
+  refused by its adapter. It is REFUSED when the status is 429, 418 or 403.
+- D2 after `dropAfterFails = 5` consecutive failed rounds, or at once when refused, the unit is DROPPED: not
+  requested for `cooldownRounds = 20` (60 s), doubling at each new drop without a success in between, at most
+  `maxCooldownRounds = 1200` (1 h). After the cooldown one probe is sent; a failed probe drops again.
+- D3 one success resets the failure count and the cooldown.
+- A dropped unit's sources are `fetch-failed: dropped` readings for every round of the cooldown. `minSources` and
+  the strict-majority rule F5 do not change: dropping can make the feeder abstain, never lower its bar.
+
+Batching: the four Kraken pairs go in ONE request (`Ticker?pair=USDTUSD,XBTUSD,ETHUSD,SOLUSD`): 22 requests per
+round instead of 25, one of them to Kraken. Each Kraken source reads its own pair out of the shared body; a body
+that misses the pair, carries a pair nobody asked for, or carries a pair under both of its names is refused whole.
+
+## 7b. The deterministic replay source (`feeder/src/tape.rs`, `replay.rs`; development and rehearsals only)
+
+`perps-oracle replay-feed` plays a TAPE into the node's ingest as rounds signed by a dev committee, with no network
+access beyond the node's loopback socket. Two kinds of tape, one format:
+
+- recorded venue data: `perps-oracle tape --recording <rounds dir | FILE.jsonl>` runs the recorded venue responses
+  through the real pipeline (adapters, F2 to F6, drop marks) and writes one row per round; `tapes/` holds the tape
+  of the live hour of 2026-11-18 (section 8a);
+- an authored script (a rehearsal's price path).
+
+Format: one JSON object per line (`feeder/src/tape.rs` is normative, unknown fields refused). Prices are USD decimal
+strings by market id, exact at 1e-8 USD (more fraction digits are refused, never rounded).
+
+| Row | Meaning |
+|---|---|
+| `{"p":{"1":"67250.5","2":"3480.12"}}` | one round; a market not named HOLDS its last price; `"absent":[3]` removes market 3 until a later row prices it; `"repeat":N` plays the row N rounds |
+| `{"ramp":{"1":"59180"},"rounds":N}` | N rounds in a straight line from the current price to the target: round k has `from + (to - from) * k / N`, the division truncated toward `from`; round N is exactly the target |
+| `{"silent":N}` | N rounds with no submission (markets go STALE after `maxStalenessMs`) |
+| on `p` and `ramp` rows | `"src":{"1":5}` (the signed `sources`, default 5), `"signers":[0,1,2,3,4]` (only these indices sign), `"override":{"6":{"1":"70000"}}` (signer 6 signs another price: a lying signer), `"note"` |
+
+What is deterministic: the sequence of prices, sources, signers and overrides (a pure function of the tape and the
+options; RFC 6979 signatures, so the same tape, keys and clock give the same bytes: tested). What is NOT: `round`
+and `timeMs` are the wall clock of the run, because the engine accepts an observation only inside its own round
+and near the block time (C2c). One tape step is played per 3 s round; `--speed K` plays every K-th step (the
+engine's round cannot be compressed); `--loop` plays forward then backward for ever (no jump where the tape wraps).
+A node that is down or refuses a round does not stop the feed (a sequencer restart in a rehearsal); the exit code is
+0 at the end of the tape and the last line on stderr counts `accepted`, `refused`, `unreachable`, `silent` rounds
+(`--strict`: exit 2 unless every round was accepted). A step whose round was lost (the process was stopped) is
+played in the next round; never two updates in one round. A feed never signs for the round it starts in (R432-2:
+an earlier instance may have signed for it, and a signer that signs two different observations for one round
+equivocates; found by the run against 431's node, which refused the second with `ORACLE_CONFLICT`); the live `run`
+waits for the next round start for the same reason.
+
+Keys: `perps-oracle committee-gen --n 7 --quorum 5 --out DIR` makes fresh random THROWAWAY keys at run time
+(`/dev/urandom`, files 0600 in a new 0700 directory, a public `committee.json`); nothing is committed. For a node
+started with its built-in dev genesis, `--node-dev-seed S` derives the node's own throwaway oracle keys (a public
+derivation, pinned against Foundry's `cast` in the tests).
+
+Ramps must stay under `jumpBps` per round or the market halts; that is also how a rehearsal makes a JUMP halt.
+`tapes/rehearsal-example.jsonl` (a 12% BTC drop in 40 rounds, an ETH gap, two lying signers, a quorum-only round,
+five silent rounds) is replayed through the engine rule round by round in `feeder/tests/r2.rs`.
+
 ## 8. Default parameters (proposal; 392 publishes the final values in `markets.json`)
 
 | Parameter | Default | Applies in |
@@ -221,12 +399,50 @@ Defaults (section 8): `exitHaircutBps = jumpBps`, `exitHaircutPerMinBps = 100`, 
 | `maxSnapshotAgeMs`, `maxTradeAgeMs`, `maxFutureSkewMs` | 5000, 300000, 2000 | feeder |
 | `frozenAfterMs`, `frozenMoveBps` | 60000, 20 | feeder |
 | `fetchTimeoutMs`, `maxClockSkewMs` | 1500, 1000 | feeder |
-| `exitHaircutBps`, `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs` | `jumpBps`, 100, 5000, 3600000 | engine, per market (section 6a) |
+| `dropAfterFails`, `cooldownRounds`, `maxCooldownRounds` | 5, 20, 1200 | feeder (section 7a) |
+| `exitHaircutBps` | BTC 500, ETH 700, SOL 1300 (round 2 proposal from the calibration, section 8a; round 1: `jumpBps`, i.e. 500, 500, 800, which is what the engine's converter still uses when the field is absent) | engine, per market (section 6a) |
+| `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs` | 100, 5000, 3600000 | engine, per market (section 6a) |
 | USDT/USD conversion: `minSources`, `maxDepegBps` | 3, 500 | feeder |
+
+## 8a. Calibration and the live hour (round 2; full tables, method and limits in `calibration/CALIBRATION.md`)
+
+Public minute candles of four venues over 34 days that include the worst days named in `docs/MARKETS.md`
+(2025-10-10, 2026-01-31, 2026-02-05, 2026-11-15), and one continuous hour of the live feeder against the seven
+venues (2026-11-18). No bound is loosened.
+
+| Parameter | Value | What the data shows | Result |
+|---|---|---|---|
+| `jumpBps` | 500 / 500 / 800 | a whole minute moved more than this in 0 / 1 / 4 of 48,960 minutes, all on 2025-10-10 | keep |
+| `agreeBps` | 100 | signers differ by sampling time inside a round; the 3 s move of an observation in the live hour stays far below it | keep |
+| `maxSourceDeviationBps` | 200 | never reached in 30 calm days; on the worst days the feeder would have abstained 1 / 1 / 36 minutes (fail closed) | keep |
+| `maxStalenessMs` | 10,000 | live hour: see CALIBRATION.md section 4 | keep |
+| `exitHaircutBps` | 500 / 500 / 800 | the band must contain the real move after m minutes of darkness: BTC yes (factor 1.9 or more), ETH barely (1.16 at 2 min), SOL NO (1,003 bps in 2 min against 1,000; 1,366 in 5 min against 1,300) | WIDEN to 500 / 700 / 1300 |
+| `exitHaircutPerMinBps`, `exitMaxHaircutBps` | 100, 5000 | the largest recorded move grows far slower than the band after 10 minutes; largest 60-minute move 1,692 bps | keep |
+| `maxHaltMs` | 3,600,000 | settling at the pre-halt index after an hour is wrong by up to 883 / 1,232 / 1,587 bps on the worst days | keep the hour; X3 only at a committee price (section 6a, proposal to 430) |
 
 ## 9. Not done / not proven
 
-See the report `~/Desktop/POSTERNDEX-PERPS-20261117/agents/394-oracle.md` for the current list. In short: not
-reviewed; parameters not calibrated on historical data; venue terms of use and most rate limits unconfirmed; the
-feeder's submission to the sequencer and the node's ingest are not wired (389); the engine does not call `core` yet
-(388); the price scale (10^priceDecimals per market vs a fixed 1e8) waits for SPEC.md.
+- No independent review yet of the round-2 work (436 has the commits). The round-1 feeder was not reviewed by 395.
+- R395-9 is stated and measured, not closed: the sequencer can still choose which valid observations a block
+  carries (section 5a). What would close it needs the node (validator refusal with an observation gossip plane) or
+  a consensus change (an omission-proof median); neither is built.
+- R436-10: the oracle side is restated and tested (section 6a); the ENGINE still serves a forced close in a halt at
+  `settle` until 430 changes SPEC 14 and the engine. X3 at the pre-halt index after `maxHaltMs` of withheld oracle
+  inputs remains possible until 430 adopts the committee-price condition.
+- The widened `exitHaircutBps` (ETH 700, SOL 1300) is a proposal: `compliance/markets.json` (435) and the engine's
+  converter default (430) still give `jumpBps`.
+- Calibration limits (CALIBRATION.md section 1): minute candles cannot resolve a 3 s round; four venues of seven;
+  34 chosen days; `jumpBps` and `agreeBps` are therefore confirmed as not too tight for genuine moves, NOT shown to
+  be as tight as they could be. No order-book depth study: the cost of moving a majority of venues was not
+  measured.
+- Live run: one hour, one host, one feeder process (a dev committee of seven keys in one process). The spread
+  BETWEEN independent feeders on different hosts was not measured; the round-to-round move of one feeder is used as
+  its upper proxy. Rate limits were not hit in the hour, which does not prove the limits (SOURCES.md).
+- The feeder reaches its sequencer over loopback plain HTTP only. A feeder on another host needs an authenticated
+  and encrypted channel (mutual TLS or a tunnel): not built. The observation's own signature authenticates the
+  CONTENT end to end either way.
+- `omitted` (section 5a) is a library function with a test; no validator calls it yet (431's decision).
+- Production keys: each validator operator generates its own oracle key on its own host. Everything here uses
+  throwaway keys (public-label derivations in tests, random run-time keys in rehearsals).
+- Venue terms of use: unconfirmed for every venue (SOURCES.md, for counsel).
+- OKX and Binance batching endpoints are not used (three requests each per round).

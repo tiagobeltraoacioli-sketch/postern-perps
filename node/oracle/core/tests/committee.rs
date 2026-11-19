@@ -502,6 +502,16 @@ fn c3_median_resists_two_liars_and_any_sequencer_subset() {
                     "mask {mask:#b} liars {liar_vals:?}: {price} outside [{lo}, {hi}]"
                 ),
                 MarketOutcome::Disagree { .. } => assert_eq!(st.safe_index(1), Some(648_700)),
+                // Restated in round 2 (rule C3 with SPEC S-5.1.1): a liar's value above MAX_PRICE no longer
+                // counts, so a subset left with fewer than q counted values is NO_QUORUM. Same property (the
+                // round changes nothing); accepted only for the liar patterns that are above the bound, so every
+                // other pattern keeps its round-1 strictness.
+                MarketOutcome::NoQuorum { .. }
+                    if liar_vals.0 > perps_oracle::MAX_PRICE
+                        || liar_vals.1 > perps_oracle::MAX_PRICE =>
+                {
+                    assert_eq!(st.safe_index(1), Some(648_700))
+                }
                 other => panic!("mask {mask:#b} liars {liar_vals:?}: unexpected {other:?}"),
             }
         }
@@ -811,4 +821,178 @@ fn parameter_validation() {
     p.markets.clear();
     assert_eq!(p.validate(), Err(ParamError::NoMarkets));
     assert!(OracleState::genesis(&p).is_err());
+}
+
+/// R436-12 (Medium, reviewer 436, round 2). Round 1 refused the WHOLE update when any one observation failed a
+/// time bound relative to the block time. With a sequencer that includes every observation it holds (R395-9), one
+/// signer of seven whose `timeMs` is late in the round (a clock one second fast, or on purpose) vetoed every round:
+/// no index, STALE after 10 s. Rule C2d: such an observation is IGNORED and the update is judged on the rest.
+#[test]
+fn r436_12_one_signer_with_a_late_time_does_not_veto_the_round() {
+    let (prm, mut st, r) = active_at(648_700);
+    // Six honest signers sample at the round's 100th ms; signer 6 signs the round's last millisecond and a far
+    // price. The block is built 400 ms into the round: signer 6 is 2,599 ms in the block's future (> 1000).
+    let mut u = honest(r, 648_900);
+    let mut late = obs(6, r, &[(1, 700_000, 5)]);
+    late.time_ms = r * ROUND_MS + ROUND_MS - 1;
+    let dom = eip712::domain_separator(&prm.verifying_contract);
+    late.signature = sig::sign(&key(6), &eip712::digest(&dom, &late.message(r)));
+    u.observations[6] = late;
+    let rep =
+        apply_update(&prm, &mut st, &u, t_of(r)).expect("the round is judged on the six others");
+    assert_eq!(rep.ignored, vec![6]);
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_900 });
+    assert_eq!(st.last_round, r);
+
+    // The same for an observation too OLD at the block time (the block is built late; one signer sampled early
+    // in the round, the others late): only the old one is ignored.
+    let (prm, mut st, r) = active_at(648_700);
+    let mut u = honest(r, 648_900);
+    let dom = eip712::domain_separator(&prm.verifying_contract);
+    for o in u.observations.iter_mut().skip(1) {
+        o.time_ms = r * ROUND_MS + 2_900;
+        o.signature = sig::sign(&key(o.signer), &eip712::digest(&dom, &o.message(r)));
+    }
+    let t = r * ROUND_MS + 100 + 6_001; // observation 0 (sampled at +100 ms) is 6,001 ms old
+    let rep = apply_update(&prm, &mut st, &u, t).unwrap();
+    assert_eq!(rep.ignored, vec![0]);
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_900 });
+}
+
+/// C2d keeps every refusal that protects a block from garbage: fewer than `q` observations inside the time
+/// bounds refuse the whole input WITHOUT consuming the round (it can come again at a later block time); an
+/// ignored observation still needs a valid signature and a time inside its round; its price enters no median.
+#[test]
+fn r436_12_ignored_is_not_accepted_and_too_few_in_time_still_refuses() {
+    let (prm, mut st, r) = active_at(648_700);
+    let dom = eip712::domain_separator(&prm.verifying_contract);
+    let at = |signer: u8, ms: u64, price: u64| {
+        let mut o = obs(signer, r, &[(1, price, 5)]);
+        o.time_ms = r * ROUND_MS + ms;
+        o.signature = sig::sign(&key(signer), &eip712::digest(&dom, &o.message(r)));
+        o
+    };
+    // Three of seven are late in the round: four in time < q = 5. Refused, nothing changes, round not consumed.
+    let mut u = honest(r, 648_900);
+    for s in 4..7u8 {
+        u.observations[usize::from(s)] = at(s, 2_999, 648_900);
+    }
+    assert_rejected_unchanged(
+        &prm,
+        &mut st,
+        &u,
+        t_of(r),
+        OracleError::Time { observation: 4 },
+    );
+    // 1,600 ms later the three are no longer in the block's future: the SAME update is accepted with all seven.
+    let rep = apply_update(&prm, &mut st.clone(), &u, t_of(r) + 1_600).unwrap();
+    assert!(rep.ignored.is_empty());
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_900 });
+
+    // Two ignored liars cannot push the median even together with one included liar: V has only in-time values.
+    let mut u = honest(r, 648_900);
+    u.observations[5] = at(5, 2_999, 900_000);
+    u.observations[6] = at(6, 2_999, 900_000);
+    u.observations[4] = at(4, 100, 900_000);
+    let rep = apply_update(&prm, &mut st.clone(), &u, t_of(r)).unwrap();
+    assert_eq!(rep.ignored, vec![5, 6]);
+    // Five in time, one of them lying: the median of {648900 x4, 900000} is honest; C4 then finds only four in
+    // agreement (< q) and the round does not move the index: fail closed.
+    assert_eq!(
+        rep.outcomes[0].1,
+        MarketOutcome::Disagree {
+            median: 648_900,
+            agree: 4
+        }
+    );
+
+    // An ignored observation with a bad signature refuses the whole input (order: round membership, signature,
+    // then C2d), so a block can never carry an unsigned observation behind a late time.
+    let mut u = honest(r, 648_900);
+    let mut bad = at(6, 2_999, 648_900);
+    bad.prices[0].price += 1;
+    u.observations[6] = bad;
+    assert_rejected_unchanged(
+        &prm,
+        &mut st,
+        &u,
+        t_of(r),
+        OracleError::BadSignature {
+            observation: 6,
+            reason: None,
+        },
+    );
+    // An observation outside its round refuses the whole input whatever the block time (a fact of the
+    // observation alone: an honest sequencer never includes it).
+    let mut u = honest(r, 648_900);
+    let mut out = obs(6, r, &[(1, 648_900, 5)]);
+    out.time_ms = (r + 1) * ROUND_MS;
+    out.signature = sig::sign(&key(6), &eip712::digest(&dom, &out.message(r)));
+    u.observations[6] = out;
+    assert_rejected_unchanged(
+        &prm,
+        &mut st,
+        &u,
+        t_of(r),
+        OracleError::Time { observation: 6 },
+    );
+}
+
+/// Round 2, 430's R430-2 (SPEC S-5.1.1), adopted in the normative rule so that this crate and the engine stay
+/// one rule: a committee value above the engine's `MAX_PRICE` (10^15 units = 10,000,000 USD) is not a price. The
+/// entry does not count for its market (as if its sources were too few); the update itself stays valid.
+#[test]
+fn c3_a_value_above_max_price_never_becomes_the_index() {
+    use perps_oracle::MAX_PRICE;
+    let prm = params();
+    // From genesis: a committee that agrees on MAX_PRICE + 1 confirms nothing; on MAX_PRICE it does.
+    let mut st = OracleState::genesis(&prm).unwrap();
+    for k in 0..4 {
+        let r = R0 + k;
+        begin_block(&prm, &mut st, t_of(r));
+        let rep = apply_update(&prm, &mut st, &honest(r, MAX_PRICE + 1), t_of(r)).unwrap();
+        assert_eq!(rep.outcomes[0].1, MarketOutcome::NoQuorum { have: 0 });
+    }
+    assert_eq!(st.market(1).unwrap().index, 0);
+    let mut st = OracleState::genesis(&prm).unwrap();
+    for k in 0..3 {
+        let r = R0 + k;
+        begin_block(&prm, &mut st, t_of(r));
+        apply_update(&prm, &mut st, &honest(r, MAX_PRICE), t_of(r)).unwrap();
+    }
+    assert_eq!(st.safe_index(1), Some(MAX_PRICE));
+    // Three of seven above the bound: four values left, below the quorum of five.
+    let (prm, mut st, r) = active_at(648_700);
+    let u = update(
+        r,
+        &[0, 1, 2, 3, 4, 5, 6],
+        &[
+            648_700,
+            648_700,
+            648_700,
+            648_700,
+            MAX_PRICE + 1,
+            u64::MAX,
+            MAX_PRICE + 1,
+        ],
+    );
+    let rep = apply_update(&prm, &mut st, &u, t_of(r)).unwrap();
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::NoQuorum { have: 4 });
+    assert_eq!(st.market(1).unwrap().index, 648_700);
+    // Two above the bound: five honest values carry the round.
+    let u = update(
+        r + 1,
+        &[0, 1, 2, 3, 4, 5, 6],
+        &[
+            648_800,
+            648_800,
+            648_800,
+            648_800,
+            648_800,
+            u64::MAX,
+            MAX_PRICE + 1,
+        ],
+    );
+    let rep = apply_update(&prm, &mut st, &u, t_of(r + 1)).unwrap();
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_800 });
 }

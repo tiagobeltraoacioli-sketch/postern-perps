@@ -1,0 +1,1329 @@
+{
+  "_note": "PosternDEX Perpetuals oracle, rule C2d (README section 5, R436-12). UNAUDITED PROTOTYPE. Each case: the update applied to the GENESIS oracle state of this committee at blockTime (H1 first). Throwaway keys.",
+  "cases": [
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa4220640001000000010000061dc93c72000573399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c06000001a1fa4220640001000000010000061dc93c720005583c6960111e039494c4557c54596475b7ab074d7872cfd05c1b3a039daf43f76fa6319609c4d7a8c4a70cffb78ecae0f2d7c1b4964e36ab03a44c14acaf9d2e1c",
+      "expect": {
+        "ignored": [],
+        "report": {
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "all-in-time",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x73399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c",
+            "signer": 5,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x583c6960111e039494c4557c54596475b7ab074d7872cfd05c1b3a039daf43f76fa6319609c4d7a8c4a70cffb78ecae0f2d7c1b4964e36ab03a44c14acaf9d2e1c",
+            "signer": 6,
+            "timeMs": 1795200000100
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa4220640001000000010000061dc93c72000573399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c06000001a1fa422bb70001000000010000082f79cd9000059203291be65d9753b58e0c8154a3351acbc9a005f619f450cc2041fa7c96ce653aae02d06e1fe50376da441ddccfa7f9d90ce9c4144fbdd77fad858d31601ff51c",
+      "expect": {
+        "ignored": [
+          6
+        ],
+        "report": {
+          "ignored": [
+            6
+          ],
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "one-in-the-future-ignored",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x73399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c",
+            "signer": 5,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "9000000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x9203291be65d9753b58e0c8154a3351acbc9a005f619f450cc2041fa7c96ce653aae02d06e1fe50376da441ddccfa7f9d90ce9c4144fbdd77fad858d31601ff51c",
+            "signer": 6,
+            "timeMs": 1795200002999
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa4220640001000000010000061dc93c72000573399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c06000001a1fa4225780001000000010000061dc93c72000558c5ec50c98c379ed17a9c8dcde8febfab4bb9fa51f7fa4cb68ae2528001bd7f2b246d2d97185a7b9504fe1d3a55de9c7c97e33b7a21c8dfae0d945117ef29ec1b",
+      "expect": {
+        "ignored": [],
+        "report": {
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "exactly-max-future-not-ignored",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x73399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c",
+            "signer": 5,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x58c5ec50c98c379ed17a9c8dcde8febfab4bb9fa51f7fa4cb68ae2528001bd7f2b246d2d97185a7b9504fe1d3a55de9c7c97e33b7a21c8dfae0d945117ef29ec1b",
+            "signer": 6,
+            "timeMs": 1795200001400
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa4220640001000000010000061dc93c72000573399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c06000001a1fa4225790001000000010000061dc93c7200058924119893746e068c6b7c251933a48e9ac7b20341f0d7783d9b35db5bae77d2151403602247ef9ef604d86ee9cc37f00a13ad0a4d93fc12aef12d07fd1a14f61c",
+      "expect": {
+        "ignored": [
+          6
+        ],
+        "report": {
+          "ignored": [
+            6
+          ],
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "one-ms-beyond-max-future-ignored",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x73399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c",
+            "signer": 5,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x8924119893746e068c6b7c251933a48e9ac7b20341f0d7783d9b35db5bae77d2151403602247ef9ef604d86ee9cc37f00a13ad0a4d93fc12aef12d07fd1a14f61c",
+            "signer": 6,
+            "timeMs": 1795200001401
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa422bb70001000000010000061dc93c720005d1ea809737617e5630bbe7721d44dfb45adf22a6c4023489a68256ab623c806d7ac4c6420811f0e58c1da54bea5a3aa07fac2edf1561b2b410593d237255993e1c06000001a1fa422bb70001000000010000061dc93c72000536c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+      "expect": {
+        "ignored": [
+          5,
+          6
+        ],
+        "report": {
+          "ignored": [
+            5,
+            6
+          ],
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "two-ignored-five-left",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xd1ea809737617e5630bbe7721d44dfb45adf22a6c4023489a68256ab623c806d7ac4c6420811f0e58c1da54bea5a3aa07fac2edf1561b2b410593d237255993e1c",
+            "signer": 5,
+            "timeMs": 1795200002999
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x36c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+            "signer": 6,
+            "timeMs": 1795200002999
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa422bb70001000000010000061dc93c720005e831bcc76e7e89fddc023c2603115c727927ff0d2281cc58bf1030d643fa24ce600c5d6ee1f863ab2f2dea85c7a6ee81b78a3800953bb241e9c19b9d85b8f1c91b05000001a1fa422bb70001000000010000061dc93c720005d1ea809737617e5630bbe7721d44dfb45adf22a6c4023489a68256ab623c806d7ac4c6420811f0e58c1da54bea5a3aa07fac2edf1561b2b410593d237255993e1c06000001a1fa422bb70001000000010000061dc93c72000536c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+      "expect": {
+        "error": "ORACLE_TIME",
+        "observation": 4
+      },
+      "name": "three-ignored-refused",
+      "stateBytesAfter": "0x00000000000000000003000000010000000000000000000000000000000001000000000000000000000000000000000000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xe831bcc76e7e89fddc023c2603115c727927ff0d2281cc58bf1030d643fa24ce600c5d6ee1f863ab2f2dea85c7a6ee81b78a3800953bb241e9c19b9d85b8f1c91b",
+            "signer": 4,
+            "timeMs": 1795200002999
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xd1ea809737617e5630bbe7721d44dfb45adf22a6c4023489a68256ab623c806d7ac4c6420811f0e58c1da54bea5a3aa07fac2edf1561b2b410593d237255993e1c",
+            "signer": 5,
+            "timeMs": 1795200002999
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x36c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+            "signer": 6,
+            "timeMs": 1795200002999
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200002000,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa422bb70001000000010000061dc93c720005e831bcc76e7e89fddc023c2603115c727927ff0d2281cc58bf1030d643fa24ce600c5d6ee1f863ab2f2dea85c7a6ee81b78a3800953bb241e9c19b9d85b8f1c91b05000001a1fa422bb70001000000010000061dc93c720005d1ea809737617e5630bbe7721d44dfb45adf22a6c4023489a68256ab623c806d7ac4c6420811f0e58c1da54bea5a3aa07fac2edf1561b2b410593d237255993e1c06000001a1fa422bb70001000000010000061dc93c72000536c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+      "expect": {
+        "ignored": [],
+        "report": {
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "the-same-update-later-accepted",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xe831bcc76e7e89fddc023c2603115c727927ff0d2281cc58bf1030d643fa24ce600c5d6ee1f863ab2f2dea85c7a6ee81b78a3800953bb241e9c19b9d85b8f1c91b",
+            "signer": 4,
+            "timeMs": 1795200002999
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xd1ea809737617e5630bbe7721d44dfb45adf22a6c4023489a68256ab623c806d7ac4c6420811f0e58c1da54bea5a3aa07fac2edf1561b2b410593d237255993e1c",
+            "signer": 5,
+            "timeMs": 1795200002999
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x36c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+            "signer": 6,
+            "timeMs": 1795200002999
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200006101,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa422b540001000000010000061dc93c720005a7d86a0628766dda95abfe4c15d10b9984393e81b74cc48827a7c2249b34ea8b3db62f7e0cf1d13bca59f12c2abf63e3195271c808a6591a689bc2c5b9aa6a921c02000001a1fa422b540001000000010000061dc93c72000576971b65a6de4ba73100ef3b316e8ff9c1164b0e4ecb1d12198c015b8cc19039607e4cfb87f5c408c1c248ebfe01068e0a28969c7a6d61c6ea050790f579c09e1b03000001a1fa422b540001000000010000061dc93c720005821d581ac23332e2c25186ca5105b9c835618f102b391478f34ef743aec7e6f86c1541ac7931d5f9c19b340df1bf900e5d0c820cf3de38a14007b9ffb95379941c04000001a1fa422b540001000000010000061dc93c720005ce437615eb81b5bd0985a7f88953cf9419d5a56afc95a89ce9619677e355665627d09b493d35e69bb66f5c4a31f06f32ed7f6ae0825d5d381078304dedfe84961b05000001a1fa422b540001000000010000061dc93c720005c154e08d607c75faa41cf68bb06113e2460dd214233117e9a246cc0cc43376a965792905da6bc1b3583e19b89213d46cae537b094519d60d780b87398609e3661b06000001a1fa422b540001000000010000061dc93c7200056e889a7ea974844b6c37f063072be9cc647bf36ba217bf093615a5decbaceb3e5a5b40db9e91a687a99113a4ecd24eba8a999c4bdeed7455c3e9580b47ff47961b",
+      "expect": {
+        "ignored": [
+          0
+        ],
+        "report": {
+          "ignored": [
+            0
+          ],
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "one-too-old-ignored",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xa7d86a0628766dda95abfe4c15d10b9984393e81b74cc48827a7c2249b34ea8b3db62f7e0cf1d13bca59f12c2abf63e3195271c808a6591a689bc2c5b9aa6a921c",
+            "signer": 1,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x76971b65a6de4ba73100ef3b316e8ff9c1164b0e4ecb1d12198c015b8cc19039607e4cfb87f5c408c1c248ebfe01068e0a28969c7a6d61c6ea050790f579c09e1b",
+            "signer": 2,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x821d581ac23332e2c25186ca5105b9c835618f102b391478f34ef743aec7e6f86c1541ac7931d5f9c19b340df1bf900e5d0c820cf3de38a14007b9ffb95379941c",
+            "signer": 3,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xce437615eb81b5bd0985a7f88953cf9419d5a56afc95a89ce9619677e355665627d09b493d35e69bb66f5c4a31f06f32ed7f6ae0825d5d381078304dedfe84961b",
+            "signer": 4,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xc154e08d607c75faa41cf68bb06113e2460dd214233117e9a246cc0cc43376a965792905da6bc1b3583e19b89213d46cae537b094519d60d780b87398609e3661b",
+            "signer": 5,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x6e889a7ea974844b6c37f063072be9cc647bf36ba217bf093615a5decbaceb3e5a5b40db9e91a687a99113a4ecd24eba8a999c4bdeed7455c3e9580b47ff47961b",
+            "signer": 6,
+            "timeMs": 1795200002900
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200006100,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa422b540001000000010000061dc93c720005a7d86a0628766dda95abfe4c15d10b9984393e81b74cc48827a7c2249b34ea8b3db62f7e0cf1d13bca59f12c2abf63e3195271c808a6591a689bc2c5b9aa6a921c02000001a1fa422b540001000000010000061dc93c72000576971b65a6de4ba73100ef3b316e8ff9c1164b0e4ecb1d12198c015b8cc19039607e4cfb87f5c408c1c248ebfe01068e0a28969c7a6d61c6ea050790f579c09e1b03000001a1fa422b540001000000010000061dc93c720005821d581ac23332e2c25186ca5105b9c835618f102b391478f34ef743aec7e6f86c1541ac7931d5f9c19b340df1bf900e5d0c820cf3de38a14007b9ffb95379941c04000001a1fa422b540001000000010000061dc93c720005ce437615eb81b5bd0985a7f88953cf9419d5a56afc95a89ce9619677e355665627d09b493d35e69bb66f5c4a31f06f32ed7f6ae0825d5d381078304dedfe84961b05000001a1fa422b540001000000010000061dc93c720005c154e08d607c75faa41cf68bb06113e2460dd214233117e9a246cc0cc43376a965792905da6bc1b3583e19b89213d46cae537b094519d60d780b87398609e3661b06000001a1fa422b540001000000010000061dc93c7200056e889a7ea974844b6c37f063072be9cc647bf36ba217bf093615a5decbaceb3e5a5b40db9e91a687a99113a4ecd24eba8a999c4bdeed7455c3e9580b47ff47961b",
+      "expect": {
+        "ignored": [],
+        "report": {
+          "markets": [
+            {
+              "count": 1,
+              "marketId": 1,
+              "outcome": "confirming",
+              "price": "6725000000000"
+            },
+            {
+              "have": 0,
+              "marketId": 2,
+              "outcome": "noQuorum"
+            },
+            {
+              "have": 0,
+              "marketId": 3,
+              "outcome": "noQuorum"
+            }
+          ],
+          "round": 598400000
+        }
+      },
+      "name": "exactly-max-age-not-ignored",
+      "stateBytesAfter": "0x0000000023aadc000003000000010000000000000000000000000000000001010000061dc93c720001000001a1fa4220000000061dc93c72000000061dc93c720000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xa7d86a0628766dda95abfe4c15d10b9984393e81b74cc48827a7c2249b34ea8b3db62f7e0cf1d13bca59f12c2abf63e3195271c808a6591a689bc2c5b9aa6a921c",
+            "signer": 1,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x76971b65a6de4ba73100ef3b316e8ff9c1164b0e4ecb1d12198c015b8cc19039607e4cfb87f5c408c1c248ebfe01068e0a28969c7a6d61c6ea050790f579c09e1b",
+            "signer": 2,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x821d581ac23332e2c25186ca5105b9c835618f102b391478f34ef743aec7e6f86c1541ac7931d5f9c19b340df1bf900e5d0c820cf3de38a14007b9ffb95379941c",
+            "signer": 3,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xce437615eb81b5bd0985a7f88953cf9419d5a56afc95a89ce9619677e355665627d09b493d35e69bb66f5c4a31f06f32ed7f6ae0825d5d381078304dedfe84961b",
+            "signer": 4,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xc154e08d607c75faa41cf68bb06113e2460dd214233117e9a246cc0cc43376a965792905da6bc1b3583e19b89213d46cae537b094519d60d780b87398609e3661b",
+            "signer": 5,
+            "timeMs": 1795200002900
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x6e889a7ea974844b6c37f063072be9cc647bf36ba217bf093615a5decbaceb3e5a5b40db9e91a687a99113a4ecd24eba8a999c4bdeed7455c3e9580b47ff47961b",
+            "signer": 6,
+            "timeMs": 1795200002900
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200006101,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa4220640001000000010000061dc93c72000573399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c06000001a1fa4220640001000000010000061dc93c720005583c6960111e039494c4557c54596475b7ab074d7872cfd05c1b3a039daf43f76fa6319609c4d7a8c4a70cffb78ecae0f2d7c1b4964e36ab03a44c14acaf9d2e1c",
+      "expect": {
+        "error": "ORACLE_TIME",
+        "observation": 0
+      },
+      "name": "all-too-old-refused",
+      "stateBytesAfter": "0x00000000000000000003000000010000000000000000000000000000000001000000000000000000000000000000000000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x73399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c",
+            "signer": 5,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x583c6960111e039494c4557c54596475b7ab074d7872cfd05c1b3a039daf43f76fa6319609c4d7a8c4a70cffb78ecae0f2d7c1b4964e36ab03a44c14acaf9d2e1c",
+            "signer": 6,
+            "timeMs": 1795200000100
+          }
+        ],
+        "round": 598400000
+      }
+    },
+    {
+      "blockTime": 1795200000400,
+      "canonicalBytes": "0x0000000023aadc000700000001a1fa4220640001000000010000061dc93c720005098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c01000001a1fa4220640001000000010000061dc93c72000550c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b02000001a1fa4220640001000000010000061dc93c7200052463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c03000001a1fa4220640001000000010000061dc93c72000566e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b04000001a1fa4220640001000000010000061dc93c720005b921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c05000001a1fa4220640001000000010000061dc93c72000573399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c06000001a1fa422bb70001000000010000061dc93c72010536c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+      "expect": {
+        "error": "ORACLE_BAD_SIGNATURE",
+        "observation": 6
+      },
+      "name": "ignored-with-bad-signature-refused",
+      "stateBytesAfter": "0x00000000000000000003000000010000000000000000000000000000000001000000000000000000000000000000000000000002000000000000000000000000000000000100000000000000000000000000000000000000000300000000000000000000000000000000010000000000000000000000000000000000",
+      "update": {
+        "observations": [
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x098bb2637f47306006032b5a76c9f1280abf50b7b9e597c5374220202d5bba0e1bbfe06c3781c131047550c3a45585d4243265b54be433ad5b28a4c55f05d0ce1c",
+            "signer": 0,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x50c8e34ba9ab4bca5becf956b454474ebd44494c5ccce97472706ede2a6f03d863c07283e90512ca23fefc4e657c0b05ed0eca0de56a8b25669579bbd53980191b",
+            "signer": 1,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x2463b4624961d9dda0219d2fa074d3f1bcba4ea7f6ef9032c46524a2868a10174abc4de911eb266c91f4bb1c3babe327610f9dfd482c63f6d4822a1cdc3e2ad21c",
+            "signer": 2,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x66e2b5f48a0ad4675306196e8c9c99332ad45b730266a4ec71f0c85e14fea7de1d31b2058656c74a5994bad70764e83848fcff90809057056816448e3dfe93351b",
+            "signer": 3,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0xb921e5c3992bae51f14d18695a2aba765aa0d8be5f0383b0eb5f50c8c43531593676bd1ebd6d7f5e5edd99a75bafe12712141b78e865a23b8382652baeaeb8211c",
+            "signer": 4,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000000",
+                "sources": 5
+              }
+            ],
+            "signature": "0x73399b7e9d71d1fc557585a7b1779373db5d0460c31a3991bbf025d2d46a5ef7536b8031edb77aec7fcac32b7bfae5f2c11568834bde3e548e5a28cb5f36f26b1c",
+            "signer": 5,
+            "timeMs": 1795200000100
+          },
+          {
+            "prices": [
+              {
+                "marketId": 1,
+                "price": "6725000000001",
+                "sources": 5
+              }
+            ],
+            "signature": "0x36c64d9534a91b9f364fc3784b4efae71d2d2c591e276b164b65d51de1b16989238c77bad5abcdaf354fec282804d636487242e0c7956de1adc261854e29f4711c",
+            "signer": 6,
+            "timeMs": 1795200002999
+          }
+        ],
+        "round": 598400000
+      }
+    }
+  ],
+  "committee": {
+    "markets": [
+      {
+        "agreeBps": 100,
+        "confirmRounds": 3,
+        "exitHaircutBps": 500,
+        "exitHaircutPerMinBps": 100,
+        "exitMaxHaircutBps": 5000,
+        "jumpBps": 500,
+        "marketId": 1,
+        "maxHaltMs": 3600000,
+        "maxStalenessMs": 10000,
+        "minSources": 3
+      },
+      {
+        "agreeBps": 100,
+        "confirmRounds": 3,
+        "exitHaircutBps": 500,
+        "exitHaircutPerMinBps": 100,
+        "exitMaxHaircutBps": 5000,
+        "jumpBps": 500,
+        "marketId": 2,
+        "maxHaltMs": 3600000,
+        "maxStalenessMs": 10000,
+        "minSources": 3
+      },
+      {
+        "agreeBps": 100,
+        "confirmRounds": 3,
+        "exitHaircutBps": 800,
+        "exitHaircutPerMinBps": 100,
+        "exitMaxHaircutBps": 5000,
+        "jumpBps": 800,
+        "marketId": 3,
+        "maxHaltMs": 3600000,
+        "maxStalenessMs": 10000,
+        "minSources": 3
+      }
+    ],
+    "maxAgeMs": 6000,
+    "maxFutureMs": 1000,
+    "quorum": 5,
+    "signers": [
+      "0x202d84093c3ecdc9fb6eb0d883b527a80911ab33",
+      "0x4e3808d1236144ee45cfdf2bb44264ab11f1f26d",
+      "0x5b7ceda707bf0f84d27a48c8bbc92be55c2a32b7",
+      "0x823c3b1a78096c6176f0f69055ffe23d737df4a6",
+      "0x9e4f03c0d17c41737d1c915d9ef2f6da64f67b2d",
+      "0xd6827a46577fbda1cf4b80a18cf81d550ecd4c64",
+      "0xfffefede2365e6bfe1e232a15fc96b4d0d05af0a"
+    ],
+    "verifyingContract": "0xdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdb"
+  }
+}

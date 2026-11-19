@@ -101,6 +101,48 @@ fn r432_1_feeder_prices_are_in_the_engine_price_scale() {
         .all(|m| m.price_decimals == 8));
 }
 
+/// R436-8 (Info, reviewer 436): "R432-1 would not have failed closed". Now it does, at the feeder: a market
+/// configured with another scale than the engine's (the round-1 display decimals) signs NOTHING, because the
+/// integer it would sign, read at 1e-8 USD, is not a plausible price; a venue set that agrees on a price a
+/// thousand times off (a unit change at the venues) is refused the same way.
+#[test]
+fn r432_1_a_wrong_scale_or_unit_abstains_instead_of_signing() {
+    let (t0, resp) = load_round_dir(&fixtures().join("rounds/round-598296643")).unwrap();
+    let mut c = default_config();
+    for (m, d) in c.markets.iter_mut().zip([1u8, 2, 3]) {
+        m.price_decimals = d;
+    }
+    let mut f = Feeder::new(c).unwrap();
+    let (obs, rep) = f.observe(round_of(t0), t0, &resp);
+    assert_eq!(obs, None, "nothing to sign");
+    for m in &rep.markets {
+        let e = m.result.as_ref().unwrap_err();
+        assert!(e.starts_with("implausible: "), "{}: {e}", m.symbol);
+    }
+    // The bounds are an order of magnitude or more away from the recorded prices on both sides.
+    let mut c = default_config();
+    c.markets[0].plausible_usd = Some((70_000, 5_000_000));
+    c.markets[2].plausible_usd = Some((1, 70));
+    let mut f = Feeder::new(c).unwrap();
+    let (obs, rep) = f.observe(round_of(t0), t0, &resp);
+    assert_eq!(
+        obs.unwrap()
+            .prices
+            .iter()
+            .map(|p| p.market_id)
+            .collect::<Vec<_>>(),
+        [2]
+    );
+    assert!(rep.markets[0].result.is_err() && rep.markets[2].result.is_err());
+    // A configuration without a usable range is refused at start.
+    let mut c = default_config();
+    c.markets[1].plausible_usd = Some((0, 10));
+    assert!(Feeder::new(c).is_err());
+    let mut c = default_config();
+    c.markets[1].plausible_usd = Some((10, 10));
+    assert!(Feeder::new(c).is_err());
+}
+
 /// The golden file of the six recorded rounds at the engine scale, and its relation to the round-1 golden file
 /// (display decimals, still checked by `pipeline::recorded_rounds_replay_to_the_golden_file`): the same median,
 /// so rounding the 1e-8 price half up to the display decimals gives the round-1 number.
@@ -891,4 +933,240 @@ fn committed_tapes_do_what_their_notes_say() {
                 .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         }
     }
+}
+
+/// R432-2 (Low, found by the integration run against 431's node, 2026-11-18: 7 x `409 ORACLE_CONFLICT`). A feed
+/// that ends and another that starts inside the same 3 s round both signed for that round, with different
+/// prices: the same signer signing twice for one round is equivocation (the node kept the first and refused the
+/// second). A process cannot know what an earlier instance signed, so it never signs for the round it starts in.
+#[test]
+fn r432_2_a_restarted_feed_never_signs_the_round_it_started_in() {
+    let ks = keys(3);
+    let rounds_of = |tape: &str, start: u64| -> Vec<u64> {
+        let steps = tape::parse(tape).unwrap();
+        let mut log = Vec::new();
+        replay::run(
+            &steps,
+            &ks,
+            &VAULT,
+            None,
+            &opts(Mode::Updates),
+            &mut FakeClock(start),
+            &mut log,
+        )
+        .unwrap();
+        String::from_utf8(log)
+            .unwrap()
+            .lines()
+            .map(|l| {
+                serde_json::from_str::<Value>(l).unwrap()["round"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect()
+    };
+    let start = 1_800_000_000_000u64; // the first millisecond of a round
+    let first = rounds_of("{\"p\":{\"1\":\"100\"},\"repeat\":2}", start);
+    // The first instance signed its last round at +150 ms and exited; the second starts 300 ms into that round.
+    let restart = first[1] * ROUND_MS + 300;
+    let second = rounds_of("{\"p\":{\"1\":\"101\"},\"repeat\":2}", restart);
+    assert!(
+        second[0] > first[1],
+        "round {} signed by both instances",
+        first[1]
+    );
+    assert_eq!(second, [first[1] + 1, first[1] + 2]);
+    // Whenever it starts inside a round, the first signed round is the one after the round of its first clock
+    // reading (the scripted clock advances 1 ms per reading).
+    for offset in [0, 1, 149, 150, 1499, 1500, 2998, 2999] {
+        let r = rounds_of("{\"p\":{\"1\":\"100\"}}", start + offset);
+        assert_eq!(r, [round_of(start + offset + 1) + 1], "offset {offset}");
+    }
+}
+
+/// Shared vectors of rule C2d (R436-12) for the engine's own implementation (430): `vectors/c2d.json`. Each case is
+/// one update applied to the GENESIS oracle state of the file's committee at `blockTime`; the expected result is
+/// the error (code and observation index) or the ignored signers, the per-market outcomes and the state bytes.
+/// Throwaway keys from public labels; the file carries the signatures, no key.
+/// Regenerate on purpose only: `ORACLE_WRITE_VECTORS=1 cargo test --test r2`.
+#[test]
+fn c2d_shared_vectors() {
+    let mut ks: Vec<_> = (0..7)
+        .map(|i| dev_key(&format!("c2d-vector-{i}")))
+        .collect();
+    ks.sort_by_key(|k| sig::address_of(k.verifying_key()));
+    let prm = committee(&ks, 5);
+    let dom = eip712::domain_separator(&VAULT);
+    let round = 598_400_000u64;
+    let start = round * ROUND_MS;
+    let mk = |times: [u64; 7], prices: [u64; 7]| -> perps_oracle::types::OracleUpdate {
+        perps_oracle::types::OracleUpdate {
+            round,
+            observations: (0..7usize)
+                .map(|i| {
+                    let o = perps_oracle::types::Observation {
+                        round,
+                        time_ms: start + times[i],
+                        prices: vec![perps_oracle::types::OraclePrice {
+                            market_id: 1,
+                            price: prices[i],
+                            sources: 5,
+                        }],
+                    };
+                    perps_oracle::types::SignedObservation {
+                        signer: i as u8,
+                        time_ms: o.time_ms,
+                        signature: sig::sign(&ks[i], &eip712::digest(&dom, &o)),
+                        prices: o.prices,
+                    }
+                })
+                .collect(),
+        }
+    };
+    let p = 6_725_000_000_000u64;
+    let mut bad_sig = mk([100, 100, 100, 100, 100, 100, 2_999], [p; 7]);
+    bad_sig.observations[6].prices[0].price += 1;
+    let cases: Vec<(&str, perps_oracle::types::OracleUpdate, u64)> = vec![
+        ("all-in-time", mk([100; 7], [p; 7]), start + 400),
+        (
+            "one-in-the-future-ignored",
+            mk(
+                [100, 100, 100, 100, 100, 100, 2_999],
+                [p, p, p, p, p, p, 9_000_000_000_000],
+            ),
+            start + 400,
+        ),
+        (
+            "exactly-max-future-not-ignored",
+            mk([100, 100, 100, 100, 100, 100, 1_400], [p; 7]),
+            start + 400,
+        ),
+        (
+            "one-ms-beyond-max-future-ignored",
+            mk([100, 100, 100, 100, 100, 100, 1_401], [p; 7]),
+            start + 400,
+        ),
+        (
+            "two-ignored-five-left",
+            mk([100, 100, 100, 100, 100, 2_999, 2_999], [p; 7]),
+            start + 400,
+        ),
+        (
+            "three-ignored-refused",
+            mk([100, 100, 100, 100, 2_999, 2_999, 2_999], [p; 7]),
+            start + 400,
+        ),
+        (
+            "the-same-update-later-accepted",
+            mk([100, 100, 100, 100, 2_999, 2_999, 2_999], [p; 7]),
+            start + 2_000,
+        ),
+        (
+            "one-too-old-ignored",
+            mk([100, 2_900, 2_900, 2_900, 2_900, 2_900, 2_900], [p; 7]),
+            start + 6_101,
+        ),
+        (
+            "exactly-max-age-not-ignored",
+            mk([100, 2_900, 2_900, 2_900, 2_900, 2_900, 2_900], [p; 7]),
+            start + 6_100,
+        ),
+        ("all-too-old-refused", mk([100; 7], [p; 7]), start + 6_101),
+        ("ignored-with-bad-signature-refused", bad_sig, start + 400),
+    ];
+    let mut out = Vec::new();
+    for (name, u, t) in &cases {
+        let mut st = OracleState::genesis(&prm).unwrap();
+        begin_block(&prm, &mut st, *t);
+        let expect = match apply_update(&prm, &mut st, u, *t) {
+            Ok(r) => serde_json::json!({"ignored": r.ignored, "report": json::report_to_json(&r)}),
+            Err(e) => {
+                let observation = match e {
+                    OracleError::Time { observation }
+                    | OracleError::BadSignature { observation, .. } => Some(observation),
+                    _ => None,
+                };
+                serde_json::json!({"error": e.code(), "observation": observation})
+            }
+        };
+        out.push(serde_json::json!({
+            "name": name, "blockTime": t, "update": json::update_to_json(u),
+            "canonicalBytes": format!("0x{}", hex::encode(perps_oracle::encoding::encode(u))),
+            "expect": expect, "stateBytesAfter": format!("0x{}", hex::encode(st.encode())),
+        }));
+    }
+    let file = serde_json::json!({
+        "_note": "PosternDEX Perpetuals oracle, rule C2d (README section 5, R436-12). UNAUDITED PROTOTYPE. Each case: the update applied to the GENESIS oracle state of this committee at blockTime (H1 first). Throwaway keys.",
+        "committee": {
+            "verifyingContract": format!("0x{}", hex::encode(VAULT)),
+            "signers": prm.signers.iter().map(|a| format!("0x{}", hex::encode(a))).collect::<Vec<_>>(),
+            "quorum": 5, "maxFutureMs": 1000, "maxAgeMs": 6000,
+            "markets": [{"marketId": 1, "minSources": 3, "agreeBps": 100, "jumpBps": 500, "maxStalenessMs": 10000, "confirmRounds": 3,
+                         "exitHaircutBps": 500, "exitHaircutPerMinBps": 100, "exitMaxHaircutBps": 5000, "maxHaltMs": 3600000},
+                        {"marketId": 2, "minSources": 3, "agreeBps": 100, "jumpBps": 500, "maxStalenessMs": 10000, "confirmRounds": 3,
+                         "exitHaircutBps": 500, "exitHaircutPerMinBps": 100, "exitMaxHaircutBps": 5000, "maxHaltMs": 3600000},
+                        {"marketId": 3, "minSources": 3, "agreeBps": 100, "jumpBps": 800, "maxStalenessMs": 10000, "confirmRounds": 3,
+                         "exitHaircutBps": 800, "exitHaircutPerMinBps": 100, "exitMaxHaircutBps": 5000, "maxHaltMs": 3600000}],
+        },
+        "cases": out,
+    });
+    // The committee object is the one the cases were computed with.
+    assert_eq!(json::committee_from_json(&file["committee"]).unwrap(), prm);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../vectors/c2d.json");
+    let text = serde_json::to_string_pretty(&file).unwrap() + "\n";
+    if std::env::var_os("ORACLE_WRITE_VECTORS").is_some() {
+        fs::write(&path, &text).unwrap();
+    }
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        text,
+        "vectors/c2d.json is stale"
+    );
+    // What the cases must show, independently of the file.
+    let by_name = |n: &str| out.iter().find(|c| c["name"] == n).unwrap()["expect"].clone();
+    assert_eq!(by_name("all-in-time")["ignored"], serde_json::json!([]));
+    assert_eq!(
+        by_name("one-in-the-future-ignored")["ignored"],
+        serde_json::json!([6])
+    );
+    assert_eq!(
+        by_name("one-in-the-future-ignored")["report"]["markets"][0]["price"],
+        p.to_string()
+    );
+    assert_eq!(
+        by_name("exactly-max-future-not-ignored")["ignored"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        by_name("one-ms-beyond-max-future-ignored")["ignored"],
+        serde_json::json!([6])
+    );
+    assert_eq!(
+        by_name("two-ignored-five-left")["ignored"],
+        serde_json::json!([5, 6])
+    );
+    assert_eq!(
+        by_name("three-ignored-refused"),
+        serde_json::json!({"error": "ORACLE_TIME", "observation": 4})
+    );
+    assert_eq!(
+        by_name("the-same-update-later-accepted")["ignored"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        by_name("one-too-old-ignored")["ignored"],
+        serde_json::json!([0])
+    );
+    assert_eq!(
+        by_name("exactly-max-age-not-ignored")["ignored"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        by_name("all-too-old-refused"),
+        serde_json::json!({"error": "ORACLE_TIME", "observation": 0})
+    );
+    assert_eq!(
+        by_name("ignored-with-bad-signature-refused"),
+        serde_json::json!({"error": "ORACLE_BAD_SIGNATURE", "observation": 6})
+    );
 }

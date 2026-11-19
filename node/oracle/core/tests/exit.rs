@@ -193,3 +193,68 @@ fn halt_extremes_are_part_of_the_state_bytes() {
     assert_ne!(st.encode(), b.encode());
     assert_eq!(st.market(1).unwrap().halt_low, 520_000);
 }
+
+/// R436-10 (High, reviewer 436, round 2). Round 1's README 6a proposed that a forced close in a halted market
+/// settles at `settle`. With no committee price since the halt, `settle` is the frozen index: a sequencer that
+/// stops including oracle inputs when the market turns against its position, and then serves its own forced
+/// close, leaves at the pre-move price. The price of ONE account's exit is the side of the band worse for it;
+/// `settle` is for X3 only, and says whether it is a committee price at all.
+#[test]
+fn r436_10_one_accounts_exit_never_gets_the_frozen_index() {
+    let (prm, mut st, _) = active(650_000);
+    let it = st.market(1).unwrap().index_time_ms;
+    // The sequencer goes dark; 10.001 s later the market is STALE. The real price is now 4% higher (676_000):
+    // nobody in the engine knows.
+    begin_block(&prm, &mut st, it + 10_001);
+    let x = exit_price(&prm, &st, 1, it + 10_001).unwrap();
+    // The option the round-1 text gave away: `settle` is still the pre-move index, and no committee price backs it.
+    assert_eq!((x.settle, x.settle_committee_time_ms), (650_000, None));
+    // A short leaving alone buys back at `high`: at least one permitted step (jumpBps = 5%) above the frozen
+    // index, so above the real price it is running from; a long sells at `low`.
+    assert_eq!(x.close_price(false), 682_500);
+    assert_eq!(x.close_price(true), 617_500);
+    assert!(x.close_price(false) > 676_000 && x.close_price(false) > x.settle);
+    assert!(x.close_price(true) < x.settle);
+    // Waiting does not help the one who waits: the band only widens with the age of the index.
+    let later = exit_price(&prm, &st, 1, it + 1_800_000).unwrap();
+    assert!(later.close_price(false) > x.close_price(false));
+    assert!(later.close_price(true) < x.close_price(true));
+    // At the X3 deadline with nothing signed since the halt, `settle` is still not a committee price.
+    let due = exit_price(&prm, &st, 1, it + 3_600_000).unwrap();
+    assert!(due.settle_due);
+    assert_eq!((due.settle, due.settle_committee_time_ms), (650_000, None));
+    // While active there is one price and no band.
+    let (prm, st, r) = active(650_000);
+    let a = exit_price(&prm, &st, 1, t_of(r)).unwrap();
+    assert_eq!(
+        (
+            a.close_price(true),
+            a.close_price(false),
+            a.settle_committee_time_ms
+        ),
+        (650_000, 650_000, None)
+    );
+}
+
+/// When the committee HAS signed since the halt, `settle` is that price and carries its time; one account's exit
+/// is still priced at the band, which covers it.
+#[test]
+fn r436_10_settle_names_the_committee_price_and_its_time() {
+    let (prm, mut st, r) = active(650_000);
+    apply_update(&prm, &mut st, &upd(r, 520_000), t_of(r)).unwrap();
+    let x = exit_price(&prm, &st, 1, t_of(r)).unwrap();
+    assert_eq!(
+        (x.settle, x.settle_committee_time_ms),
+        (520_000, Some(r * ROUND_MS))
+    );
+    assert!(x.close_price(true) <= 520_000 && x.close_price(false) >= 650_000);
+    // A later committee price replaces it.
+    begin_block(&prm, &mut st, t_of(r + 1));
+    apply_update(&prm, &mut st, &upd(r + 1, 700_000), t_of(r + 1)).unwrap();
+    let x = exit_price(&prm, &st, 1, t_of(r + 1)).unwrap();
+    assert_eq!(
+        (x.settle, x.settle_committee_time_ms),
+        (700_000, Some((r + 1) * ROUND_MS))
+    );
+    assert!(x.close_price(true) <= 520_000 && x.close_price(false) >= 700_000);
+}
