@@ -154,33 +154,121 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
     .into_response()
 }
 
-/// CORS (API.md section 1): every response carries the configured origin; a preflight is answered here. The API
-/// has no cookies and no sessions, so the header grants nothing a non-browser client does not already have.
+/// The headers a page may send (API.md): the body type, the edge's geoblock assertion and its dev stand-in, and
+/// the signed read of an attestation record. `Authorization` is NOT here: the operator and ingest tokens are not
+/// for browsers.
+pub const CORS_ALLOW_HEADERS: &str = "content-type, x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-nonce, x-postern-read-signature";
+pub const CORS_ALLOW_METHODS: &str = "GET, POST, OPTIONS";
+
+/// F434-2: an allowlist entry is exactly what a browser sends in `Origin`: `http(s)://host[:port]`, lower case,
+/// nothing after it. `*`, `null`, a wildcard host, a path or a trailing slash are refused at start.
+pub fn parse_origin(s: &str) -> Result<String, String> {
+    let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).ok_or("an origin is http://host[:port] or https://host[:port]")?;
+    // an IPv6 literal is bracketed; otherwise the last colon, if any, starts the port
+    let (host, port) = if let Some(r) = rest.strip_prefix('[') {
+        let (inside, after) = r.split_once(']').ok_or("an IPv6 host needs its closing bracket")?;
+        if inside.is_empty() || !inside.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b':')) {
+            return Err("the IPv6 host is not lower-case hex and colons".into());
+        }
+        match after {
+            "" => (inside, None),
+            _ => (inside, Some(after.strip_prefix(':').ok_or("nothing may follow the host but :port")?)),
+        }
+    } else {
+        let (h, p) = match rest.split_once(':') {
+            Some((h, p)) => (h, Some(p)),
+            None => (rest, None),
+        };
+        let ok = !h.is_empty()
+            && h.len() <= 253
+            && h.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
+            && !h.starts_with(['.', '-'])
+            && !h.ends_with(['.', '-'])
+            && !h.contains("..");
+        if !ok {
+            return Err("the host must be a lower-case name or address: no wildcard, no path, no trailing slash, no user, no space".into());
+        }
+        (h, p)
+    };
+    let _ = host;
+    if let Some(p) = port {
+        if p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit()) || p.parse::<u16>().is_err() {
+            return Err("the port is not a number from 0 to 65535 (and nothing may follow it)".into());
+        }
+    }
+    Ok(s.to_string())
+}
+
+/// What the `Origin` request header says against the allowlist.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OriginCheck {
+    /// no allowlist configured: CORS is off (no header sent, no preflight answered)
+    Off,
+    /// the request names no origin (not a browser page on another origin)
+    Absent,
+    Allowed(HeaderValue),
+    /// an origin that is not on the list (also: several `Origin` headers, or one that is not text)
+    Refused,
+}
+
+pub fn origin_check(app: &App, headers: &HeaderMap) -> OriginCheck {
+    let list = app.cors_origins.lock().unwrap();
+    if list.is_empty() {
+        return OriginCheck::Off;
+    }
+    let mut it = headers.get_all("origin").iter();
+    let Some(v) = it.next() else { return OriginCheck::Absent };
+    if it.next().is_some() {
+        return OriginCheck::Refused;
+    }
+    match v.to_str() {
+        // byte-for-byte equality with an entry: no prefix, suffix, case or port leniency
+        Ok(o) if list.iter().any(|a| a == o) => OriginCheck::Allowed(v.clone()),
+        _ => OriginCheck::Refused,
+    }
+}
+
+/// CORS (API.md section 1, F434-2). With an EMPTY allowlist (the default) nothing is added and `OPTIONS` is not
+/// answered. With a list: a response to a request whose `Origin` is exactly on the list carries that one origin
+/// (never `*`, never an origin that is not on the list, never `Access-Control-Allow-Credentials`); a preflight
+/// from a listed origin is answered `204` here, from any other origin `403`. The API has no cookies and no
+/// sessions, so the header grants a page nothing a non-browser client does not already have.
 ///
 /// The same layer applies the per-IP READ limit of section 8 (R436-6: reads were unlimited): every GET except the
 /// WebSocket upgrade takes a token of the caller's bucket; an empty bucket is `429 RATE_LIMITED`.
 async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    let origin = app.cors_origin.lock().unwrap().clone();
-    let preflight = req.method() == axum::http::Method::OPTIONS;
+    let origin = origin_check(&app, req.headers());
+    let preflight = origin != OriginCheck::Off
+        && origin != OriginCheck::Absent
+        && req.method() == axum::http::Method::OPTIONS
+        && req.headers().contains_key("access-control-request-method");
     let limited = req.method() == axum::http::Method::GET
         && req.uri().path() != "/v1/ws"
         && req.extensions().get::<ConnectInfo<SocketAddr>>().is_some_and(|ci| !app.read_rate.lock().unwrap().allow(&ip_key(ci.0.ip()), now_ms()));
     let mut resp = if preflight {
-        StatusCode::NO_CONTENT.into_response()
+        match origin {
+            OriginCheck::Allowed(_) => StatusCode::NO_CONTENT.into_response(),
+            _ => error(403, "ORIGIN_NOT_ALLOWED", "this origin is not on the node's list", serde_json::json!({})),
+        }
     } else if limited {
         error(429, "RATE_LIMITED", "per-IP read rate", serde_json::json!({}))
     } else {
         next.run(req).await
     };
-    let h = resp.headers_mut();
-    if let Ok(v) = HeaderValue::from_str(&origin) {
-        h.insert("access-control-allow-origin", v);
+    if origin == OriginCheck::Off {
+        return resp;
     }
-    h.insert("vary", HeaderValue::from_static("origin"));
-    if preflight {
-        h.insert("access-control-allow-methods", HeaderValue::from_static("GET, POST, OPTIONS"));
-        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-signature"));
-        h.insert("access-control-max-age", HeaderValue::from_static("600"));
+    let h = resp.headers_mut();
+    // the answer depends on the request's Origin: a shared cache must not hand one origin's answer to another
+    h.append("vary", HeaderValue::from_static("origin"));
+    if let OriginCheck::Allowed(v) = origin {
+        h.insert("access-control-allow-origin", v);
+        h.insert("access-control-expose-headers", HeaderValue::from_static("retry-after"));
+        if preflight {
+            h.insert("access-control-allow-methods", HeaderValue::from_static(CORS_ALLOW_METHODS));
+            h.insert("access-control-allow-headers", HeaderValue::from_static(CORS_ALLOW_HEADERS));
+            h.insert("access-control-max-age", HeaderValue::from_static("600"));
+        }
     }
     resp
 }
@@ -369,7 +457,7 @@ async fn oracle_status(State(app): State<Arc<App>>, Path(sym): Path<String>) -> 
     }
     Json(serde_json::json!({"symbol": m.symbol, "status": "halted", "price": "0", "time": s.engine.time(),
         "round": s.engine.last_oracle_round().to_string(), "sources": [], "signers": 0, "threshold": app.g.oracle_quorum,
-        "haltReason": "the stub engine has no oracle state"}))
+        "haltReason": "the stub engine has no oracle state", "haltedSince": null, "exitBand": null}))
     .into_response()
 }
 
@@ -607,72 +695,237 @@ fn take_blocks(app: &App, from: u64, limit: u64) -> Vec<crate::types::Block> {
     out
 }
 
-/// R436-6: decoding the inputs and recovering every action's signer is done OUTSIDE the sequencer lock.
+/// Bounds of `GET /v1/blocks` (R436-14 residue: it rendered up to 500 blocks, recovering every action's signer,
+/// on the runtime's own threads, for every caller at once).
+pub struct BlockRenders {
+    /// renders running at once (the others wait their turn, up to `BLOCKS_WAIT_MS`)
+    pub permits: Arc<tokio::sync::Semaphore>,
+    /// an answer is closed once it holds this many bytes of blocks (never fewer than one block)
+    pub max_bytes: std::sync::atomic::AtomicUsize,
+    /// the thread of the newest render (the tests check that it is not a runtime thread's caller)
+    pub last_thread: std::sync::Mutex<Option<std::thread::ThreadId>>,
+}
+
+pub const BLOCKS_RENDERS: usize = 4;
+pub const BLOCKS_MAX_BYTES: usize = 4 << 20;
+pub const BLOCKS_WAIT_MS: u64 = 5_000;
+
+impl BlockRenders {
+    pub fn new() -> BlockRenders {
+        BlockRenders { permits: Arc::new(tokio::sync::Semaphore::new(BLOCKS_RENDERS)), max_bytes: std::sync::atomic::AtomicUsize::new(BLOCKS_MAX_BYTES), last_thread: std::sync::Mutex::new(None) }
+    }
+}
+
+impl Default for BlockRenders {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `GET /v1/blocks?from&limit[&raw]`. R436-6: decoding the inputs and recovering every action's signer is done
+/// OUTSIDE the sequencer lock. R436-14 residue: and OFF the runtime's threads (the blocking pool), at most
+/// `BLOCKS_RENDERS` at once, and an answer stops at `BLOCKS_MAX_BYTES` (it then holds fewer blocks than `limit`:
+/// the caller continues with `from` = its last height + 1, as it does anyway).
 async fn blocks_range(State(app): State<Arc<App>>, q: Q) -> Response {
     let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
     let limit: u64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).clamp(1, 500);
     let raw = q.get("raw").is_some();
-    let blocks = take_blocks(&app, from, limit);
-    let out: Vec<serde_json::Value> = blocks.iter().map(|b| block_json(&app, b, raw)).collect();
-    Json(serde_json::json!({"blocks": out})).into_response()
+    let Ok(Ok(permit)) = tokio::time::timeout(Duration::from_millis(BLOCKS_WAIT_MS), app.block_renders.permits.clone().acquire_owned()).await else {
+        return error(429, "RATE_LIMITED", "too many block reads are being rendered: retry", serde_json::json!({}));
+    };
+    let app2 = app.clone();
+    let rendered = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        *app2.block_renders.last_thread.lock().unwrap() = Some(std::thread::current().id());
+        let max = app2.block_renders.max_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let blocks = take_blocks(&app2, from, limit);
+        let mut body = String::from("{\"blocks\":[");
+        for (i, b) in blocks.iter().enumerate() {
+            if i > 0 {
+                if body.len() >= max {
+                    break;
+                }
+                body.push(',');
+            }
+            body.push_str(&block_json(&app2, b, raw).to_string());
+        }
+        body.push_str("]}");
+        body
+    })
+    .await;
+    match rendered {
+        Ok(body) => ([("content-type", "application/json")], body).into_response(),
+        Err(_) => error(500, "INTERNAL", "block rendering failed", serde_json::json!({})),
+    }
+}
+
+/// Who a block stream is counted against. `Peer`: the TCP peer (an IPv6 peer by its /64). `Edge`: the client
+/// address the EDGE named, used only when the request proved it came through the edge (`stream_client`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ClientKey {
+    Peer([u8; 20]),
+    Edge([u8; 20]),
+}
+
+impl ClientKey {
+    fn of(ip: std::net::IpAddr) -> [u8; 20] {
+        match ip {
+            // one subscriber line holds a whole /64: it is one client
+            std::net::IpAddr::V6(v) if v.to_ipv4_mapped().is_none() => {
+                let mut o = v.octets();
+                o[8..].fill(0);
+                ip_key(std::net::IpAddr::V6(o.into()))
+            }
+            std::net::IpAddr::V6(v) => ip_key(std::net::IpAddr::V4(v.to_ipv4_mapped().expect("checked"))),
+            v4 => ip_key(v4),
+        }
+    }
+    pub fn peer(ip: std::net::IpAddr) -> ClientKey {
+        ClientKey::Peer(Self::of(ip))
+    }
+    pub fn edge(ip: std::net::IpAddr) -> ClientKey {
+        ClientKey::Edge(Self::of(ip))
+    }
+}
+
+struct StreamEntry {
+    id: u64,
+    key: ClientKey,
+    /// 0 while the consumer keeps up; else the time (ms) since when a finished chunk has been waiting for it
+    blocked_since: Arc<std::sync::atomic::AtomicU64>,
+    cancel: Arc<tokio::sync::Notify>,
 }
 
 /// Limits of `/v1/blocks/stream` (R436-14): the stream used to be built whole in memory (up to 10,001 blocks) with
 /// every signature recovered on the runtime's threads, by any number of callers at once.
+///
+/// R436-14 residue (fairness): a slot is not a place to sit. A stream whose consumer has left a chunk waiting for
+/// `evict_idle_ms` is EVICTED the moment someone else needs its slot (the same client asking again, or anyone when
+/// all slots are taken; then the client holding the most slots loses its idlest stream), and no request holds a
+/// slot longer than `max_ms`, however it paces its reads.
 pub struct StreamLimits {
+    table: std::sync::Mutex<(u64, Vec<StreamEntry>)>,
     /// streams served at once by this process
-    pub slots: Arc<tokio::sync::Semaphore>,
-    /// one stream per client address at a time
-    pub ips: std::sync::Mutex<std::collections::HashSet<std::net::IpAddr>>,
+    pub slots: usize,
+    /// streams at once for one client (`ClientKey`); below `slots`
+    pub per_client: usize,
     /// blocks rendered per chunk
     pub chunk_blocks: u64,
     /// a consumer that does not take the next chunk within this time is disconnected
     pub slow_ms: std::sync::atomic::AtomicU64,
+    /// a stream idle this long gives way to a request that needs its slot
+    pub evict_idle_ms: std::sync::atomic::AtomicU64,
+    /// the longest one request is served (the client continues with `from` = its last height + 1)
+    pub max_ms: std::sync::atomic::AtomicU64,
+    /// streams evicted so far
+    pub evicted: std::sync::atomic::AtomicU64,
 }
 
 pub const STREAM_SLOTS: usize = 4;
+pub const STREAM_PER_CLIENT: usize = 1;
 pub const STREAM_CHUNK_BLOCKS: u64 = 16;
 /// a chunk is closed once it holds this many bytes (a block can be megabytes of JSON)
 pub const STREAM_CHUNK_BYTES: usize = 1 << 20;
 pub const STREAM_SLOW_MS: u64 = 10_000;
+pub const STREAM_EVICT_IDLE_MS: u64 = 2_000;
+pub const STREAM_MAX_MS: u64 = 120_000;
 pub const STREAM_MAX_BLOCKS: u64 = 10_001;
 
-impl StreamLimits {
-    pub fn new(slots: usize) -> StreamLimits {
-        StreamLimits { slots: Arc::new(tokio::sync::Semaphore::new(slots)), ips: std::sync::Mutex::new(Default::default()), chunk_blocks: STREAM_CHUNK_BLOCKS, slow_ms: std::sync::atomic::AtomicU64::new(STREAM_SLOW_MS) }
+/// A held stream slot; dropping it gives the slot back (unless it was evicted, then it is already gone).
+pub struct StreamSlot {
+    limits: Arc<StreamLimits>,
+    id: u64,
+    blocked_since: Arc<std::sync::atomic::AtomicU64>,
+    cancel: Arc<tokio::sync::Notify>,
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        self.limits.table.lock().unwrap().1.retain(|e| e.id != self.id);
     }
 }
 
-struct IpSlot(Arc<StreamLimits>, std::net::IpAddr);
+impl StreamLimits {
+    pub fn new(slots: usize) -> StreamLimits {
+        use std::sync::atomic::AtomicU64;
+        StreamLimits {
+            table: std::sync::Mutex::new((0, Vec::new())),
+            slots,
+            per_client: STREAM_PER_CLIENT.min(slots),
+            chunk_blocks: STREAM_CHUNK_BLOCKS,
+            slow_ms: AtomicU64::new(STREAM_SLOW_MS),
+            evict_idle_ms: AtomicU64::new(STREAM_EVICT_IDLE_MS),
+            max_ms: AtomicU64::new(STREAM_MAX_MS),
+            evicted: AtomicU64::new(0),
+        }
+    }
 
-impl Drop for IpSlot {
-    fn drop(&mut self) {
-        self.0.ips.lock().unwrap().remove(&self.1);
+    /// Streams being served now.
+    pub fn in_use(&self) -> usize {
+        self.table.lock().unwrap().1.len()
+    }
+
+    /// Streams whose consumer has left a chunk waiting for at least `min_ms`.
+    pub fn idle(&self, now: u64, min_ms: u64) -> usize {
+        self.table.lock().unwrap().1.iter().filter(|e| matches!(e.blocked_since.load(std::sync::atomic::Ordering::Relaxed), b if b != 0 && now.saturating_sub(b) >= min_ms)).count()
+    }
+
+    /// A slot for `key`, or the reason there is none. May evict ONE idle stream (see the type's comment).
+    pub fn acquire(self: &Arc<Self>, key: ClientKey, now: u64) -> Result<StreamSlot, &'static str> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let idle_for = self.evict_idle_ms.load(Relaxed);
+        let mut t = self.table.lock().unwrap();
+        let idle = |e: &StreamEntry| {
+            let b = e.blocked_since.load(Relaxed);
+            b != 0 && now.saturating_sub(b) >= idle_for
+        };
+        let held = |k: &ClientKey| t.1.iter().filter(|e| e.key == *k).count();
+        let victim = if held(&key) >= self.per_client {
+            // the same client again: only its own idle stream may give way
+            let v = t.1.iter().enumerate().filter(|(_, e)| e.key == key && idle(e)).min_by_key(|(_, e)| e.blocked_since.load(Relaxed)).map(|(i, _)| i);
+            Some(v.ok_or("one block stream per client at a time")?)
+        } else if t.1.len() >= self.slots {
+            // every slot is taken: the idlest stream of the client that holds the most gives way
+            let v = t.1.iter().enumerate().filter(|(_, e)| idle(e)).min_by_key(|(_, e)| (usize::MAX - held(&e.key), e.blocked_since.load(Relaxed))).map(|(i, _)| i);
+            Some(v.ok_or("too many block streams are being served: retry")?)
+        } else {
+            None
+        };
+        if let Some(i) = victim {
+            let e = t.1.remove(i);
+            e.cancel.notify_one();
+            self.evicted.fetch_add(1, Relaxed);
+        }
+        t.0 += 1;
+        let (id, blocked_since, cancel) = (t.0, Arc::new(std::sync::atomic::AtomicU64::new(0)), Arc::new(tokio::sync::Notify::new()));
+        t.1.push(StreamEntry { id, key, blocked_since: blocked_since.clone(), cancel: cancel.clone() });
+        Ok(StreamSlot { limits: self.clone(), id, blocked_since, cancel })
     }
 }
 
 /// An ndjson stream of blocks `from ..` (at most `STREAM_MAX_BLOCKS`), produced AS IT IS READ:
-/// - at most `limits.slots` streams at once, one per client address (`429 RATE_LIMITED` otherwise);
+/// - at most `limits.slots` streams at once, `limits.per_client` per client (`429 RATE_LIMITED` otherwise, unless
+///   an idle stream gives way: `StreamLimits`);
 /// - memory per stream is bounded: `chunk_blocks` blocks are copied (by `take`, which may lock for the copy),
 ///   rendered on the blocking pool (input decoding and signer recovery are CPU work) up to `STREAM_CHUNK_BYTES`,
 ///   and handed to a channel of two chunks; the next chunk is made only when the consumer took one (backpressure);
-/// - a consumer that does not take a chunk for `slow_ms` is disconnected (the body ends; the client continues
-///   with `from` = its last height + 1, as it does after `STREAM_MAX_BLOCKS`).
-pub fn ndjson_block_stream(limits: &Arc<StreamLimits>, peer: std::net::IpAddr, g: Arc<crate::genesis::Genesis>, from: u64, raw: bool, take: Arc<dyn Fn(u64, u64) -> Vec<crate::types::Block> + Send + Sync>) -> Response {
-    let Ok(permit) = limits.slots.clone().try_acquire_owned() else {
-        return error(429, "RATE_LIMITED", "too many block streams are being served: retry", serde_json::json!({}));
+/// - a consumer that does not take a chunk for `slow_ms` is disconnected, an evicted stream and one older than
+///   `max_ms` end too (the body ends; the client continues with `from` = its last height + 1, as it does after
+///   `STREAM_MAX_BLOCKS`).
+pub fn ndjson_block_stream(limits: &Arc<StreamLimits>, client: ClientKey, g: Arc<crate::genesis::Genesis>, from: u64, raw: bool, take: Arc<dyn Fn(u64, u64) -> Vec<crate::types::Block> + Send + Sync>) -> Response {
+    use std::sync::atomic::Ordering::Relaxed;
+    let slot = match limits.acquire(client, now_ms()) {
+        Ok(s) => s,
+        Err(why) => return error(429, "RATE_LIMITED", why, serde_json::json!({})),
     };
-    if !limits.ips.lock().unwrap().insert(peer) {
-        return error(429, "RATE_LIMITED", "one block stream per client address at a time", serde_json::json!({}));
-    }
-    let ip_slot = IpSlot(limits.clone(), peer);
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
     let limits = limits.clone();
     tokio::spawn(async move {
-        let (_permit, _ip_slot) = (permit, ip_slot);
+        let slot = slot;
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(limits.max_ms.load(Relaxed));
         let end = from.saturating_add(STREAM_MAX_BLOCKS);
         let mut next = from;
-        while next < end {
+        while next < end && tokio::time::Instant::now() < deadline {
             let (take2, g2) = (take.clone(), g.clone());
             let n = (end - next).min(limits.chunk_blocks.max(1));
             let rendered = tokio::task::spawn_blocking(move || {
@@ -695,11 +948,25 @@ pub fn ndjson_block_stream(limits: &Arc<StreamLimits>, peer: std::net::IpAddr, g
                 break;
             }
             next += count;
-            let slow = Duration::from_millis(limits.slow_ms.load(std::sync::atomic::Ordering::Relaxed));
-            match tokio::time::timeout(slow, tx.send(Ok(body.into()))).await {
-                Ok(Ok(())) => {}
-                // the consumer is gone, or too slow: stop producing; dropping the sender ends the body
-                _ => break,
+            // room in the channel: the consumer keeps up. Otherwise the chunk waits, and from now the stream is
+            // idle: it can be evicted, is cut after `slow_ms`, and ends at its deadline.
+            let item = match tx.try_send(Ok(body.into())) {
+                Ok(()) => continue,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => item,
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+            };
+            slot.blocked_since.store(now_ms().max(1), Relaxed);
+            let slow = Duration::from_millis(limits.slow_ms.load(Relaxed));
+            let sent = tokio::select! {
+                r = tokio::time::timeout(slow, tx.send(item)) => matches!(r, Ok(Ok(()))),
+                _ = slot.cancel.notified() => false,
+                _ = tokio::time::sleep_until(deadline) => false,
+            };
+            slot.blocked_since.store(0, Relaxed);
+            if !sent {
+                // the consumer is gone, too slow, evicted or out of time: stop producing; dropping the sender
+                // ends the body
+                break;
             }
         }
     });
@@ -707,13 +974,38 @@ pub fn ndjson_block_stream(limits: &Arc<StreamLimits>, peer: std::net::IpAddr, g
     ([("content-type", "application/x-ndjson")], axum::body::Body::from_stream(stream)).into_response()
 }
 
+/// Whom a stream request is counted against (R436-14 residue). Behind the edge every client arrives from the
+/// edge's address, so the TCP peer alone would give them ONE slot between them. The edge names the client in a
+/// header (`--edge-client-header`), and a header is only text: it is believed ONLY when the same request carries
+/// a valid edge assertion (the edge's MAC, fresh, never seen before; the request spends it), which a client
+/// cannot make. Everything else (no edge verifier, no such flag, no assertion, a bad one, a header that is not
+/// one address) is counted against the TCP peer.
+pub fn stream_client(app: &App, peer: std::net::IpAddr, headers: &HeaderMap) -> ClientKey {
+    let name = app.edge_client_header.lock().unwrap().clone();
+    if let (Some(edge), Some(name)) = (&app.geo.edge, name) {
+        let mut vals = headers.get_all(name.as_str()).iter();
+        let claimed = match (vals.next(), vals.next()) {
+            (Some(v), None) => v.to_str().ok().and_then(|s| s.trim().parse::<std::net::IpAddr>().ok()),
+            _ => None,
+        };
+        if let Some(ip) = claimed {
+            let h = |k: &str| headers.get(k).and_then(|v| v.to_str().ok());
+            if edge.authenticate(h(crate::geo::ASSERTION_HEADER), h(crate::geo::ASSERTION_MAC_HEADER), now_ms()) {
+                return ClientKey::edge(ip);
+            }
+        }
+    }
+    ClientKey::peer(peer)
+}
+
 /// `GET /v1/blocks/stream?from=H`: at most 10,001 blocks per request (continue with `from` = the last height + 1
 /// until an empty answer), streamed with the limits of `ndjson_block_stream` (R436-14).
-async fn blocks_stream(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, q: Q) -> Response {
+async fn blocks_stream(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, q: Q) -> Response {
     let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
     let raw = q.get("raw").is_some();
     let app2 = app.clone();
-    ndjson_block_stream(&app.streams, peer.ip(), app.g.clone(), from, raw, Arc::new(move |f, n| take_blocks(&app2, f, n)))
+    let client = stream_client(&app, peer.ip(), &headers);
+    ndjson_block_stream(&app.streams, client, app.g.clone(), from, raw, Arc::new(move |f, n| take_blocks(&app2, f, n)))
 }
 
 /// Admission path shared by REST and WebSocket: parse, recover the signer, geoblock, then the sequencer.
@@ -841,8 +1133,16 @@ async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>, hea
         (Some(tok), Some(p)) => crate::oracle_pool::token_ok(tok, p.as_bytes()),
         _ => false,
     };
-    if !operator && !crate::attest::read_authorised(&app.g, &a, h("x-postern-read-time"), h("x-postern-read-signature"), now_ms()) {
-        return error(401, "UNAUTHORIZED", "an attestation record is read by its account (X-Postern-Read-Time + X-Postern-Read-Signature, API.md section 6) or by the operator", serde_json::json!({}));
+    if !operator {
+        let now = now_ms();
+        let refused = || error(401, "UNAUTHORIZED", "an attestation record is read by its account (X-Postern-Read-Time, X-Postern-Read-Nonce, X-Postern-Read-Signature: one signature, one read; API.md section 6) or by the operator", serde_json::json!({}));
+        let Some((t, nonce)) = crate::attest::read_authorised(&app.g, &a, h("x-postern-read-time"), h("x-postern-read-nonce"), h("x-postern-read-signature"), now) else { return refused() };
+        // the signature is spent here: a captured header set reads nothing a second time
+        match app.read_replay.lock().unwrap().once(&a, nonce, t, now) {
+            crate::attest::ReadOnce::Fresh => {}
+            crate::attest::ReadOnce::Replayed => return refused(),
+            crate::attest::ReadOnce::Full => return error(429, "RATE_LIMITED", "too many signed reads are being remembered: retry in a minute", serde_json::json!({})),
+        }
     }
     let at = app.attestations.lock().unwrap();
     Json(attestation_json(&a, &at.status(&a, now_ms()))).into_response()
@@ -1243,7 +1543,13 @@ async fn geo(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketA
 
 // ---------------- WebSocket ----------------
 
+/// F434-2: browsers do not preflight a WebSocket, so the upgrade itself checks `Origin` against the allowlist
+/// when one is configured: a page on an origin that is not listed is refused `403`. A client that sends no
+/// `Origin` (not a browser) is served as before: the check keeps other SITES out, it is not authentication.
 async fn ws(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, up: WebSocketUpgrade) -> Response {
+    if origin_check(&app, &headers) == OriginCheck::Refused {
+        return error(403, "ORIGIN_NOT_ALLOWED", "this origin is not on the node's list", serde_json::json!({}));
+    }
     up.max_message_size(16 * 1024).on_upgrade(move |s| ws_session(app, s, peer, headers))
 }
 

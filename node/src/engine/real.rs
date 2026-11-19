@@ -263,8 +263,12 @@ impl Engine for RealEngine {
                         "makerFeeBps": trim(d(m.maker_fee_ppm as u128, 2)), "takerFeeBps": trim(d(m.taker_fee_ppm as u128, 2)),
                         "liquidationFeeBps": trim(d(m.liquidation_fee_ppm as u128, 2)),
                         "fundingIntervalSec": m.funding_interval_ms / 1000, "maxFundingRate": trim(d(m.max_funding_rate.max(0) as u128, 9)),
+                        // F434-5 / F434-6: the bands the engine applies, from its own MarketParams (R393-N1)
+                        "markBandBps": m.mark_band_bps, "marketSlippageBps": m.market_slippage_bps,
                         "oracle": {"sources": ["committee"], "minSources": m.oracle.min_sources, "maxStalenessMs": m.oracle.max_staleness_ms,
-                            "maxDeviationBps": m.oracle.jump_bps.to_string()},
+                            "maxDeviationBps": m.oracle.jump_bps.to_string(),
+                            "exitHaircutBps": m.oracle.exit_haircut_bps, "exitHaircutPerMinBps": m.oracle.exit_haircut_per_min_bps,
+                            "exitMaxHaircutBps": m.oracle.exit_max_haircut_bps, "maxHaltMs": m.oracle.max_halt_ms},
                         "openInterestCap": trim(d(m.oi_cap as u128, 8)),
                     })
                 })
