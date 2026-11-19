@@ -427,11 +427,12 @@ venues (2026-11-18). No bound is loosened.
 - R395-9 is stated and measured, not closed: the sequencer can still choose which valid observations a block
   carries (section 5a). What would close it needs the node (validator refusal with an observation gossip plane) or
   a consensus change (an omission-proof median); neither is built.
-- R436-10: the oracle side is restated and tested (section 6a); the ENGINE still serves a forced close in a halt at
-  `settle` until 430 changes SPEC 14 and the engine. X3 at the pre-halt index after `maxHaltMs` of withheld oracle
-  inputs remains possible until 430 adopts the committee-price condition.
-- The widened `exitHaircutBps` (ETH 700, SOL 1300) is a proposal: `compliance/markets.json` (435) and the engine's
-  converter default (430) still give `jumpBps`.
+- R436-10: the oracle side is restated and tested (section 6a); the engine follows it from SPEC 0.2.3 (430,
+  `c6d4ff9`: forced close at the band side worse for the closer, X3 only at a committee price). Residue, stated: a
+  market that nobody prices stays halted until the vault's escape.
+- The widened `exitHaircutBps` (ETH 700, SOL 1300) reaches the engine only through `compliance/markets.json`
+  0.2.2 (435, `d7065d1`, with a parameter check against the calibrated floors); the converter's default when the
+  field is absent is still `jumpBps`. Whether to accept the values is an owner input.
 - Calibration limits (CALIBRATION.md section 1): minute candles cannot resolve a 3 s round; four venues of seven;
   34 chosen days; `jumpBps` and `agreeBps` are therefore confirmed as not too tight for genuine moves, NOT shown to
   be as tight as they could be. No order-book depth study: the cost of moving a majority of venues was not
