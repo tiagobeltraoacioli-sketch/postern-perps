@@ -98,5 +98,5 @@ for mi in range(len(rep[0]["markets"])):
         "venueUsedRounds": dict(sorted(used.items())),
     }
 u = [float(r["usdtUsd"]) for r in rep if r["usdtUsd"]]
-out["usdtUsd"] = {"roundsWithRate": len(u), "min": min(u) if u else None, "max": max(u) if u else None}
+out["usdtUsd"] = {"roundsWithRate": len(u), "min": f"{min(u):.5f}" if u else None, "max": f"{max(u):.5f}" if u else None}
 print(json.dumps(rnd(out), indent=1))

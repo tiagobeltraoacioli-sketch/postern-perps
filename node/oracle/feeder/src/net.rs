@@ -381,4 +381,106 @@ mod tests {
         assert!(clock_ok(&[(d, d - 1500), (d, d - 1200), (d, d - 1100)]).is_err());
         assert!(clock_ok(&[(d, d)]).is_err());
     }
+
+    #[test]
+    fn one_request_per_unit_and_the_batched_unit_serves_four_sources() {
+        let c = default_config().with_kraken_batch();
+        let units = fetch_units(&all_sources(&c));
+        assert_eq!(units.len(), 22);
+        let kraken: Vec<_> = units.iter().filter(|(u, _)| u.contains("kraken")).collect();
+        assert_eq!(kraken.len(), 1);
+        assert_eq!(
+            kraken[0].1,
+            [
+                "kraken-USDT-USD",
+                "kraken-BTC-USD",
+                "kraken-ETH-USD",
+                "kraken-SOL-USD"
+            ]
+        );
+        assert!(units
+            .iter()
+            .filter(|(u, _)| !u.contains("kraken"))
+            .all(|(_, n)| n.len() == 1));
+        // Without batching: 25 requests, as in round 1.
+        assert_eq!(fetch_units(&all_sources(&default_config())).len(), 25);
+    }
+
+    /// Drop rule over the live loop's own bookkeeping: a unit that times out five rounds in a row is skipped for
+    /// the cooldown, a 429 is skipped at once, a unit that answers 200 with a body no adapter accepts counts as
+    /// failed, and the others are never touched.
+    #[test]
+    fn health_bookkeeping_follows_the_drop_rule() {
+        let mut feeder = Feeder::new(default_config().with_kraken_batch()).unwrap();
+        let units = fetch_units(&all_sources(&feeder.config));
+        let mut health = Healths::default();
+        let gemini = "https://api.gemini.com/v1/pubticker/btcusd";
+        let okx = "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT";
+        let bitfinex = "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD";
+        let mut skipped: Vec<(u64, String)> = Vec::new();
+        for round in 100..140u64 {
+            let t0 = round * ROUND_MS;
+            let fetches: Vec<Fetch> = units
+                .iter()
+                .map(|(url, sources)| {
+                    let dropped = health.skip(round)(url);
+                    if dropped {
+                        skipped.push((round, url.clone()));
+                    }
+                    let (status, error, body) = if url == gemini {
+                        (0, Some("timeout: global".to_string()), None)
+                    } else if url == okx && round == 100 {
+                        (
+                            429,
+                            Some("http-status-429".to_string()),
+                            Some("{}".to_string()),
+                        )
+                    } else if url == bitfinex {
+                        (
+                            200,
+                            None,
+                            Some("[\"error\",10020,\"symbol: invalid\"]".to_string()),
+                        )
+                    } else {
+                        // No body the adapters accept either, but these units are not under test: mark them OK
+                        // by leaving them out of the bookkeeping below.
+                        (200, None, None)
+                    };
+                    Fetch {
+                        url: url.clone(),
+                        sources: sources.clone(),
+                        status,
+                        received_ms: t0 + 50,
+                        http_date_ms: None,
+                        error,
+                        body,
+                        dropped,
+                    }
+                })
+                .filter(|f| [gemini, okx, bitfinex].contains(&f.url.as_str()))
+                .collect();
+            let resp: Vec<Response> = fetches.iter().flat_map(|f| f.responses(t0)).collect();
+            let (_, rep) = feeder.observe(round, t0, &resp);
+            health.record(round, &fetches, &rep);
+        }
+        let of = |u: &str| -> Vec<u64> {
+            skipped
+                .iter()
+                .filter(|(_, x)| x == u)
+                .map(|(r, _)| *r)
+                .collect()
+        };
+        // OKX: refused in round 100 -> skipped rounds 101..=120, probed at 121 (again a failure: no body) ...
+        assert_eq!(of(okx)[..20], (101..=120).collect::<Vec<_>>()[..]);
+        assert!(!of(okx).contains(&121));
+        // Gemini: five timeouts (100..=104), skipped 105..=124, probed at 125 (fails: dropped again, 40 rounds).
+        assert_eq!(of(gemini), (105..=124).chain(126..140).collect::<Vec<_>>());
+        // Bitfinex: a 200 with an error body is a failure too.
+        assert_eq!(
+            of(bitfinex),
+            (105..=124).chain(126..140).collect::<Vec<_>>()
+        );
+        assert_eq!(health.0[gemini].drops, 2);
+        assert_eq!(health.0[gemini].successes, 0);
+    }
 }
