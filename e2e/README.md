@@ -70,7 +70,9 @@ exchange keeps running but never receives a user's forced withdrawal (one L2 end
 two-endpoint watchers of the sequencer and of the validators make no progress); the request passes its deadline, the
 vault refuses the next checkpoint, anyone triggers escape with reason 2, and every account claims with proofs served
 by a validator. What it does not show: a sequencer that sees the request and ignores it while HONEST validators see
-it too (they would have to refuse to sign; the node has no fault switch for that).
+it too (they would have to refuse to sign; the node has no fault switch for that). First run (phases A, B, C, K on
+the code of `main` 1a44d73): 31 of 31 checks, books closed to the unit. Still not rehearsed: a shortfall escape
+(insurance first, then pro rata), the fee sweep at the UTC day boundary, an exit from a halted market at the exit band.
 
 Arithmetic and key derivations of the rehearsal have their own tests (`e2e/test/`), as does the proxy.
 
