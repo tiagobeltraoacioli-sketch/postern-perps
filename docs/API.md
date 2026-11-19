@@ -543,7 +543,7 @@ unchanged (for example `INSUFFICIENT_MARGIN`, `POST_ONLY_WOULD_CROSS`, `REDUCE_O
 |---|---|
 | Actions per account | 20 per second, burst 40 |
 | Actions per IP | 50 per second, burst 100 |
-| REST reads per IP | 100 per second |
+| REST reads per IP | 100 per second, burst 200 (`--read-rate`, 0 = off): every GET except the WebSocket upgrade; `429 RATE_LIMITED` |
 | WebSocket connections per IP | 20; subscriptions per connection 100 |
 | Request body | 16 KiB |
 | WebSocket message in | 16 KiB; out queue 1024 messages, then the connection is closed (`SLOW_CONSUMER`) |

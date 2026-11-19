@@ -190,3 +190,62 @@ fn r436_12_pool_time_rules_with_artificial_bounds() {
     offer_all(&mut pool, [0, 0, 0, 1_000, 1_000, 1_000, 1_000]);
     assert!(pool.take_ready_at(&g, 0, t0 + 1_600, t0 + 1_600, 1_000, 1_500).is_none(), "only four acceptable");
 }
+
+/// R436-6 (Medium, node part): the withdrawal certificate and an account's withdrawal list no longer rebuild the
+/// whole withdrawal tree per record; the incremental tree gives the same siblings as the engine's own proof for
+/// every record and every accepted count, and the per-account list is exact.
+#[test]
+fn r436_6_withdrawal_proofs_from_the_incremental_tree_equal_the_engines() {
+    let mut n = net_real("r436-6", 1);
+    let users: Vec<_> = (0..3).map(|i| user(200 + i)).collect();
+    for (i, u) in users.iter().enumerate() {
+        n.deposit_everywhere(deposit(i as u64, key_address(u), 5_000_000_000));
+    }
+    n.step();
+    // seven withdrawals over four blocks, interleaved between the accounts
+    let mut nonce = now();
+    for round in 0..4 {
+        for (i, u) in users.iter().enumerate() {
+            if (round + i) % 2 == 0 {
+                nonce += 1;
+                let a = key_address(u);
+                n.seq.admit_signed(withdraw(&n.g, u, a, nonce, 10_000_000 + (round as u64) * 1_000_000, a), now()).unwrap();
+            }
+        }
+        n.step();
+    }
+    let total = n.seq.engine.withdrawal_count();
+    assert!(total >= 6, "{total}");
+    assert_eq!(n.seq.wd_tree.len(), total);
+    for count in 1..=total {
+        for id in 0..count {
+            let ours = n.seq.wd_tree.proof(id, count).unwrap();
+            assert_eq!(Some(ours.clone()), n.seq.engine.withdrawal_proof(id, count), "id {id} count {count}");
+            let p = n.seq.withdrawal_proof(id, Some(count), None).unwrap();
+            assert_eq!(p["siblings"].as_array().unwrap().len(), 32);
+        }
+    }
+    // the certificate of every record verifies against the newest final checkpoint
+    let h = n.seq.latest_final().unwrap();
+    let root = n.seq.checkpoint_for(h).unwrap().withdrawals_root;
+    for id in 0..total {
+        let cert = n.seq.certificate(id).expect("certified");
+        let sib: Vec<[u8; 32]> = cert["proof"]["siblings"].as_array().unwrap().iter().map(|p| perps_node::util::parse_hex_fixed::<32>(p.as_str().unwrap()).unwrap()).collect();
+        assert!(postern_perps_engine::merkle::verify(&n.seq.engine.withdrawal(id).unwrap().leaf(), id, &sib, &root));
+    }
+    // the per-account list is exactly the engine's records of that account, in id order
+    for u in &users {
+        let a = key_address(u);
+        let expect: Vec<u64> = (0..total).filter(|id| n.seq.engine.withdrawal(*id).unwrap().account == a).collect();
+        assert_eq!(n.seq.wd_by_account.get(&a).cloned().unwrap_or_default(), expect);
+    }
+    // and survives a restart (rebuilt from the replayed engine)
+    let (g, key, dir) = (n.g.clone(), n.keys.sequencer.clone(), n.dir.clone());
+    let lens: Vec<usize> = users.iter().map(|u| n.seq.wd_by_account[&key_address(u)].len()).collect();
+    drop(n);
+    let (_, _, checked) = perps_node::dev::dev_genesis_real("test-r436-6", 7, 5, 1, 0);
+    let s = perps_node::sequencer::Sequencer::open(g.clone(), key, Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked).unwrap()), dir, view()).unwrap();
+    assert_eq!(s.wd_tree.len(), total);
+    assert_eq!(users.iter().map(|u| s.wd_by_account[&key_address(u)].len()).collect::<Vec<_>>(), lens);
+    assert!(s.certificate(0).is_some(), "final checkpoints reloaded: certificates are served again");
+}

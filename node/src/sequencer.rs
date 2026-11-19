@@ -100,6 +100,10 @@ impl RateLimit {
         if self.per_sec <= 0.0 {
             return true; // disabled (dev load tests only)
         }
+        // bounded memory: the table is dropped when it grows past 100,000 keys (every key then starts full)
+        if self.buckets.len() > 100_000 {
+            self.buckets.clear();
+        }
         let b = self.buckets.entry(*k).or_insert(Bucket { tokens: self.burst, last_ms: now_ms });
         let dt = now_ms.saturating_sub(b.last_ms) as f64 / 1000.0;
         b.tokens = (b.tokens + dt * self.per_sec).min(self.burst);
@@ -120,6 +124,9 @@ pub struct BlockInfo {
     pub book_deltas: Vec<serde_json::Value>,
     /// What the block changed in the market-data index (`None` with the stub engine)
     pub delta: Option<IndexDelta>,
+    /// The acknowledgements of the block's actions (account, `ActionAck` JSON): what the WebSocket `account`
+    /// channel sends, so a session never scans the acknowledgement table (R436-6)
+    pub acks: Vec<(Address, serde_json::Value)>,
 }
 
 /// Checkpoint heights whose engine state is kept for account proofs: at most this many FINAL ones (the newest),
@@ -175,6 +182,10 @@ pub struct Sequencer {
     pub frames: BTreeMap<u64, Arc<postern_perps_engine::Engine>>,
     /// checkpoint heights never pruned from `frames` (submitted to the vault)
     pub pinned_frames: BTreeSet<u64>,
+    /// Every withdrawal leaf, as an incremental SPEC 11 tree: a proof costs 32 hashes (R436-6)
+    pub wd_tree: crate::engine::IncTree,
+    /// account -> its withdrawal ids, oldest first
+    pub wd_by_account: BTreeMap<Address, Vec<u64>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -255,7 +266,10 @@ impl Sequencer {
             oracle_pool: OraclePool::default(),
             frames: BTreeMap::new(),
             pinned_frames: BTreeSet::new(),
+            wd_tree: crate::engine::IncTree::new(postern_perps_engine::engine::WITHDRAWAL_DEPTH),
+            wd_by_account: BTreeMap::new(),
         };
+        s.sync_withdrawals();
         s.pinned_frames = read_pinned(&s.data_dir);
         if let Some(e) = s.engine.real() {
             let mut ix = Indexer::new(&g);
@@ -302,8 +316,20 @@ impl Sequencer {
         Ok(s)
     }
 
+    /// Appends to the withdrawal tree and the per-account list every record the engine has and they do not
+    /// (records are append-only and ids are consecutive).
+    fn sync_withdrawals(&mut self) {
+        while self.wd_tree.len() < self.engine.withdrawal_count() {
+            let id = self.wd_tree.len();
+            let Some(rec) = self.engine.withdrawal(id) else { break };
+            self.wd_tree.push(rec.leaf());
+            self.wd_by_account.entry(rec.account).or_default().push(id);
+        }
+    }
+
     fn after_apply(&mut self, b: &Block, inputs: &[Input], out: &BlockOutcome, pre: Option<&PreInfo>) {
         let h = b.header.height;
+        self.sync_withdrawals();
         let delta = match (self.index.as_mut(), pre, self.engine.real()) {
             (Some(ix), Some(pre), Some(post)) => Some(ix.apply(&self.g, pre, post, h, b.header.time, inputs, &out.outcomes, &out.typed)),
             _ => None,
@@ -336,6 +362,7 @@ impl Sequencer {
                 Err(e) => eprintln!("checkpoint body at {h} not built: {e}"),
             }
         }
+        let mut block_acks: Vec<(Address, serde_json::Value)> = Vec::new();
         for (i, (inp, o)) in inputs.iter().zip(&out.outcomes).enumerate() {
             if let (Input::Action(_), Some(ah)) = (inp, o.action_hash) {
                 let mut result = serde_json::json!({"ok": o.ok, "error": o.error});
@@ -349,6 +376,7 @@ impl Sequencer {
                     a.height = Some(h);
                     a.index = Some(i);
                     a.result = Some(result);
+                    block_acks.push((a.account, a.to_json()));
                 }
             }
         }
@@ -372,7 +400,7 @@ impl Sequencer {
                 "bids": levels_json(&db, m.price_decimals, m.size_decimals), "asks": levels_json(&da, m.price_decimals, m.size_decimals)}));
             self.books.insert(m.market_id, (seq, bids, asks));
         }
-        let info = Arc::new(BlockInfo { block: Arc::new(b.clone()), outcome: out.clone(), book_deltas, delta });
+        let info = Arc::new(BlockInfo { block: Arc::new(b.clone()), outcome: out.clone(), book_deltas, delta, acks: block_acks });
         self.recent.push_back(info);
         while self.recent.len() > self.recent_keep {
             self.recent.pop_front();
@@ -712,7 +740,7 @@ impl Sequencer {
         if id >= c.body.withdrawal_count {
             return None;
         }
-        let siblings = self.engine.withdrawal_proof(id, c.body.withdrawal_count)?;
+        let siblings = self.wd_tree.proof(id, c.body.withdrawal_count)?;
         let cp = self.aggregator.checkpoint_json(&self.g, cp_h, None)?;
         Some(serde_json::json!({
             "digest": to_hex(&c.digest),
@@ -776,11 +804,10 @@ impl Sequencer {
         self.frames.get(&h).map(|e| (h, e.clone()))
     }
 
-    /// VAULT.md `claimEscape` input for `addr` against the FINAL checkpoint at `height` (default: the latest
-    /// final): the account leaf fields, its 32 siblings, and the checkpoint with its signatures. Checked here
-    /// before it is served: the leaf and the siblings must reproduce the checkpoint's `accountsRoot`.
-    pub fn account_proof(&self, addr: &Address, height: Option<u64>) -> Result<serde_json::Value, String> {
-        use postern_perps_engine as pe;
+    /// What an account proof against the FINAL checkpoint at `height` (default: the latest final) is built from:
+    /// the engine state of that height, the checkpoint's `accountsRoot` and its JSON. Cheap (an `Arc` clone), so
+    /// the API takes it under the sequencer lock and builds the proof outside it (R436-6).
+    pub fn account_proof_parts(&self, height: Option<u64>) -> Result<(Arc<postern_perps_engine::Engine>, H256, serde_json::Value), String> {
         let h = match height {
             Some(h) => h,
             None => self.aggregator.latest_final.ok_or("no final checkpoint yet")?,
@@ -790,28 +817,17 @@ impl Sequencer {
         }
         let e = self.frames.get(&h).ok_or_else(|| format!("the state at checkpoint {h} is no longer held by this node (held: {:?})", self.frames.keys().collect::<Vec<_>>()))?;
         let c = self.aggregator.by_height.get(&h).ok_or("checkpoint vanished")?;
-        let (data, index, siblings) = e.account_proof(addr).ok_or("the account does not exist at this checkpoint")?;
-        let leaf = pe::merkle::leaf_hash(&data);
-        // recompute the root from the leaf and the siblings exactly as the vault does (VAULT.md 5.5)
-        let mut node = leaf;
-        for (i, s) in siblings.iter().enumerate() {
-            node = if (index >> i) & 1 == 1 { crate::util::keccak_parts(&[&[0x01], s, &node]) } else { crate::util::keccak_parts(&[&[0x01], &node, s]) };
-        }
-        if siblings.len() != pe::engine::ACCOUNT_DEPTH || node != c.body.accounts_root {
-            return Err("internal: the proof does not reproduce the checkpoint's accountsRoot (not served)".into());
-        }
-        let a = &e.accounts[index as usize];
-        let escape = e.escape_value(index);
-        // data = "PPv1acct" || account:20 || be32 index || be128 balance || be64 escapeValue || positionsHash:32
-        let positions_hash = &data[data.len() - 32..];
         let bh = self.block(h).ok().flatten().map(|b| b.header.log_hash);
-        Ok(serde_json::json!({
-            "address": to_hex(addr), "checkpoint": self.aggregator.checkpoint_json(&self.g, h, bh),
-            "leaf": to_hex(&leaf),
-            "leafData": {"account": to_hex(&a.address), "index": index, "balance": a.balance.to_string(), "escapeValue": escape.to_string(),
-                "positionsHash": to_hex(positions_hash), "encoded": to_hex(&data)},
-            "proof": siblings.iter().map(|s| to_hex(s)).collect::<Vec<_>>(), "index": index.to_string(),
-        }))
+        let cp = self.aggregator.checkpoint_json(&self.g, h, bh).ok_or("checkpoint vanished")?;
+        Ok((e.clone(), c.body.accounts_root, cp))
+    }
+
+    /// VAULT.md `claimEscape` input for `addr` against the FINAL checkpoint at `height` (default: the latest
+    /// final): the account leaf fields, its 32 siblings, and the checkpoint with its signatures. Checked before
+    /// it is served: the leaf and the siblings must reproduce the checkpoint's `accountsRoot`.
+    pub fn account_proof(&self, addr: &Address, height: Option<u64>) -> Result<serde_json::Value, String> {
+        let (e, root, cp) = self.account_proof_parts(height)?;
+        build_account_proof(&e, addr, &root, cp)
     }
 
     /// VAULT.md `withdraw(seq, w, siblings, want)` input for withdrawal `id` against a tree of the first `count`
@@ -835,7 +851,7 @@ impl Sequencer {
         if id >= count {
             return Err(format!("withdrawal {id} is not in a tree of {count} records (not yet in that checkpoint)"));
         }
-        let siblings = self.engine.withdrawal_proof(id, count).ok_or("count is above the number of withdrawals")?;
+        let siblings = self.wd_tree.proof(id, count).ok_or("count is above the number of withdrawals")?;
         let leaf = rec.leaf();
         let mut node = leaf;
         for (i, s) in siblings.iter().enumerate() {
@@ -909,6 +925,28 @@ impl Sequencer {
             .collect();
         serde_json::json!({"agents": v})
     }
+}
+
+/// The account proof over one engine state (O(accounts) hashing: call it OUTSIDE the sequencer lock).
+pub fn build_account_proof(e: &postern_perps_engine::Engine, addr: &Address, accounts_root: &H256, checkpoint: serde_json::Value) -> Result<serde_json::Value, String> {
+    use postern_perps_engine as pe;
+    let (data, index, siblings) = e.account_proof(addr).ok_or("the account does not exist at this checkpoint")?;
+    let leaf = pe::merkle::leaf_hash(&data);
+    // recompute the root from the leaf and the siblings exactly as the vault does (VAULT.md 5.5)
+    if siblings.len() != pe::engine::ACCOUNT_DEPTH || !pe::merkle::verify(&leaf, index as u64, &siblings, accounts_root) {
+        return Err("internal: the proof does not reproduce the checkpoint's accountsRoot (not served)".into());
+    }
+    let a = &e.accounts[index as usize];
+    let escape = e.escape_value(index);
+    // data = "PPv1acct" || account:20 || be32 index || be128 balance || be64 escapeValue || positionsHash:32
+    let positions_hash = &data[data.len() - 32..];
+    Ok(serde_json::json!({
+        "address": to_hex(addr), "checkpoint": checkpoint,
+        "leaf": to_hex(&leaf),
+        "leafData": {"account": to_hex(&a.address), "index": index, "balance": a.balance.to_string(), "escapeValue": escape.to_string(),
+            "positionsHash": to_hex(positions_hash), "encoded": to_hex(&data)},
+        "proof": siblings.iter().map(|s| to_hex(s)).collect::<Vec<_>>(), "index": index.to_string(),
+    }))
 }
 
 fn read_pinned(dir: &std::path::Path) -> BTreeSet<u64> {

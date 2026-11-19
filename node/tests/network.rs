@@ -734,3 +734,23 @@ async fn oracle_ingest_is_disabled_without_a_configured_token() {
     }
     let _ = n.stop.send(true);
 }
+
+/// R436-6: REST reads are rate-limited per IP (API.md section 8); writes keep their own limits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn r436_6_rest_reads_are_rate_limited_per_ip() {
+    let n = start_node("read-limit").await;
+    *n.app.read_rate.lock().unwrap() = perps_node::sequencer::RateLimit::new(1.0, 3.0);
+    let mut codes = Vec::new();
+    for _ in 0..5 {
+        codes.push(get_json(&format!("{}/v1/status", n.url)).await.0);
+    }
+    assert_eq!(codes, vec![200, 200, 200, 429, 429], "a burst of 3, then refused");
+    let (s, e) = get_json(&format!("{}/v1/markets", n.url)).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (429, Some("RATE_LIMITED")));
+    // a write is not a read: it reaches admission (and is refused there for its own reason)
+    let (s, e) = post_json(&format!("{}/v1/actions", n.url), &serde_json::json!({"type": "PlaceOrder"}), &[]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("MALFORMED")));
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    assert_eq!(get_json(&format!("{}/v1/status", n.url)).await.0, 200, "the bucket refills");
+    let _ = n.stop.send(true);
+}

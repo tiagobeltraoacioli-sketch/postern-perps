@@ -48,6 +48,8 @@ pub struct App {
     pub new_block: Notify,
     pub blocks_tx: broadcast::Sender<Arc<BlockInfo>>,
     pub ip_rate: Mutex<RateLimit>,
+    /// Per-IP limit of REST reads (API.md section 8: 100 per second, burst 200; `--read-rate`, 0 = off)
+    pub read_rate: Mutex<RateLimit>,
     pub validators: Mutex<BTreeMap<String, ValidatorStatus>>,
     pub block_interval_ms: u64,
     pub started_ms: u64,
@@ -98,6 +100,7 @@ impl App {
             new_block: Notify::new(),
             blocks_tx: tx,
             ip_rate: Mutex::new(RateLimit::new(50.0, 100.0)),
+            read_rate: Mutex::new(RateLimit::new(100.0, 200.0)),
             validators: Mutex::new(BTreeMap::new()),
             block_interval_ms,
             started_ms: now_ms(),

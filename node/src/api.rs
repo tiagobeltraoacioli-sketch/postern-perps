@@ -152,10 +152,22 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
 
 /// CORS (API.md section 1): every response carries the configured origin; a preflight is answered here. The API
 /// has no cookies and no sessions, so the header grants nothing a non-browser client does not already have.
+///
+/// The same layer applies the per-IP READ limit of section 8 (R436-6: reads were unlimited): every GET except the
+/// WebSocket upgrade takes a token of the caller's bucket; an empty bucket is `429 RATE_LIMITED`.
 async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let origin = app.cors_origin.lock().unwrap().clone();
     let preflight = req.method() == axum::http::Method::OPTIONS;
-    let mut resp = if preflight { StatusCode::NO_CONTENT.into_response() } else { next.run(req).await };
+    let limited = req.method() == axum::http::Method::GET
+        && req.uri().path() != "/v1/ws"
+        && req.extensions().get::<ConnectInfo<SocketAddr>>().is_some_and(|ci| !app.read_rate.lock().unwrap().allow(&ip_key(ci.0.ip()), now_ms()));
+    let mut resp = if preflight {
+        StatusCode::NO_CONTENT.into_response()
+    } else if limited {
+        error(429, "RATE_LIMITED", "per-IP read rate", serde_json::json!({}))
+    } else {
+        next.run(req).await
+    };
     let h = resp.headers_mut();
     if let Ok(v) = HeaderValue::from_str(&origin) {
         h.insert("access-control-allow-origin", v);
@@ -573,31 +585,48 @@ async fn block_at(State(app): State<Arc<App>>, Path(h): Path<u64>, q: Q) -> Resp
     }
 }
 
-async fn blocks_range(State(app): State<Arc<App>>, q: Q) -> Response {
-    let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
-    let limit: u64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).clamp(1, 500);
-    let raw = q.get("raw").is_some();
+/// Blocks `from..from + limit` as stored (cloned under the sequencer lock; nothing else is done under it).
+fn take_blocks(app: &App, from: u64, limit: u64) -> Vec<crate::types::Block> {
     let s = app.seq.lock().unwrap();
     let mut out = Vec::new();
     for h in from..from.saturating_add(limit) {
         match s.block(h) {
-            Ok(Some(b)) => out.push(block_json(&app, &b, raw)),
+            Ok(Some(b)) => out.push(b),
             _ => break,
         }
     }
+    out
+}
+
+/// R436-6: decoding the inputs and recovering every action's signer is done OUTSIDE the sequencer lock.
+async fn blocks_range(State(app): State<Arc<App>>, q: Q) -> Response {
+    let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
+    let limit: u64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).clamp(1, 500);
+    let raw = q.get("raw").is_some();
+    let blocks = take_blocks(&app, from, limit);
+    let out: Vec<serde_json::Value> = blocks.iter().map(|b| block_json(&app, b, raw)).collect();
     Json(serde_json::json!({"blocks": out})).into_response()
 }
 
+/// At most 10,001 blocks per request (continue with `from` = the last height + 1), read 200 at a time so the
+/// sequencer lock is held only for the copies.
 async fn blocks_stream(State(app): State<Arc<App>>, q: Q) -> Response {
     let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
-    let s = app.seq.lock().unwrap();
-    let last = s.log.last_height;
+    let raw = q.get("raw").is_some();
+    let end = from.saturating_add(10_001);
     let mut body = String::new();
-    for h in from..=last.min(from.saturating_add(10_000)) {
-        if let Ok(Some(b)) = s.block(h) {
-            body.push_str(&block_json(&app, &b, q.get("raw").is_some()).to_string());
+    let mut next = from;
+    while next < end {
+        let chunk = take_blocks(&app, next, (end - next).min(200));
+        if chunk.is_empty() {
+            break;
+        }
+        next += chunk.len() as u64;
+        for b in &chunk {
+            body.push_str(&block_json(&app, b, raw).to_string());
             body.push('\n');
         }
+        tokio::task::yield_now().await;
     }
     ([("content-type", "application/x-ndjson")], body).into_response()
 }
@@ -843,8 +872,10 @@ async fn account_proof(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q)
         Some(Ok(h)) => Some(h),
         Some(Err(_)) => return error(400, "MALFORMED", "height", serde_json::json!({"path": "height"})),
     };
-    let r = app.seq.lock().unwrap().account_proof(&a, height);
-    match r {
+    // the engine state of that checkpoint is taken under the lock (an Arc clone); the proof (hashing every
+    // account leaf) is built outside it (R436-6)
+    let parts = app.seq.lock().unwrap().account_proof_parts(height);
+    match parts.and_then(|(e, root, cp)| crate::sequencer::build_account_proof(&e, &a, &root, cp)) {
         Ok(j) => Json(j).into_response(),
         Err(e) => not_found(&e),
     }
@@ -925,24 +956,15 @@ async fn withdrawal(State(app): State<Arc<App>>, Path(id): Path<u64>) -> Respons
     }
 }
 
+/// Newest first, at most 1,000. The ids come from the per-account index and each certificate proof costs 32
+/// hashes (R436-6: this used to scan every withdrawal and rebuild the whole tree per record).
 async fn account_withdrawals(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
         Err(r) => return r,
     };
-    let n = app.seq.lock().unwrap().engine.withdrawal_count();
-    let mut out = Vec::new();
-    for id in (0..n).rev() {
-        let is_mine = app.seq.lock().unwrap().engine.withdrawal(id).map(|w| w.account == a).unwrap_or(false);
-        if is_mine {
-            if let Some(j) = withdrawal_json(&app, id) {
-                out.push(j);
-            }
-        }
-        if out.len() >= 1000 {
-            break;
-        }
-    }
+    let ids: Vec<u64> = app.seq.lock().unwrap().wd_by_account.get(&a).map(|v| v.iter().rev().take(1000).copied().collect()).unwrap_or_default();
+    let out: Vec<serde_json::Value> = ids.into_iter().filter_map(|id| withdrawal_json(&app, id)).collect();
     Json(serde_json::json!({"withdrawals": out})).into_response()
 }
 
@@ -1045,7 +1067,7 @@ fn account_update(app: &App, info: &crate::sequencer::BlockInfo, a: &Address, in
     let deposits: Vec<crate::types::DepositEvent> = inputs.iter().filter_map(|i| match i { crate::types::Input::Deposit(d) if d.account == *a => Some(d.clone()), _ => None }).collect();
     let mut data = {
         let s = app.seq.lock().unwrap();
-        let acks: Vec<serde_json::Value> = s.acks.values().filter(|k| k.account == *a && k.height == Some(h)).map(|k| k.to_json()).collect();
+        let acks: Vec<serde_json::Value> = info.acks.iter().filter(|(x, _)| x == a).map(|(_, j)| j.clone()).collect();
         let mut data = serde_json::json!({"height": h, "time": info.block.header.time,
             "account": s.account_view(a, false).map(account_shape).unwrap_or(serde_json::Value::Null)});
         match (&info.delta, &s.index) {
