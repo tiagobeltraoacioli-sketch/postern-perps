@@ -502,6 +502,16 @@ fn c3_median_resists_two_liars_and_any_sequencer_subset() {
                     "mask {mask:#b} liars {liar_vals:?}: {price} outside [{lo}, {hi}]"
                 ),
                 MarketOutcome::Disagree { .. } => assert_eq!(st.safe_index(1), Some(648_700)),
+                // Restated in round 2 (rule C3 with SPEC S-5.1.1): a liar's value above MAX_PRICE no longer
+                // counts, so a subset left with fewer than q counted values is NO_QUORUM. Same property (the
+                // round changes nothing); accepted only for the liar patterns that are above the bound, so every
+                // other pattern keeps its round-1 strictness.
+                MarketOutcome::NoQuorum { .. }
+                    if liar_vals.0 > perps_oracle::MAX_PRICE
+                        || liar_vals.1 > perps_oracle::MAX_PRICE =>
+                {
+                    assert_eq!(st.safe_index(1), Some(648_700))
+                }
                 other => panic!("mask {mask:#b} liars {liar_vals:?}: unexpected {other:?}"),
             }
         }
@@ -926,4 +936,63 @@ fn r436_12_ignored_is_not_accepted_and_too_few_in_time_still_refuses() {
         t_of(r),
         OracleError::Time { observation: 6 },
     );
+}
+
+/// Round 2, 430's R430-2 (SPEC S-5.1.1), adopted in the normative rule so that this crate and the engine stay
+/// one rule: a committee value above the engine's `MAX_PRICE` (10^15 units = 10,000,000 USD) is not a price. The
+/// entry does not count for its market (as if its sources were too few); the update itself stays valid.
+#[test]
+fn c3_a_value_above_max_price_never_becomes_the_index() {
+    use perps_oracle::MAX_PRICE;
+    let prm = params();
+    // From genesis: a committee that agrees on MAX_PRICE + 1 confirms nothing; on MAX_PRICE it does.
+    let mut st = OracleState::genesis(&prm).unwrap();
+    for k in 0..4 {
+        let r = R0 + k;
+        begin_block(&prm, &mut st, t_of(r));
+        let rep = apply_update(&prm, &mut st, &honest(r, MAX_PRICE + 1), t_of(r)).unwrap();
+        assert_eq!(rep.outcomes[0].1, MarketOutcome::NoQuorum { have: 0 });
+    }
+    assert_eq!(st.market(1).unwrap().index, 0);
+    let mut st = OracleState::genesis(&prm).unwrap();
+    for k in 0..3 {
+        let r = R0 + k;
+        begin_block(&prm, &mut st, t_of(r));
+        apply_update(&prm, &mut st, &honest(r, MAX_PRICE), t_of(r)).unwrap();
+    }
+    assert_eq!(st.safe_index(1), Some(MAX_PRICE));
+    // Three of seven above the bound: four values left, below the quorum of five.
+    let (prm, mut st, r) = active_at(648_700);
+    let u = update(
+        r,
+        &[0, 1, 2, 3, 4, 5, 6],
+        &[
+            648_700,
+            648_700,
+            648_700,
+            648_700,
+            MAX_PRICE + 1,
+            u64::MAX,
+            MAX_PRICE + 1,
+        ],
+    );
+    let rep = apply_update(&prm, &mut st, &u, t_of(r)).unwrap();
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::NoQuorum { have: 4 });
+    assert_eq!(st.market(1).unwrap().index, 648_700);
+    // Two above the bound: five honest values carry the round.
+    let u = update(
+        r + 1,
+        &[0, 1, 2, 3, 4, 5, 6],
+        &[
+            648_800,
+            648_800,
+            648_800,
+            648_800,
+            648_800,
+            u64::MAX,
+            MAX_PRICE + 1,
+        ],
+    );
+    let rep = apply_update(&prm, &mut st, &u, t_of(r + 1)).unwrap();
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_800 });
 }

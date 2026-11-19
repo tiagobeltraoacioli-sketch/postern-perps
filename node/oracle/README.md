@@ -148,7 +148,10 @@ Then `lastOracleRound = round`, and for each market `m` the engine knows (entrie
 in ascending `marketId` order:
 
 - A round rejected by C3 or C4 for a market still consumes the round number (C1 is about the input).
-- C3 values `V` = the `price` of `m` in each observation NOT ignored by C2d whose entry has `sources >= minSources(m)`. If `|V| < q`:
+- C3 values `V` = the `price` of `m` in each observation NOT ignored by C2d whose entry has `sources >= minSources(m)`
+  and `price <= MAX_PRICE = 10^15` (10,000,000 USD at 1e-8; `docs/SPEC.md` S-5.1.1, 430's R430-2, adopted here in
+  round 2 so that this document and the engine are one rule: a larger value is not a price and its entry does not
+  count; the update itself stays valid). If `|V| < q`:
   no change for `m` (`NO_QUORUM`). Else `M = sort(V)[|V| / 2]` (the median; the upper median when `|V|` is even).
 - C4 `A` = the number of `v` in `V` with `|v - M| * 10000 <= agreeBps * M` (u128). If `A < q`: no change for `m`
   (`DISAGREE`). Else `M` is the committee price of `m` for round `round`, at time `tau = round * 3000`.

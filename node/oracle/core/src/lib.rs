@@ -29,6 +29,9 @@ pub mod types;
 
 /// Length of an oracle round in milliseconds (README section 2).
 pub const ROUND_MS: u64 = 3000;
+/// The engine's largest price, `MAX_PRICE = 10^15` units of 1e-8 USD = 10,000,000 USD (`docs/SPEC.md` section 1).
+/// A committee value above it is not a price (rule C3).
+pub const MAX_PRICE: u64 = 1_000_000_000_000_000;
 /// Maximum number of markets in one observation.
 pub const MAX_PRICES: usize = 256;
 

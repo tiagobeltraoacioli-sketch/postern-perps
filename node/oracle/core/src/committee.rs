@@ -433,6 +433,9 @@ pub fn apply_update(
             .filter(|(_, ig)| !**ig)
             .filter_map(|(o, _)| o.prices.iter().find(|e| e.market_id == p.market_id))
             .filter(|e| e.sources >= p.min_sources)
+            // SPEC S-5.1.1 (430's R430-2): a value above MAX_PRICE is not a price of the engine; the entry does
+            // not count, so a committee that signs such a value gets no index (fail closed).
+            .filter(|e| e.price <= crate::MAX_PRICE)
             .map(|e| e.price)
             .collect();
         if v.len() < q {
