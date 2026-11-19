@@ -91,4 +91,11 @@ export default async function (ctx) {
     await api.cancelAll(maker);
     return { forcedRequests: forcedCount, processedInVault: Number(latest[3]) };
   });
+  await ctx.check('H-06', 'the node\'s own checkpoint relayer (the keeper) delivered checkpoints to the vault without anyone asking', async () => {
+    blockedIf(!stack.relayer, 'the stack runs without the node relayer (up.sh --relayer off): every checkpoint was relayed by the rehearsal');
+    const r = (await api.json('/v1/node')).relayer;
+    expect(r.enabled === true && r.accepted >= 1, JSON.stringify(r));
+    expect(r.address === stack.relayer, `relayer ${r.address}`);
+    return { address: r.address, submitted: r.submitted, accepted: r.accepted, failures: r.failures, lastReason: r.lastReason, vaultLatestHeight: r.vaultLatestHeight, vaultMode: r.vaultMode, alarm: r.alarm };
+  });
 }

@@ -27,12 +27,13 @@ export default async function (ctx) {
     await sleep(1500);
     const h0 = (await api.json('/v1/status')).latestBlock.height;
     await api.until(async () => {
-      const { C, r } = await relayLatest(ctx, { minHeight: h0 });
-      lastCp = C;
-      return Number((await chain.call(stack.vault, LATEST))[0]) === C.height ? true : null;
-    }, { ms: 90000, every: 2000, what: 'the vault at the node\'s latest final checkpoint' });
+      await relayLatest(ctx, { minHeight: h0 });   // the rehearsal's relay or the node's own relayer: either may deliver it
+      return Number((await chain.call(stack.vault, LATEST))[0]) >= h0 ? true : null;
+    }, { ms: 90000, every: 2000, what: 'the vault at a checkpoint taken after every order was cancelled' });
     const L = await chain.call(stack.vault, LATEST);
     H = Number(L[0]); totalEscape = BigInt(L[6]);
+    lastCp = await api.json(`/v1/finality/${H}`);
+    expect(lastCp.height === H && lastCp.stateRoot === L[8], `the node's checkpoint at ${H} is not the one the vault holds`);
     let sum = 0n;
     for (const a of all) {
       const r = await api.get(`/v1/accounts/${a.address}/proof?height=${H}`);

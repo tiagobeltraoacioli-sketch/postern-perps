@@ -1,7 +1,7 @@
 #!/bin/bash
 # Starts the local PosternDEX Perpetuals stack. UNAUDITED prototype: local processes, loopback only, throwaway keys.
 #
-#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--funding-ms MS] [--frontend] [--keep]
+#   e2e/up.sh [--label L] [--tree DIR] [--l2 anvil|fake] [--oracle replay|dev] [--local-validators N] [--funding-ms MS] [--relayer on|off] [--frontend] [--keep]
 #
 # Build host (loopback): L2 (anvil chain 700770 + the pass-through proxy as second endpoint), the node
 # (sequencer; validators in process and/or as separate processes), the oracle feeder. Mac: one ssh tunnel, the
@@ -10,10 +10,12 @@
 # --tree is the Mac checkout of the same tree (contracts, frontend, mock); default the integration worktree.
 # --funding-ms: the dev genesis funding interval (default 60000 = one minute, so several intervals pass in one
 #   rehearsal; production is 3600000; 0 keeps the compliance value). A dev override of the node, shown in /v1/markets.
+# --relayer on (default, anvil only): the node's own checkpoint relayer (the keeper of VAULT.md 8a) with a gas-only
+#   THROWAWAY key generated on the host at run time (file 0600, never printed), funded with anvil_setBalance.
 # --keep restarts the node on its existing data directory (recovery) instead of a fresh one.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/config.sh"
-LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000
+LABEL=main; L2=anvil; ORACLE=replay; LOCALV=7; FRONTEND=0; KEEP=fresh; FUNDING_MS=60000; RELAYER=on
 TREE=$HOME/worktrees/perps-e2e-r2-int-20261118; [ -d "$TREE" ] || TREE=$(cd "$HERE/.." && pwd)
 while [ $# -gt 0 ]; do
   case $1 in
@@ -25,6 +27,7 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=keep; shift ;;
     --tree) TREE=$2; shift 2 ;;
     --funding-ms) FUNDING_MS=$2; shift 2 ;;
+    --relayer) RELAYER=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -69,6 +72,11 @@ if [ "$L2" = anvil ]; then
   . "$HERE/deploy.sh"   # sets VAULT, TOKEN; writes .run/deployment.json
   GEN="$GEN --vault $VAULT"; NODE_ARGS="$NODE_ARGS --token $TOKEN"
   L2_ARGS="--l2 http://127.0.0.1:$H_ANVIL,http://127.0.0.1:$H_PROXY --l2-poll-ms 1000"
+  NODE_ARGS="$NODE_ARGS --cors-origin http://127.0.0.1:$M_FRONTEND"
+  if [ "$RELAYER" = on ]; then
+    e2e_ssh "$S/bin/relay-prepare.sh $KEEP"
+    NODE_ARGS="$NODE_ARGS --relay-rpc http://127.0.0.1:$H_ANVIL --relay-key-file \$HOME/$E2E_SCRATCH/run/relay-key --relay-poll-ms 2000"
+  fi
 else
   L2_ARGS="--l2 http://127.0.0.1:53512,http://127.0.0.1:53513"
 fi
@@ -92,6 +100,12 @@ if [ -n "$VAULT" ] && [ "$NODE_VAULT" != "$VAULT" ]; then echo "the node's vault
 VAULT=$NODE_VAULT
 say "node up (tree $LABEL, $PROFILE, engine vault $VAULT)"
 
+if [ "$L2" = anvil ] && [ "$RELAYER" = on ]; then
+  RELAY_ADDR=$(curl -fsS "http://127.0.0.1:$M_API/v1/node" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).relayer?.address ?? ""))')
+  case "$RELAY_ADDR" in 0x????????????????????????????????????????) ;; *) echo "the node reports no relayer address (does this tree's node take --relay-rpc?)" >&2; exit 1 ;; esac
+  curl -fsS -o /dev/null -X POST -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"anvil_setBalance\",\"params\":[\"$RELAY_ADDR\",\"0x56bc75e2d63100000\"]}" "http://127.0.0.1:$M_ANVIL"
+  say "checkpoint relayer $RELAY_ADDR funded with gas on the local anvil"
+fi
 if [ "$L2" = fake ]; then
   DEP=$("$NODE_BIN" "$HERE/rehearsal/accounts.mjs" --fake-l2-args)
   mac_start fake-l2-a "$NODE_BIN" "$TREE/node/mock/conformance/fake-l2.mjs" --port 49912 --vault "$VAULT" $DEP
@@ -115,6 +129,7 @@ cat > "$RUN/stack.json" <<JSON
  "seed": "$E2E_SEED", "genesisFlags": "$GEN", "fundingIntervalMs": $FUNDING_MS, "profile": "$PROFILE", "api": "http://127.0.0.1:$M_API", "l2Rpc": "http://127.0.0.1:$M_ANVIL", "l2Proxy": "http://127.0.0.1:$M_PROXY",
  "hostApi": "http://127.0.0.1:$H_API", "vault": "$VAULT", "token": "$TOKEN", "frontend": $( [ "$FRONTEND" = 1 ] && echo "\"http://127.0.0.1:$M_FRONTEND\"" || echo null ),
  "oracleCommittee": $( [ -n "${ORACLE_LIST:-}" ] && printf '["%s"]' "$(printf '%s' "$ORACLE_LIST" | sed 's/,/","/g')" || echo null ), "oracleQuorum": 5,
+ "relayer": $( [ -n "${RELAY_ADDR:-}" ] && echo "\"$RELAY_ADDR\"" || echo null ),
  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 JSON
 say "stack up; description in $RUN/stack.json; stop with e2e/down.sh"

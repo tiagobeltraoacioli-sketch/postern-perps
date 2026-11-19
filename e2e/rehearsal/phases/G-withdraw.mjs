@@ -12,10 +12,9 @@ export const recordTuple = (r) => `(${r.withdrawalId},${r.account},${r.recipient
 /** Relays a checkpoint that contains withdrawal `id`, fetches its proof for that checkpoint. */
 export async function provenWithdrawal(ctx, id, minHeight) {
   const { api, chain, stack } = ctx;
-  const { C, r } = await relayLatest(ctx, { minHeight });
+  const { C, r, held } = await relayLatest(ctx, { minHeight });
   const seq = Number(await chain.callOne(stack.vault, 'checkpointCount()(uint64)'));
-  const vaultLatest = await chain.call(stack.vault, 'latest()(uint64,uint64,uint64,uint64,uint64,uint64,uint128,bytes32,bytes32)');
-  expect(r.ok || Number(vaultLatest[0]) >= C.height, `checkpoint relay: ${r.error}`);
+  expect(held, `checkpoint relay: ${r.error}`);
   const count = Number(await chain.callOne(stack.vault, 'withdrawalCountAt(uint64)(uint64)', [seq]));
   expect(count > Number(id), `the accepted checkpoint ${seq} holds ${count} withdrawal records, need id ${id}`);
   const p = await api.json(`/v1/withdrawals/${id}/proof?count=${count}`);
