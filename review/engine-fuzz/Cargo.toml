@@ -11,6 +11,7 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 hex = "0.4"
 # Agent 436 (round 2): the engine under test, for the fuzzer binary only (src/lib.rs stays SPEC-only).
 postern-perps-engine = { path = "../../engine" }
+serde_json = "1"
 
 [[bin]]
 name = "fuzz436"

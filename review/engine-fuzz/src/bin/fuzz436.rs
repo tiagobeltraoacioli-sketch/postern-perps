@@ -33,6 +33,8 @@
 //!  (the R436-1 class); accounts still below maintenance after their liquidation step.
 //!
 //! Usage: fuzz436 <first_seed> <seeds> <blocks_per_seed> <threads> [minutes]
+//! FUZZ436_COMPLIANCE=1: the genesis comes from compliance/markets.json + risk.json through the engine's converter
+//! (the real ticks, steps, tiers, leverage, OI caps, confirmRounds and launch gate) instead of the testkit markets.
 //! THROWAWAY keys only (derived from public integers).
 use k256::ecdsa::SigningKey;
 use perps_review_fuzz as sp;
@@ -156,7 +158,9 @@ struct World {
     next_dep: u64,
     next_forced: u64,
     forced: BTreeMap<u64, ([u8; 20], u8, u64)>,
-    px: [u64; 2],
+    px: Vec<u64>,
+    mids: Vec<u32>,
+    compliance: bool,
     mode: u64,
     last_round: u64,
     nonce_ctr: u64,
@@ -237,17 +241,29 @@ impl World {
     fn new(seed: u64) -> World {
         let mut rng = Rng(seed.wrapping_mul(0xD1B5_4A32_D192_ED03) ^ 0x436);
         let n_or = 7;
-        let mut m1 = pe::testkit::market(1, "BTC-USD");
-        let mut m2 = pe::testkit::market(2, "ETH-USD");
-        if rng.chance(30) {
-            m1.oi_cap = 2_000_000_000; // 20 BTC: the OI cap binds
-            m2.oi_cap = 20_000_000_000;
-        }
-        if rng.chance(30) {
-            m1.oracle.confirm_rounds = 3;
-            m2.oracle.confirm_rounds = 2;
-        }
-        let e = Engine::new(pe::testkit::genesis(n_or, vec![m1, m2]));
+        let compliance = std::env::var("FUZZ436_COMPLIANCE").is_ok();
+        let e = if compliance {
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../compliance/");
+            let rd = |f: &str| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(format!("{dir}{f}")).expect("compliance file")).expect("json") };
+            let signers: Vec<String> = pe::testkit::oracle_keys(n_or).iter().map(|k| format!("0x{}", hex::encode(addr(k)))).collect();
+            let g = pe::genesis::from_compliance(&rd("markets.json"), &rd("risk.json"), pe::testkit::DEV_VAULT, signers, 5, "25000", 250_000).expect("compliance genesis");
+            Engine::new(g.check().expect("checked"))
+        } else {
+            let mut m1 = pe::testkit::market(1, "BTC-USD");
+            let mut m2 = pe::testkit::market(2, "ETH-USD");
+            if rng.chance(30) {
+                m1.oi_cap = 2_000_000_000; // 20 BTC: the OI cap binds
+                m2.oi_cap = 20_000_000_000;
+            }
+            if rng.chance(30) {
+                m1.oracle.confirm_rounds = 3;
+                m2.oracle.confirm_rounds = 2;
+            }
+            Engine::new(pe::testkit::genesis(n_or, vec![m1, m2]))
+        };
+        let mids: Vec<u32> = e.markets.keys().copied().collect();
+        let start = [6_725_000_000_000u64, 348_000_000_000, 18_240_000_000];
+        let px: Vec<u64> = (0..mids.len()).map(|i| start[i % 3]).collect();
         let dom = sp::Domain::production_like(VAULT);
         assert_eq!(dom.separator(), e.domain_sep, "SPEC 2.1 domain separator: this program's equals the engine's");
         let log_hash = e.log_hash;
@@ -262,12 +278,16 @@ impl World {
             rng_checks: Rng(seed ^ 0x5EED_C0DE_0436),
             e,
             dom,
-            t: T0,
+            // compliance mode (confirmRounds 3): start 150 s before an hour boundary, so that a funding boundary is
+            // crossed by ordinary blocks while the markets are active (after an hour JUMP they are halted)
+            t: if compliance { T0 + 650_000 } else { T0 },
             h: 0,
             next_dep: 0,
             next_forced: 0,
             forced: BTreeMap::new(),
-            px: [6_725_000_000_000, 348_000_000_000],
+            px,
+            mids,
+            compliance,
             mode,
             last_round: 0,
             nonce_ctr: 0,
@@ -306,7 +326,7 @@ impl World {
     fn price_near(&mut self, mid: u32) -> u64 {
         let m = &self.e.markets[&mid];
         let tick = m.p.tick;
-        let base = if m.mark > 0 { m.mark } else { self.px[(mid - 1) as usize] };
+        let base = if m.mark > 0 { m.mark } else { self.px[self.mids.iter().position(|x| *x == mid).unwrap()] };
         let p = if self.rng.chance(8) {
             // far from the market: 0.3x to 3x
             (base as u128 * (30 + self.rng.below(270)) as u128 / 100) as u64
@@ -320,7 +340,7 @@ impl World {
         let ui = self.rng.below(USERS as u64) as usize;
         let key = self.users[ui].clone();
         let acct = addr(&key);
-        let mid = 1 + self.rng.below(2) as u32;
+        let mid = self.mids[self.rng.below(self.mids.len() as u64) as usize];
         let mut meta = Meta { expect: Expect::Any, why: "", withdraw: None, deposit: None, payload: Vec::new(), is_action: true };
         // who signs: the account, its agent slot (maybe approved), or a stranger
         let roll = self.rng.below(100);
@@ -335,7 +355,15 @@ impl World {
             let step = self.e.markets[&mid].p.step;
             let big = if self.rng.chance(10) { 5000 } else { 400 };
             let off_step = if self.rng.chance(2) { 1 } else { 0 };
-            let size = (1 + self.rng.below(big)) * step + off_step;
+            let size = if self.compliance {
+                // the real steps are fine-grained: sizes up to about 30,000 USD of notional (ten times that 1 in 10)
+                let mp = &self.e.markets[&mid].p;
+                let target = (if big > 400 { 300_000u128 } else { 30_000u128 }) * 10_000_000_000_000_000 / (price.max(1) as u128);
+                let k = ((target / step as u128) as u64).clamp(1, mp.max_size / step + 3);
+                (mp.min_size / step).saturating_sub(1) * step + (1 + self.rng.below(k)) * step + off_step
+            } else {
+                (1 + self.rng.below(big)) * step + off_step
+            };
             let trig = if ty >= 2 { self.price_near(mid) } else if self.rng.chance(1) { 5 } else { 0 };
             let mut coid = [0u8; 32];
             coid[31] = self.rng.below(256) as u8;
@@ -352,7 +380,7 @@ impl World {
             };
             sp::Action { ty: "CancelOrder", fields: vec![Val::Address(acct), Val::U64(n), Val::U32(m), Val::U64(oid)] }
         } else if kind < 76 {
-            sp::Action { ty: "CancelAll", fields: vec![Val::Address(acct), Val::U64(n), Val::U32(self.rng.below(4) as u32)] }
+            sp::Action { ty: "CancelAll", fields: vec![Val::Address(acct), Val::U64(n), Val::U32(self.rng.below(self.mids.len() as u64 + 2) as u32)] }
         } else if kind < 82 {
             sp::Action { ty: "UpdateLeverage", fields: vec![Val::Address(acct), Val::U64(n), Val::U32(mid), Val::U32(self.rng.below(56) as u32), Val::Bool(self.rng.chance(5))] }
         } else if kind < 84 {
@@ -414,7 +442,7 @@ impl World {
         }
         self.last_round = round;
         // price process
-        for i in 0..2 {
+        for i in 0..self.px.len() {
             let mv: i64 = match self.mode {
                 0 => 0,
                 1 => self.rng.range(-300, 300),
@@ -442,8 +470,9 @@ impl World {
         p.push(signers.len() as u8);
         for s in signers {
             let mut prices: Vec<(u32, u64, u8)> = Vec::new();
-            for (i, mid) in [1u32, 2].iter().enumerate() {
-                if *mid == 2 && skip_eth {
+            let mids = self.mids.clone();
+            for (i, mid) in mids.iter().enumerate() {
+                if i == 1 && skip_eth {
                     continue;
                 }
                 let jitter = if self.mode == 0 { 0 } else if self.rng.chance(3) { self.rng.range(-300, 300) } else { self.rng.range(-20, 20) };
@@ -495,11 +524,18 @@ impl World {
         // deposits
         if self.h == 1 {
             let (ins, bs) = (self.rng.below(3), self.rng.below(3));
-            if ins > 0 {
-                self.deposit(system_address(ACCT_INSURANCE), 60_000_000_000 / ins, &mut metas, &mut inputs);
-            }
-            if bs > 0 {
-                self.deposit(system_address(ACCT_BACKSTOP), 25_000_000_000 / bs, &mut metas, &mut inputs);
+            if self.compliance {
+                // the launch gate (S-4.11) needs both minimums before any order is accepted
+                let (li, lb) = (self.e.g.g.launch_insurance_min, self.e.g.g.launch_backstop_min);
+                self.deposit(system_address(ACCT_INSURANCE), li.max(1), &mut metas, &mut inputs);
+                self.deposit(system_address(ACCT_BACKSTOP), lb.max(1), &mut metas, &mut inputs);
+            } else {
+                if ins > 0 {
+                    self.deposit(system_address(ACCT_INSURANCE), 60_000_000_000 / ins, &mut metas, &mut inputs);
+                }
+                if bs > 0 {
+                    self.deposit(system_address(ACCT_BACKSTOP), 25_000_000_000 / bs, &mut metas, &mut inputs);
+                }
             }
             for i in 0..USERS {
                 if self.rng.chance(85) {
