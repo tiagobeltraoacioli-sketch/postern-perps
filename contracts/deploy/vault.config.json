@@ -3,6 +3,8 @@
   "status": "PROTOTYPE, UNAUDITED: not for deployment (perpetuals not deployed before legal review)",
   "chainId": 700770,
   "token": "TBD-deploy",
+  "tokenCodehash": "TBD-deploy",
+  "tokenCodehashNote": "keccak256 of the token's runtime code (cast codehash), taken from the reviewed bUSDC deployment and compared by the script; pins WHICH contract holds the collateral, not only its address",
   "tokenNote": "bUSDC on the Bloch L2 (BridgedStablecoinV3 of the Ethereum route), 6 decimals; address from bloch-l2-bridge deployments/bridges.json once deployed",
   "feeRecipient": "0x775a993F09Bd80aeCF8F8c2ADe0C84158E3a0544",
   "validators": ["TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner", "TBD-owner"],

@@ -1,0 +1,540 @@
+{
+  "schema": "postern-perps/engine-vault-vectors/1",
+  "status": "PROTOTYPE, UNAUDITED. Produced by contracts/tools/engine-vectors from the real engine; throwaway keys",
+  "story": "backstop",
+  "chainId": 700770,
+  "vault": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "feeRecipient": "0x775a993f09bd80aecf8f8c2ade0c84158e3a0544",
+  "validators": [
+    "0x02daa7c91de56731fe424b0c4e7d90d7833caab0",
+    "0x04a3c31a73d71aeb06318ac28c966e73b86d91b8",
+    "0x17a73195ccb3c210daa8ed0cef453b448ae5b977",
+    "0x6d632d85af86ee2aee04f267e4023f5f04e01fa7",
+    "0xbcdb818b1249ef1a02ff65cbc2c2d3103de302ed",
+    "0xbeb9fa621d9ccf67a38d338dee76afc1146a60fd",
+    "0xff6c9a0696ec40ebe8f51d474d6150df66d6edeb"
+  ],
+  "guardians": [
+    "0x0dd5182cd2915b3ea92f363a9fed2129c3f75866",
+    "0x388891054f4465ca603415e96fff65a2fb77a967",
+    "0x5732fca734c22f2fe62216b9d3bcbda4b4dd1b93"
+  ],
+  "limits": {
+    "threshold": 5,
+    "unpauseThreshold": 6,
+    "cap": "1000000000000",
+    "minDeposit": "10000000",
+    "windowLimit": "250000000000",
+    "windowSeconds": "86400",
+    "largeThreshold": "50000000000",
+    "largeDelay": "86400",
+    "forcedDelay": "172800",
+    "escapeDelay": "604800",
+    "pauseDuration": "172800",
+    "pauseCooldown": "172800"
+  },
+  "engine": {
+    "specVersion": "0.1",
+    "finalHeight": 12,
+    "finalStateRoot": "0x24766cebe967c98c8b57e4d4d379206772b5d64da218b470d83ead47cd86c084"
+  },
+  "notes": [
+    "at the last checkpoint: mallory equity -66400781600000000000 (1e-8 notional units), INSURANCE balance 5000000000 -> escape value 0, sum of escape values 59640078160 vs custody 58000000000"
+  ],
+  "stepCount": 19,
+  "steps": [
+    {
+      "from": "0xc0b93a2fab7ded2a08db92dfa8845d42be6eaf01",
+      "account": "0x0000000000000000000000000000000000000002",
+      "amount": "5000000000",
+      "expectIndex": 0,
+      "kind": "deposit",
+      "l2Time": "1800000001",
+      "n": 0
+    },
+    {
+      "from": "0xc0b93a2fab7ded2a08db92dfa8845d42be6eaf01",
+      "account": "0x0000000000000000000000000000000000000003",
+      "amount": "2000000000",
+      "expectIndex": 1,
+      "kind": "deposit",
+      "l2Time": "1800000002",
+      "n": 1
+    },
+    {
+      "from": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+      "account": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+      "amount": "40000000000",
+      "expectIndex": 2,
+      "kind": "deposit",
+      "l2Time": "1800000003",
+      "n": 2
+    },
+    {
+      "from": "0xebbb2a22bd123086bc2edc0e6e8536ae7497d70f",
+      "account": "0xebbb2a22bd123086bc2edc0e6e8536ae7497d70f",
+      "amount": "8000000000",
+      "expectIndex": 3,
+      "kind": "deposit",
+      "l2Time": "1800000004",
+      "n": 3
+    },
+    {
+      "from": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",
+      "account": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",
+      "amount": "3000000000",
+      "expectIndex": 4,
+      "kind": "deposit",
+      "l2Time": "1800000005",
+      "n": 4
+    },
+    {
+      "cp": {
+        "height": "2",
+        "time": "1800000006000",
+        "logHash": "0x102eca1c094e1e0021cd5512ef58e7dd75113102eee70347f10ba235af84dfbd",
+        "stateRoot": "0x42b4123432ffe61d836e4875dfc6cd6db0997e5d532a34621aeaec5d6f3e3438",
+        "accountsRoot": "0x29ef86a3cff5d13853288f7e55bc8ea45fef6a25bf092b57b26401693ce7ea5c",
+        "marketsRoot": "0x6c6569f7828b29490863ad1c6af9f4b9e95857dcbd2f65864ff3278877e61423",
+        "withdrawalsRoot": "0x7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e",
+        "nextDepositIndex": "5",
+        "nextForcedIndex": "0",
+        "nextOrderId": "5",
+        "totalEscape": "58000000000",
+        "dust": "0",
+        "auxHash": "0xc014ea2ef925ccdc05c1de1b765d0ba10bf4b15d093d79d4a51b0fc4e7bb5926",
+        "depositsHead": "0x8f5964f1dce64efd4029c4335515cb73dc93ae9c4eda04344931e0a75eb67a75",
+        "forcedHead": "0xfdac256423f5a41dd9fdbc56b3579ddae8cee0dbe78d5d4c9cc5172670d48498",
+        "withdrawalCount": "0",
+        "withdrawalsTotal": "0"
+      },
+      "digest": "0xc06bebc0f1be41a7ddccc34f29c8323fe3011a5bd4b26ffc0950cd3a9cea3afb",
+      "signatures": [
+        "0xc8808510fffa05b5e1b8c3b8fbe310061e9c485c13abab5b5d9d4338760ace411ea198705a4ddf310b1f0e5a2dd70fa1df4d54df4616f7eca855ec0e82241b3a1c",
+        "0x8410dd602835188b2dfbe54a320b24ceb22c1f190ccfb42c7392134d63e731dc6cc8c354260ddccf33b7b870f9a3e547df172ecd3bfa25bb56a0538e28002e711b",
+        "0xaaeaf67c6b8fecb845c394b0aa20cf58c0dbd1897b9535bf6c726c7af0ff360f345e0cc12c7331fc8715ea6820547217ec5c5eb119b501e6a15888a1410231991c",
+        "0xccaa1074a9bd476b8bb3d61ea09aad341b650a7635d4e91e791c96cbf6dfaa69682fee4f899f525156f5c5cf83d757860ce015a3ed7dfd050bdc684464e7db5f1c",
+        "0x130a32c086af330b185acd7a47443a8e17dd525577e26d410563373f37c4a104435c79510e4d6f3df23ece4760ebc72d0dccbd949bcd6182ba47bb5184c408271c"
+      ],
+      "expect": "accepted",
+      "expectSeq": 1,
+      "kind": "checkpoint",
+      "l2Time": "1800000006",
+      "n": 5
+    },
+    {
+      "cp": {
+        "height": "12",
+        "time": "1800000036000",
+        "logHash": "0xd786c3573202ffa93ae62c617a21aed5301ba7cb4fd233e04e2cbe7a01c9a567",
+        "stateRoot": "0x24766cebe967c98c8b57e4d4d379206772b5d64da218b470d83ead47cd86c084",
+        "accountsRoot": "0x2b6c8d9da68a26a63064b6171db3f47304742484e3b55a303f58f59563f21998",
+        "marketsRoot": "0x82273a9b5e1adc2483ce1866cc0dd797b9788c5bdc6c513a42e11af8ee431b9b",
+        "withdrawalsRoot": "0x7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e",
+        "nextDepositIndex": "5",
+        "nextForcedIndex": "0",
+        "nextOrderId": "5",
+        "totalEscape": "59640078160",
+        "dust": "0",
+        "auxHash": "0x5ba3a683f686aee9c0b5461854f4644b0d5ff8edda24d0c0e30d0cc2763c440e",
+        "depositsHead": "0x8f5964f1dce64efd4029c4335515cb73dc93ae9c4eda04344931e0a75eb67a75",
+        "forcedHead": "0xfdac256423f5a41dd9fdbc56b3579ddae8cee0dbe78d5d4c9cc5172670d48498",
+        "withdrawalCount": "0",
+        "withdrawalsTotal": "0"
+      },
+      "digest": "0xcd5445fdd58d681599cb174afb1a16580dcc31e2aacbdfe85c9bb8c9311b8837",
+      "signatures": [
+        "0x5d162f0b16e7dde25c12416b547a278f44475ec210e121d89d794bed55968bdb4576291e8b810c1a534d6b763a0e9845a33e50f19bc8bed080b02ccef2629df91b",
+        "0xa13723edc287a0eb38480417f6ed1a461a1ee41db0861fc577636c85d64f7a670e6ac1ad707840ab6f967c72531a19f37f4896a56305ebf556f022ae20ada64d1c",
+        "0x6fc6e7c9483b350d5c35a4c9af5cd2b0a5813ed5186ec50ec5d5fa2733a5f4c674845bcf6449a415eef594dcdce6664245caca1624a3ea6ff7a399d48b475e301c",
+        "0x5f088b491556a7aa0a161c440e8321d74c24b47d62ccda596efe955ed6d57e737fd4045d7c4c93f73d1f615bf7f9683c0f37db572cacba87dabb37844ccc8dff1b",
+        "0xf5ac478ad83668e03d2914bbc3dce25d5fcb473ea83827cd4c856acdae6edae24ae374a5bef7667a7100406631e5be86e43de5d7a12e42236edff8c3798540881c"
+      ],
+      "expect": "accepted",
+      "expectSeq": 2,
+      "kind": "checkpoint",
+      "l2Time": "1800000036",
+      "n": 6
+    },
+    {
+      "why": "no checkpoint for escapeDelay",
+      "kind": "warp",
+      "l2Time": "1800604836",
+      "n": 7
+    },
+    {
+      "expectReason": 1,
+      "expectPool": "58000000000",
+      "expectTotalEscape": "59640078160",
+      "kind": "triggerEscape",
+      "l2Time": "1800604837",
+      "n": 8
+    },
+    {
+      "insurance": {
+        "a": {
+          "account": "0x0000000000000000000000000000000000000002",
+          "index": 1,
+          "balance": "5000000000",
+          "escapeValue": "0",
+          "positionsHash": "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
+        },
+        "leafData": "0x50507631616363740000000000000000000000000000000000000002000000010000000000000000000000012a05f2000000000000000000e8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c",
+        "siblings": [
+          "0x1a7aee21ef4ce1e7a8f23e3f46903a09ae8a08d41bbcaf6c53ea57980a6990b0",
+          "0xf6cbca0bdedbc8c658bd1885f1eb66eeea93ffb764e59c863a0cb6189e98dde6",
+          "0x415c1b3aa94c5da05ddf08c43159d09c50ecae56b7270c6b7f5e0ff1737158b2",
+          "0x47a8f5e8fa70be2760378067c9c6d410dd96be07820b4230c11254c7ff10c298",
+          "0xaed19ca4bfe2365b1b33fa94744cd0c6a2d550506c7e7efc073879cb79459b9a",
+          "0x6e6998a7da8b2db5c98eb853099d8caec63797b5283b7dac37b2ffb630a86e24",
+          "0x181c19735bff23b55bc295fc0b60c1c5c7288209b261a08e26924598ce72404e",
+          "0xecb408b290ab2920e63611ef1e8ca964aebb66ea5739f19d24b92094f28e44f8",
+          "0x294bf9785e1391d24d52abf915636a73bdaa12ed29e85e21dae14c09d0f2e34b",
+          "0xcf7e37a934683edec795e3529db8fac0863519c2419ba24c0f6e4efa86ec7d1a",
+          "0x72ce48cca9bc743fed84a0bdc00ad2c5b540323849c982f671a9bd8d52d15719",
+          "0x0e2d7d0b695fdcd9dc6c54313ae652218375c3358d34ade3dcc49dda05c0db10",
+          "0xa0a786a71d24007a23f5ce21e6997a305baeefaf348937a8b74974cb039c10c8",
+          "0x0628cb6496193e6a55ece4a8240384e142273eeb9cc4bdae680f971fd1929f10",
+          "0x2c3b833a3ca9d6f02055871655dd18f003a279f84a334bf6050899a9bc1cedc3",
+          "0x1a6c5e9fd899efca64c2aca6243434b423d791f92a839c0c92ce0a5a51a07234",
+          "0xa9942b0fabdf9bf32241f8245eb26737ffbd91822ac484ae857fc35d21fb652f",
+          "0x7e4206a110a8721cc68455c35400b056251398dfcf98b04aeee19549bfd2122f",
+          "0xbfb429bfebb3aa270012d8063896d205bfd8ce116e4a304335bd59e9471f9fcc",
+          "0xe22fa8fff28cfb1f3664382ced6d3f1d634ef2851c10b1dce18c57c957985bf9",
+          "0xd29bf231e30afb5cd1bc01d214e905c60c87533bf967a94877b3843bb0bdef5d",
+          "0x146d57f70bcb580465116619359a35ece364f17e8d56524b5eee8bf6b8ebfdf6",
+          "0xcdbc0759e847f96beb000c3cc51e30f8b2ccac5dcc5c409fea938a3345f8b603",
+          "0x86e4b0792326c35995f1563b0d8f99fc38b0348a356e149c04b2783d5bd4cfb8",
+          "0x45965170d4d5afdbc7dd54ef3beb044e3a61bdc1a96a4d31beaaee6b75a3f063",
+          "0xb4603e46f0de988e62ff27b69f4d393a18f5ed31ea265fee69e73dc4eeddc902",
+          "0xb394b29ffe4175348b892c892e0eee5e565c83ebbe247de17cd9bf999d75d2b7",
+          "0xad44e31db4754e01afbb20b8aceb34ce5ef195a9701a7115326091c4fedb5a44",
+          "0x0bf2ca8aa236c35d3e7bd0ba97c8e772194462c90b5bb6caea4774e4100e95ef",
+          "0xde0aa4f414066517b910862d802e616c418bf24150940c3b74b46e6a4e84b15a",
+          "0x5368cf00e43190f04a959a2bfd87d648b02bb4494a00b755c1198da350e04cdb",
+          "0x223c1c9f16dfa65bdc98bd2ff419b6f1c47596c3f1eed71c5a3d3c2a3c33f99b"
+        ]
+      },
+      "backstop": {
+        "a": {
+          "account": "0x0000000000000000000000000000000000000003",
+          "index": 2,
+          "balance": "2000000000",
+          "escapeValue": "2000000000",
+          "positionsHash": "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
+        },
+        "leafData": "0x5050763161636374000000000000000000000000000000000000000300000002000000000000000000000000773594000000000077359400e8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c",
+        "siblings": [
+          "0xd3e3e71a7ffa3a2349d38956be94a2babfda366662e9b310b473a2f35115e8aa",
+          "0x6fcd7d2c04b1838f739385c6b5be2679b914aafea8d4a57802be4f20e81effb2",
+          "0x415c1b3aa94c5da05ddf08c43159d09c50ecae56b7270c6b7f5e0ff1737158b2",
+          "0x47a8f5e8fa70be2760378067c9c6d410dd96be07820b4230c11254c7ff10c298",
+          "0xaed19ca4bfe2365b1b33fa94744cd0c6a2d550506c7e7efc073879cb79459b9a",
+          "0x6e6998a7da8b2db5c98eb853099d8caec63797b5283b7dac37b2ffb630a86e24",
+          "0x181c19735bff23b55bc295fc0b60c1c5c7288209b261a08e26924598ce72404e",
+          "0xecb408b290ab2920e63611ef1e8ca964aebb66ea5739f19d24b92094f28e44f8",
+          "0x294bf9785e1391d24d52abf915636a73bdaa12ed29e85e21dae14c09d0f2e34b",
+          "0xcf7e37a934683edec795e3529db8fac0863519c2419ba24c0f6e4efa86ec7d1a",
+          "0x72ce48cca9bc743fed84a0bdc00ad2c5b540323849c982f671a9bd8d52d15719",
+          "0x0e2d7d0b695fdcd9dc6c54313ae652218375c3358d34ade3dcc49dda05c0db10",
+          "0xa0a786a71d24007a23f5ce21e6997a305baeefaf348937a8b74974cb039c10c8",
+          "0x0628cb6496193e6a55ece4a8240384e142273eeb9cc4bdae680f971fd1929f10",
+          "0x2c3b833a3ca9d6f02055871655dd18f003a279f84a334bf6050899a9bc1cedc3",
+          "0x1a6c5e9fd899efca64c2aca6243434b423d791f92a839c0c92ce0a5a51a07234",
+          "0xa9942b0fabdf9bf32241f8245eb26737ffbd91822ac484ae857fc35d21fb652f",
+          "0x7e4206a110a8721cc68455c35400b056251398dfcf98b04aeee19549bfd2122f",
+          "0xbfb429bfebb3aa270012d8063896d205bfd8ce116e4a304335bd59e9471f9fcc",
+          "0xe22fa8fff28cfb1f3664382ced6d3f1d634ef2851c10b1dce18c57c957985bf9",
+          "0xd29bf231e30afb5cd1bc01d214e905c60c87533bf967a94877b3843bb0bdef5d",
+          "0x146d57f70bcb580465116619359a35ece364f17e8d56524b5eee8bf6b8ebfdf6",
+          "0xcdbc0759e847f96beb000c3cc51e30f8b2ccac5dcc5c409fea938a3345f8b603",
+          "0x86e4b0792326c35995f1563b0d8f99fc38b0348a356e149c04b2783d5bd4cfb8",
+          "0x45965170d4d5afdbc7dd54ef3beb044e3a61bdc1a96a4d31beaaee6b75a3f063",
+          "0xb4603e46f0de988e62ff27b69f4d393a18f5ed31ea265fee69e73dc4eeddc902",
+          "0xb394b29ffe4175348b892c892e0eee5e565c83ebbe247de17cd9bf999d75d2b7",
+          "0xad44e31db4754e01afbb20b8aceb34ce5ef195a9701a7115326091c4fedb5a44",
+          "0x0bf2ca8aa236c35d3e7bd0ba97c8e772194462c90b5bb6caea4774e4100e95ef",
+          "0xde0aa4f414066517b910862d802e616c418bf24150940c3b74b46e6a4e84b15a",
+          "0x5368cf00e43190f04a959a2bfd87d648b02bb4494a00b755c1198da350e04cdb",
+          "0x223c1c9f16dfa65bdc98bd2ff419b6f1c47596c3f1eed71c5a3d3c2a3c33f99b"
+        ]
+      },
+      "expectPayable": "57640078160",
+      "expectSubordinated": "2000000000",
+      "expectSystemRemainder": "359921840",
+      "kind": "proveSystemShares",
+      "l2Time": "1800604838",
+      "n": 9
+    },
+    {
+      "proof": {
+        "a": {
+          "account": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+          "index": 3,
+          "balance": "39989907280",
+          "escapeValue": "54599707280",
+          "positionsHash": "0x6cd739edacdc55efb109f5fb5e196ba1938dc92f535f700ccf4ee1443dca314c"
+        },
+        "leafData": "0x505076316163637437d26082b3e73bce1071d833c69a9573aad58b29000000030000000000000000000000094f958f500000000cb6656a906cd739edacdc55efb109f5fb5e196ba1938dc92f535f700ccf4ee1443dca314c",
+        "siblings": [
+          "0xd27e1cc6ff1bf89ab113944980796de2fffa8da94b1539ce4468ad0e60ebf121",
+          "0x6fcd7d2c04b1838f739385c6b5be2679b914aafea8d4a57802be4f20e81effb2",
+          "0x415c1b3aa94c5da05ddf08c43159d09c50ecae56b7270c6b7f5e0ff1737158b2",
+          "0x47a8f5e8fa70be2760378067c9c6d410dd96be07820b4230c11254c7ff10c298",
+          "0xaed19ca4bfe2365b1b33fa94744cd0c6a2d550506c7e7efc073879cb79459b9a",
+          "0x6e6998a7da8b2db5c98eb853099d8caec63797b5283b7dac37b2ffb630a86e24",
+          "0x181c19735bff23b55bc295fc0b60c1c5c7288209b261a08e26924598ce72404e",
+          "0xecb408b290ab2920e63611ef1e8ca964aebb66ea5739f19d24b92094f28e44f8",
+          "0x294bf9785e1391d24d52abf915636a73bdaa12ed29e85e21dae14c09d0f2e34b",
+          "0xcf7e37a934683edec795e3529db8fac0863519c2419ba24c0f6e4efa86ec7d1a",
+          "0x72ce48cca9bc743fed84a0bdc00ad2c5b540323849c982f671a9bd8d52d15719",
+          "0x0e2d7d0b695fdcd9dc6c54313ae652218375c3358d34ade3dcc49dda05c0db10",
+          "0xa0a786a71d24007a23f5ce21e6997a305baeefaf348937a8b74974cb039c10c8",
+          "0x0628cb6496193e6a55ece4a8240384e142273eeb9cc4bdae680f971fd1929f10",
+          "0x2c3b833a3ca9d6f02055871655dd18f003a279f84a334bf6050899a9bc1cedc3",
+          "0x1a6c5e9fd899efca64c2aca6243434b423d791f92a839c0c92ce0a5a51a07234",
+          "0xa9942b0fabdf9bf32241f8245eb26737ffbd91822ac484ae857fc35d21fb652f",
+          "0x7e4206a110a8721cc68455c35400b056251398dfcf98b04aeee19549bfd2122f",
+          "0xbfb429bfebb3aa270012d8063896d205bfd8ce116e4a304335bd59e9471f9fcc",
+          "0xe22fa8fff28cfb1f3664382ced6d3f1d634ef2851c10b1dce18c57c957985bf9",
+          "0xd29bf231e30afb5cd1bc01d214e905c60c87533bf967a94877b3843bb0bdef5d",
+          "0x146d57f70bcb580465116619359a35ece364f17e8d56524b5eee8bf6b8ebfdf6",
+          "0xcdbc0759e847f96beb000c3cc51e30f8b2ccac5dcc5c409fea938a3345f8b603",
+          "0x86e4b0792326c35995f1563b0d8f99fc38b0348a356e149c04b2783d5bd4cfb8",
+          "0x45965170d4d5afdbc7dd54ef3beb044e3a61bdc1a96a4d31beaaee6b75a3f063",
+          "0xb4603e46f0de988e62ff27b69f4d393a18f5ed31ea265fee69e73dc4eeddc902",
+          "0xb394b29ffe4175348b892c892e0eee5e565c83ebbe247de17cd9bf999d75d2b7",
+          "0xad44e31db4754e01afbb20b8aceb34ce5ef195a9701a7115326091c4fedb5a44",
+          "0x0bf2ca8aa236c35d3e7bd0ba97c8e772194462c90b5bb6caea4774e4100e95ef",
+          "0xde0aa4f414066517b910862d802e616c418bf24150940c3b74b46e6a4e84b15a",
+          "0x5368cf00e43190f04a959a2bfd87d648b02bb4494a00b755c1198da350e04cdb",
+          "0x223c1c9f16dfa65bdc98bd2ff419b6f1c47596c3f1eed71c5a3d3c2a3c33f99b"
+        ]
+      },
+      "expect": "registered",
+      "expectAmount": "54599707280",
+      "expectPaidNow": "0",
+      "expectRecipient": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+      "escapeValue": "54599707280",
+      "kind": "claimEscape",
+      "l2Time": "1800604839",
+      "n": 10
+    },
+    {
+      "proof": {
+        "a": {
+          "account": "0xebbb2a22bd123086bc2edc0e6e8536ae7497d70f",
+          "index": 4,
+          "balance": "7969721840",
+          "escapeValue": "0",
+          "positionsHash": "0xaea747afdf6f61fc746333cfece1e3fa8beb260ef8a023c32bd0f2cdfbaa1cd3"
+        },
+        "leafData": "0x5050763161636374ebbb2a22bd123086bc2edc0e6e8536ae7497d70f00000004000000000000000000000001db084df00000000000000000aea747afdf6f61fc746333cfece1e3fa8beb260ef8a023c32bd0f2cdfbaa1cd3",
+        "siblings": [
+          "0x1ea44c117f75ee9dd861729f437cc0880efb2d9049b791e199db480ff0628fec",
+          "0xc07a1e8b7e0057673fdc2affe190d8a960c5fe615663f27b7ce84f3d93ef92a6",
+          "0xa6a84458854be516141f17ed7d04c39249dd60aa59a97a77aacac1a8ebe8bc92",
+          "0x47a8f5e8fa70be2760378067c9c6d410dd96be07820b4230c11254c7ff10c298",
+          "0xaed19ca4bfe2365b1b33fa94744cd0c6a2d550506c7e7efc073879cb79459b9a",
+          "0x6e6998a7da8b2db5c98eb853099d8caec63797b5283b7dac37b2ffb630a86e24",
+          "0x181c19735bff23b55bc295fc0b60c1c5c7288209b261a08e26924598ce72404e",
+          "0xecb408b290ab2920e63611ef1e8ca964aebb66ea5739f19d24b92094f28e44f8",
+          "0x294bf9785e1391d24d52abf915636a73bdaa12ed29e85e21dae14c09d0f2e34b",
+          "0xcf7e37a934683edec795e3529db8fac0863519c2419ba24c0f6e4efa86ec7d1a",
+          "0x72ce48cca9bc743fed84a0bdc00ad2c5b540323849c982f671a9bd8d52d15719",
+          "0x0e2d7d0b695fdcd9dc6c54313ae652218375c3358d34ade3dcc49dda05c0db10",
+          "0xa0a786a71d24007a23f5ce21e6997a305baeefaf348937a8b74974cb039c10c8",
+          "0x0628cb6496193e6a55ece4a8240384e142273eeb9cc4bdae680f971fd1929f10",
+          "0x2c3b833a3ca9d6f02055871655dd18f003a279f84a334bf6050899a9bc1cedc3",
+          "0x1a6c5e9fd899efca64c2aca6243434b423d791f92a839c0c92ce0a5a51a07234",
+          "0xa9942b0fabdf9bf32241f8245eb26737ffbd91822ac484ae857fc35d21fb652f",
+          "0x7e4206a110a8721cc68455c35400b056251398dfcf98b04aeee19549bfd2122f",
+          "0xbfb429bfebb3aa270012d8063896d205bfd8ce116e4a304335bd59e9471f9fcc",
+          "0xe22fa8fff28cfb1f3664382ced6d3f1d634ef2851c10b1dce18c57c957985bf9",
+          "0xd29bf231e30afb5cd1bc01d214e905c60c87533bf967a94877b3843bb0bdef5d",
+          "0x146d57f70bcb580465116619359a35ece364f17e8d56524b5eee8bf6b8ebfdf6",
+          "0xcdbc0759e847f96beb000c3cc51e30f8b2ccac5dcc5c409fea938a3345f8b603",
+          "0x86e4b0792326c35995f1563b0d8f99fc38b0348a356e149c04b2783d5bd4cfb8",
+          "0x45965170d4d5afdbc7dd54ef3beb044e3a61bdc1a96a4d31beaaee6b75a3f063",
+          "0xb4603e46f0de988e62ff27b69f4d393a18f5ed31ea265fee69e73dc4eeddc902",
+          "0xb394b29ffe4175348b892c892e0eee5e565c83ebbe247de17cd9bf999d75d2b7",
+          "0xad44e31db4754e01afbb20b8aceb34ce5ef195a9701a7115326091c4fedb5a44",
+          "0x0bf2ca8aa236c35d3e7bd0ba97c8e772194462c90b5bb6caea4774e4100e95ef",
+          "0xde0aa4f414066517b910862d802e616c418bf24150940c3b74b46e6a4e84b15a",
+          "0x5368cf00e43190f04a959a2bfd87d648b02bb4494a00b755c1198da350e04cdb",
+          "0x223c1c9f16dfa65bdc98bd2ff419b6f1c47596c3f1eed71c5a3d3c2a3c33f99b"
+        ]
+      },
+      "expect": "InvalidWithdrawal",
+      "expectAmount": "0",
+      "escapeValue": "0",
+      "kind": "claimEscape",
+      "l2Time": "1800604840",
+      "n": 11
+    },
+    {
+      "proof": {
+        "a": {
+          "account": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",
+          "index": 5,
+          "balance": "3000000000",
+          "escapeValue": "3000000000",
+          "positionsHash": "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
+        },
+        "leafData": "0x505076316163637402917ac3433cf4181d32c1c12cb4a734e985f8a800000005000000000000000000000000b2d05e0000000000b2d05e00e8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c",
+        "siblings": [
+          "0x3c85133bf5ce3bfbb7a9c642761f45225f001bb669cd8d36cc9f85fd94fb2b25",
+          "0xc07a1e8b7e0057673fdc2affe190d8a960c5fe615663f27b7ce84f3d93ef92a6",
+          "0xa6a84458854be516141f17ed7d04c39249dd60aa59a97a77aacac1a8ebe8bc92",
+          "0x47a8f5e8fa70be2760378067c9c6d410dd96be07820b4230c11254c7ff10c298",
+          "0xaed19ca4bfe2365b1b33fa94744cd0c6a2d550506c7e7efc073879cb79459b9a",
+          "0x6e6998a7da8b2db5c98eb853099d8caec63797b5283b7dac37b2ffb630a86e24",
+          "0x181c19735bff23b55bc295fc0b60c1c5c7288209b261a08e26924598ce72404e",
+          "0xecb408b290ab2920e63611ef1e8ca964aebb66ea5739f19d24b92094f28e44f8",
+          "0x294bf9785e1391d24d52abf915636a73bdaa12ed29e85e21dae14c09d0f2e34b",
+          "0xcf7e37a934683edec795e3529db8fac0863519c2419ba24c0f6e4efa86ec7d1a",
+          "0x72ce48cca9bc743fed84a0bdc00ad2c5b540323849c982f671a9bd8d52d15719",
+          "0x0e2d7d0b695fdcd9dc6c54313ae652218375c3358d34ade3dcc49dda05c0db10",
+          "0xa0a786a71d24007a23f5ce21e6997a305baeefaf348937a8b74974cb039c10c8",
+          "0x0628cb6496193e6a55ece4a8240384e142273eeb9cc4bdae680f971fd1929f10",
+          "0x2c3b833a3ca9d6f02055871655dd18f003a279f84a334bf6050899a9bc1cedc3",
+          "0x1a6c5e9fd899efca64c2aca6243434b423d791f92a839c0c92ce0a5a51a07234",
+          "0xa9942b0fabdf9bf32241f8245eb26737ffbd91822ac484ae857fc35d21fb652f",
+          "0x7e4206a110a8721cc68455c35400b056251398dfcf98b04aeee19549bfd2122f",
+          "0xbfb429bfebb3aa270012d8063896d205bfd8ce116e4a304335bd59e9471f9fcc",
+          "0xe22fa8fff28cfb1f3664382ced6d3f1d634ef2851c10b1dce18c57c957985bf9",
+          "0xd29bf231e30afb5cd1bc01d214e905c60c87533bf967a94877b3843bb0bdef5d",
+          "0x146d57f70bcb580465116619359a35ece364f17e8d56524b5eee8bf6b8ebfdf6",
+          "0xcdbc0759e847f96beb000c3cc51e30f8b2ccac5dcc5c409fea938a3345f8b603",
+          "0x86e4b0792326c35995f1563b0d8f99fc38b0348a356e149c04b2783d5bd4cfb8",
+          "0x45965170d4d5afdbc7dd54ef3beb044e3a61bdc1a96a4d31beaaee6b75a3f063",
+          "0xb4603e46f0de988e62ff27b69f4d393a18f5ed31ea265fee69e73dc4eeddc902",
+          "0xb394b29ffe4175348b892c892e0eee5e565c83ebbe247de17cd9bf999d75d2b7",
+          "0xad44e31db4754e01afbb20b8aceb34ce5ef195a9701a7115326091c4fedb5a44",
+          "0x0bf2ca8aa236c35d3e7bd0ba97c8e772194462c90b5bb6caea4774e4100e95ef",
+          "0xde0aa4f414066517b910862d802e616c418bf24150940c3b74b46e6a4e84b15a",
+          "0x5368cf00e43190f04a959a2bfd87d648b02bb4494a00b755c1198da350e04cdb",
+          "0x223c1c9f16dfa65bdc98bd2ff419b6f1c47596c3f1eed71c5a3d3c2a3c33f99b"
+        ]
+      },
+      "expect": "registered",
+      "expectAmount": "3000000000",
+      "expectPaidNow": "3000000000",
+      "expectRecipient": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",
+      "escapeValue": "3000000000",
+      "kind": "claimEscape",
+      "l2Time": "1800604841",
+      "n": 12
+    },
+    {
+      "proof": {
+        "a": {
+          "account": "0x0000000000000000000000000000000000000001",
+          "index": 0,
+          "balance": "40370880",
+          "escapeValue": "40370880",
+          "positionsHash": "0xe8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c"
+        },
+        "leafData": "0x5050763161636374000000000000000000000000000000000000000100000000000000000000000000000000026802c000000000026802c0e8e77626586f73b955364c7b4bbf0bb7f7685ebd40e852b164633a4acbd3244c",
+        "siblings": [
+          "0xf05f26fb3f20320710d4eab09042c122bed8f86ab14b991159527508c50ace08",
+          "0xf6cbca0bdedbc8c658bd1885f1eb66eeea93ffb764e59c863a0cb6189e98dde6",
+          "0x415c1b3aa94c5da05ddf08c43159d09c50ecae56b7270c6b7f5e0ff1737158b2",
+          "0x47a8f5e8fa70be2760378067c9c6d410dd96be07820b4230c11254c7ff10c298",
+          "0xaed19ca4bfe2365b1b33fa94744cd0c6a2d550506c7e7efc073879cb79459b9a",
+          "0x6e6998a7da8b2db5c98eb853099d8caec63797b5283b7dac37b2ffb630a86e24",
+          "0x181c19735bff23b55bc295fc0b60c1c5c7288209b261a08e26924598ce72404e",
+          "0xecb408b290ab2920e63611ef1e8ca964aebb66ea5739f19d24b92094f28e44f8",
+          "0x294bf9785e1391d24d52abf915636a73bdaa12ed29e85e21dae14c09d0f2e34b",
+          "0xcf7e37a934683edec795e3529db8fac0863519c2419ba24c0f6e4efa86ec7d1a",
+          "0x72ce48cca9bc743fed84a0bdc00ad2c5b540323849c982f671a9bd8d52d15719",
+          "0x0e2d7d0b695fdcd9dc6c54313ae652218375c3358d34ade3dcc49dda05c0db10",
+          "0xa0a786a71d24007a23f5ce21e6997a305baeefaf348937a8b74974cb039c10c8",
+          "0x0628cb6496193e6a55ece4a8240384e142273eeb9cc4bdae680f971fd1929f10",
+          "0x2c3b833a3ca9d6f02055871655dd18f003a279f84a334bf6050899a9bc1cedc3",
+          "0x1a6c5e9fd899efca64c2aca6243434b423d791f92a839c0c92ce0a5a51a07234",
+          "0xa9942b0fabdf9bf32241f8245eb26737ffbd91822ac484ae857fc35d21fb652f",
+          "0x7e4206a110a8721cc68455c35400b056251398dfcf98b04aeee19549bfd2122f",
+          "0xbfb429bfebb3aa270012d8063896d205bfd8ce116e4a304335bd59e9471f9fcc",
+          "0xe22fa8fff28cfb1f3664382ced6d3f1d634ef2851c10b1dce18c57c957985bf9",
+          "0xd29bf231e30afb5cd1bc01d214e905c60c87533bf967a94877b3843bb0bdef5d",
+          "0x146d57f70bcb580465116619359a35ece364f17e8d56524b5eee8bf6b8ebfdf6",
+          "0xcdbc0759e847f96beb000c3cc51e30f8b2ccac5dcc5c409fea938a3345f8b603",
+          "0x86e4b0792326c35995f1563b0d8f99fc38b0348a356e149c04b2783d5bd4cfb8",
+          "0x45965170d4d5afdbc7dd54ef3beb044e3a61bdc1a96a4d31beaaee6b75a3f063",
+          "0xb4603e46f0de988e62ff27b69f4d393a18f5ed31ea265fee69e73dc4eeddc902",
+          "0xb394b29ffe4175348b892c892e0eee5e565c83ebbe247de17cd9bf999d75d2b7",
+          "0xad44e31db4754e01afbb20b8aceb34ce5ef195a9701a7115326091c4fedb5a44",
+          "0x0bf2ca8aa236c35d3e7bd0ba97c8e772194462c90b5bb6caea4774e4100e95ef",
+          "0xde0aa4f414066517b910862d802e616c418bf24150940c3b74b46e6a4e84b15a",
+          "0x5368cf00e43190f04a959a2bfd87d648b02bb4494a00b755c1198da350e04cdb",
+          "0x223c1c9f16dfa65bdc98bd2ff419b6f1c47596c3f1eed71c5a3d3c2a3c33f99b"
+        ]
+      },
+      "expect": "registered",
+      "expectAmount": "40370880",
+      "expectPaidNow": "40370880",
+      "expectRecipient": "0x775a993f09bd80aecf8f8c2ade0c84158e3a0544",
+      "escapeValue": "40370880",
+      "kind": "claimEscape",
+      "l2Time": "1800604842",
+      "n": 13
+    },
+    {
+      "why": "large-amount delay of the escape payouts",
+      "kind": "warp",
+      "l2Time": "1800691239",
+      "n": 14
+    },
+    {
+      "account": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+      "expectPaid": "54599707280",
+      "expectRecipient": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+      "kind": "releaseEscape",
+      "l2Time": "1800691240",
+      "n": 15
+    },
+    {
+      "why": "90 days after escape: the system remainder and the surplus become payable to the fee address",
+      "kind": "warp",
+      "l2Time": "1808380837",
+      "n": 16
+    },
+    {
+      "expectPaid": "359921840",
+      "expectRecipient": "0x775a993f09bd80aecf8f8c2ade0c84158e3a0544",
+      "kind": "releaseSystem",
+      "l2Time": "1808380838",
+      "n": 17
+    },
+    {
+      "expect": "InvalidSurplus",
+      "expectAmount": "0",
+      "kind": "sweep",
+      "l2Time": "1808380839",
+      "n": 18
+    }
+  ],
+  "expect": {
+    "vaultBalance": "0",
+    "depositedTotal": "58000000000",
+    "withdrawnTotal": "0",
+    "escapeClaimedTotal": "57640078160",
+    "refundedTotal": "0",
+    "receivedCount": 3,
+    "received": [
+      {
+        "account": "0x02917ac3433cf4181d32c1c12cb4a734e985f8a8",
+        "received": "3000000000"
+      },
+      {
+        "account": "0x37d26082b3e73bce1071d833c69a9573aad58b29",
+        "received": "54599707280"
+      },
+      {
+        "account": "0x775a993f09bd80aecf8f8c2ade0c84158e3a0544",
+        "received": "400292720"
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "perps-vault-engine-vectors"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "UNLICENSED"
+description = "End-to-end vault vectors produced by the real engine and signed with the node's checkpoint code (UNAUDITED prototype; throwaway keys only)"
+
+# Not a member of any workspace: built only on the build host, with its own CARGO_TARGET_DIR.
+[workspace]
+
+[dependencies]
+postern-perps-engine = { path = "../../../engine" }
+postern-perps-node = { path = "../../../node" }
+k256 = { version = "=0.13.4", features = ["ecdsa", "std"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+hex = "0.4"
+
+[profile.release]
+overflow-checks = true

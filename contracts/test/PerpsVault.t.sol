@@ -1083,13 +1083,18 @@ contract PerpsVaultSilenceTest is Base {
         assertEq(usdc.balanceOf(u), 100 * USDC, "paid");
     }
 
-    /// Deposits for keyless accounts (system accounts, precompiles) are refused: nothing could ever refund them.
+    /// Deposits for keyless accounts (precompiles, PROTOCOL_FEE, the zero address) are refused: nothing could ever
+    /// refund them. Restated in round 2 (vault v0.3): INSURANCE (0x..02) and BACKSTOP (0x..03) left this list
+    /// because the vault now records their funder and refunds an uncredited system deposit to it
+    /// (SystemFunding.t.sol); the property (no value stranded for a keyless address) is unchanged, and the loop
+    /// below still covers 0x..00, 0x..01 and now also 0x..04 to 0x..0b.
     function test_keyless_deposit_refused() public {
         address u = address(0x1000000000000000000000000000000000000001);
         usdc.mint(u, 100 * USDC);
         vm.startPrank(u);
         usdc.approve(address(vault), 100 * USDC);
-        for (uint160 k; k < 4; ++k) {
+        for (uint160 k; k < 12; ++k) {
+            if (k == 2 || k == 3) continue;
             vm.expectRevert(PerpsVault.InvalidDeposit.selector);
             vault.deposit(10 * USDC, address(k));
         }
