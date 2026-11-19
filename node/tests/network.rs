@@ -311,6 +311,11 @@ async fn http_api_actions_finality_geo_and_websocket() {
     }
     assert!(!cert.is_null(), "withdrawal not certified in time");
     verify_checkpoint_json(&g, &cert["checkpoint"]).unwrap();
+    // the certificate is the schema's WithdrawalCertificate: a whole Checkpoint (blockHash included), 32 siblings
+    assert_eq!(cert["checkpoint"]["blockHash"].as_str().map(|h| h.len()), Some(66), "{}", cert["checkpoint"]);
+    assert_eq!(cert["checkpoint"]["blockHash"], cert["checkpoint"]["logHash"]);
+    assert_eq!(cert["proof"].as_array().map(|a| a.len()), Some(32));
+    assert_eq!(cert.as_object().unwrap().keys().map(|k| k.as_str()).collect::<std::collections::BTreeSet<_>>(), ["checkpoint", "digest", "proof", "record", "signatures"].into_iter().collect());
     let (s, fin) = get_json(&format!("{}/v1/finality/latest", n.url)).await;
     assert_eq!(s, 200);
     verify_checkpoint_json(&g, &fin).unwrap();

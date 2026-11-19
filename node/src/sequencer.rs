@@ -830,7 +830,10 @@ impl Sequencer {
             return None;
         }
         let siblings = self.wd_tree.proof(id, c.body.withdrawal_count)?;
-        let cp = self.aggregator.checkpoint_json(&self.g, cp_h, None)?;
+        // the checkpoint object is API.md's `Checkpoint`, blockHash included (it was null here until the
+        // conformance run of round 2 against two funded accounts showed it)
+        let bh = self.block(cp_h).ok().flatten().map(|b| b.header.log_hash);
+        let cp = self.aggregator.checkpoint_json(&self.g, cp_h, bh)?;
         Some(serde_json::json!({
             "digest": to_hex(&c.digest),
             "record": {"withdrawalId": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient), "amount": rec.amount.to_string(), "height": rec.height.to_string()},
