@@ -1,0 +1,233 @@
+{
+ "what": "LIVE feeder (seven public venues, read-only, anonymous) into the node ingest on loopback, build host, 2026-11-19 00:30 UTC",
+ "node": "codex/perps-node-r2-20261118 b897344 (431), release, dev --engine real --oracle-committee-file --oracle-token-file",
+ "feeder": "codex/perps-oracle-r2-20261118 c88ac6e (432), release, feature net: perps-oracle run --key-dir DIR --vault V --node http://127.0.0.1:53230 --token-file F --rounds 25",
+ "committee": "7 random throwaway keys generated at run time, quorum 5, one process (development shape)",
+ "rounds": 25,
+ "postStatuses": {
+  "200": 25
+ },
+ "signersPerRound": [
+  7
+ ],
+ "firstRound": {
+  "round": 598349387,
+  "prices": [
+   {
+    "symbol": "BTC-USD",
+    "price1e8": "6283420000000",
+    "sources": 7
+   },
+   {
+    "symbol": "ETH-USD",
+    "price1e8": "177720542010",
+    "sources": 7
+   },
+   {
+    "symbol": "SOL-USD",
+    "price1e8": "7342825230",
+    "sources": 7
+   }
+  ],
+  "nodeReply": [
+   {
+    "reply": {
+     "held": 7,
+     "observations": [
+      {
+       "signer": 0,
+       "status": "held"
+      },
+      {
+       "signer": 1,
+       "status": "held"
+      },
+      {
+       "signer": 2,
+       "status": "held"
+      },
+      {
+       "signer": 3,
+       "status": "held"
+      },
+      {
+       "signer": 4,
+       "status": "held"
+      },
+      {
+       "signer": 5,
+       "status": "held"
+      },
+      {
+       "signer": 6,
+       "status": "ready"
+      }
+     ],
+     "quorum": 5,
+     "round": "598349387",
+     "status": "ready"
+    },
+    "status": 200
+   }
+  ]
+ },
+ "lastRound": {
+  "round": 598349411,
+  "prices": [
+   {
+    "symbol": "BTC-USD",
+    "price1e8": "6273925521750",
+    "sources": 7
+   },
+   {
+    "symbol": "ETH-USD",
+    "price1e8": "177456853530",
+    "sources": 7
+   },
+   {
+    "symbol": "SOL-USD",
+    "price1e8": "7332000000",
+    "sources": 7
+   }
+  ],
+  "nodeReply": [
+   {
+    "reply": {
+     "held": 7,
+     "observations": [
+      {
+       "signer": 0,
+       "status": "held"
+      },
+      {
+       "signer": 1,
+       "status": "held"
+      },
+      {
+       "signer": 2,
+       "status": "held"
+      },
+      {
+       "signer": 3,
+       "status": "held"
+      },
+      {
+       "signer": 4,
+       "status": "held"
+      },
+      {
+       "signer": 5,
+       "status": "held"
+      },
+      {
+       "signer": 6,
+       "status": "ready"
+      }
+     ],
+     "quorum": 5,
+     "round": "598349411",
+     "status": "ready"
+    },
+    "status": 200
+   }
+  ]
+ },
+ "nodeOracleStatusChanges": [
+  {
+   "symbol": "BTC-USD",
+   "status": "stale",
+   "price": "0",
+   "round": "0",
+   "haltReason": "STALE"
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "stale",
+   "price": "0",
+   "round": "0",
+   "haltReason": "STALE"
+  },
+  {
+   "symbol": "SOL-USD",
+   "status": "stale",
+   "price": "0",
+   "round": "0",
+   "haltReason": "STALE"
+  },
+  {
+   "symbol": "BTC-USD",
+   "status": "ok",
+   "price": "62837.7688341",
+   "round": "598349389",
+   "haltReason": null
+  },
+  {
+   "symbol": "ETH-USD",
+   "status": "ok",
+   "price": "1777.47",
+   "round": "598349389",
+   "haltReason": null
+  },
+  {
+   "symbol": "SOL-USD",
+   "status": "ok",
+   "price": "73.43",
+   "round": "598349389",
+   "haltReason": null
+  }
+ ],
+ "nodeOracleLast": {
+  "BTC-USD": {
+   "status": "ok",
+   "price": "62739.2552175",
+   "round": "598349411"
+  },
+  "ETH-USD": {
+   "status": "ok",
+   "price": "1774.5685353",
+   "round": "598349411"
+  },
+  "SOL-USD": {
+   "status": "ok",
+   "price": "73.32",
+   "round": "598349411"
+  }
+ },
+ "roundsLatest": {
+  "quorum": 5,
+  "signers": [
+   "0x0eb09f74daf4d959962d125082b180abdb44c330",
+   "0x97502d2970b5bb2c4a7641a4e39f1cccf14e0476",
+   "0xaa9dd7556427cd1f093003e6d842635045e041af",
+   "0xacb821ee4cf4c4289bc2dfaed964f09e62129e2e",
+   "0xb151d686073aa24de8926e2135498b9ca5afea00",
+   "0xc09b78af6992187a449ab6059e998718e8678838",
+   "0xd6d6250b77678ab279a4b745754eae161b340da9"
+  ],
+  "gatherMs": 500,
+  "accepted": 175,
+  "refused": 0,
+  "conflicts": 0,
+  "roundsBuilt": 25,
+  "lastBuilt": {
+   "round": "598349411",
+   "signers": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ]
+  },
+  "held": [],
+  "enabled": true,
+  "lastAcceptedRound": "598349411"
+ },
+ "exit": [
+  "run exit=0",
+  "node stopped",
+  "DONE"
+ ]
+}

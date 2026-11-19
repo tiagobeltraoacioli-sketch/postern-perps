@@ -125,7 +125,121 @@ Values to carry into genesis (`compliance/markets.json`, per market `oracle` obj
 the converter): `exitHaircutBps` BTC 500, ETH 700, SOL 1300; `exitHaircutPerMinBps` 100; `exitMaxHaircutBps` 5000;
 `maxHaltMs` 3600000; the other oracle fields unchanged.
 
-## 4. The live hour
+## 4. The live hour (2026-11-18 23:23:45 to 2026-11-19 00:28:42 UTC)
 
-Running at the time of this commit (started 2026-11-18 23:23:45 UTC on the build host, 1,300 rounds); this section is
-written when it ends.
+One feeder process on the build host (`perps-oracle run --key-dir ... --record ...`, branch tip `a6a6df3` plus the
+`net` feature; a throwaway committee of seven random keys generated for the run and deleted after it), read-only
+anonymous GETs with the client name `ticker-client/1.0`, 22 requests per round (Kraken batched), 1,300
+consecutive 3 s rounds. Files (on the host, in the agent's scratch): raw responses `live-hour-raw.jsonl` (13.3 MB,
+sha256 `52eb226f8c6d53ac03caa1bbd054705fc18f39a2e7eba20468c2370866930694`), observations and reports
+`live-hour.jsonl` (sha256 `3eec9d70e7e8b999dda564973d7a4876c2457e77b8e16f1537d0045b91047635`). In the repository:
+the statistics `results/live-hour-20261118-stats.json` (`live_stats.py`; the tables below are printed from it by
+`live_tables.py`), the first 40 raw rounds `../fixtures/live-20261118/rounds-first-40.jsonl`, and the tape of the
+whole hour `../tapes/live-hour-20261118.jsonl`, which the current pipeline reproduces from the raw recording
+(1,300 of 1,300 rounds equal to what the run signed; the first 40 rows are checked against the fixture by
+`feeder/tests/cli.rs`).
+
+Rounds 1300 (rounds 598348075 to 598349374, 3897 s, 64.9 min); rounds missing in the
+sequence 0; refused by the clock check 0; rounds with nothing to sign 0;
+requests per round p50 22, max 22; drop events 0;
+USDT/USD rate between 0.99862 and 0.99882 (1300 rounds with a rate).
+
+### L1 requests by venue host
+
+| Host | requests | HTTP 200 | other answers | no answer (timeout 1.5 s) | latency p50 / p90 / p99 / max (ms) |
+|---|---|---|---|---|---|
+| api-pub.bitfinex.com | 3900 | 3900 | 0 | 0 | 19 / 26 / 50 / 173 |
+| api.binance.com | 3900 | 3900 | 0 | 0 | 243 / 249 / 683 / 729 |
+| api.exchange.coinbase.com | 5200 | 5200 | 0 | 0 | 17 / 28 / 112 / 370 |
+| api.gemini.com | 5200 | 5145 | 0 | 55 | 408 / 612 / 1514 / 1563 |
+| api.kraken.com | 1300 | 1300 | 0 | 0 | 39 / 45 / 60 / 187 |
+| www.bitstamp.net | 5200 | 5194 | 0 | 6 | 7 / 12 / 43 / 1562 |
+| www.okx.com | 3900 | 3893 | 0 | 7 | 264 / 276 / 344 / 1562 |
+
+### L2 markets
+
+| Market | rounds priced | rounds abstained | longest run without a price | sources 7 / 6 / 5 / fewer | price first -> last (min .. max) | venue spread bps p50 / p99 / max | 3 s move of the observation bps p50 / p90 / p99 / max |
+|---|---|---|---|---|---|---|---|
+| BTC-USD | 1300 | 0 | 0 | 1282 / 18 / 0 / 0 | 62689.098 -> 62800.353 (62559.4 .. 63209.279) | 13.97 / 22.95 / 43.35 | 0.54 / 2.26 / 5.44 / 22.70 |
+| ETH-USD | 1300 | 0 | 0 | 1286 / 14 / 0 / 0 | 1770.31 -> 1775.53 (1767.594 .. 1781.451) | 13.67 / 23.90 / 38.13 | 0.78 / 2.67 / 5.15 / 14.56 |
+| SOL-USD | 1300 | 0 | 0 | 1284 / 16 / 0 / 0 | 73.279 -> 73.36 (73.123 .. 73.88) | 13.96 / 23.62 / 33.75 | 0.68 / 2.63 / 5.33 / 14.83 |
+
+### L3 venues: rounds used, reasons a reading was not valid, distance from the feeder's observation (bps)
+
+| Source | used | not valid (reason: rounds) | distance p50 / p99 / max |
+|---|---|---|---|
+| binance-BTC-USDT | 1300 | 0 | 0.21 / 2.96 / 17.69 |
+| bitfinex-BTC-USD | 1300 | 0 | 13.14 / 21.82 / 42.30 |
+| bitstamp-BTC-USD | 1298 | {'fetch-failed: timeout: global': 2} | 0.41 / 3.31 / 6.63 |
+| coinbase-BTC-USD | 1300 | 0 | 0.30 / 2.24 / 3.49 |
+| gemini-BTC-USD | 1287 | {'fetch-failed: timeout: global': 13} | 0.87 / 4.67 / 20.66 |
+| kraken-BTC-USD | 1300 | 0 | 0.38 / 2.54 / 4.61 |
+| okx-BTC-USDT | 1297 | {'fetch-failed: timeout: global': 3} | 0.24 / 1.95 / 6.09 |
+| binance-ETH-USDT | 1300 | 0 | 0.24 / 2.73 / 8.74 |
+| bitfinex-ETH-USD | 1300 | 0 | 12.65 / 22.38 / 37.62 |
+| bitstamp-ETH-USD | 1299 | {'fetch-failed: timeout: global': 1} | 0.42 / 2.94 / 6.11 |
+| coinbase-ETH-USD | 1300 | 0 | 0.39 / 2.71 / 5.32 |
+| gemini-ETH-USD | 1289 | {'fetch-failed: timeout: global': 11} | 1.44 / 4.54 / 6.52 |
+| kraken-ETH-USD | 1300 | 0 | 0.53 / 3.08 / 4.86 |
+| okx-ETH-USDT | 1298 | {'fetch-failed: timeout: global': 2} | 0.29 / 2.09 / 4.28 |
+| binance-SOL-USDT | 1300 | 0 | 0.68 / 3.51 / 11.84 |
+| bitfinex-SOL-USD | 1300 | 0 | 12.65 / 21.67 / 32.25 |
+| bitstamp-SOL-USD | 1297 | {'fetch-failed: timeout: global': 3} | 0.68 / 3.00 / 9.66 |
+| coinbase-SOL-USD | 1300 | 0 | 0.41 / 2.73 / 4.08 |
+| gemini-SOL-USD | 1289 | {'fetch-failed: timeout: global': 11} | 2.60 / 6.14 / 7.47 |
+| kraken-SOL-USD | 1300 | 0 | 0.41 / 2.75 / 7.87 |
+| okx-SOL-USDT | 1298 | {'fetch-failed: timeout: global': 2} | 0.39 / 2.05 / 3.42 |
+
+What the hour shows:
+
+- Gaps: none. 1,300 of 1,300 rounds priced all three markets; no round was missed, refused by the clock check or
+  left without an observation; the longest run without a price is 0 rounds. `maxStalenessMs` = 10 s (three lost
+  rounds in a row) was never approached. KEEP.
+- Rate limits: 28,600 requests, every answer that came was HTTP 200; no 429, 418 or 403, so the drop rule never
+  fired. This is one hour from one address: it shows the budget of SOURCES.md is tolerated, not what the limits
+  are.
+- Failures: 68 requests got no answer within `fetchTimeoutMs` = 1,500 ms (Gemini 55 = 1.1% of its requests, OKX 7,
+  Bitstamp 6), never five in a row for one request (no drop). Each cost one source for one round: 7 sources in
+  98.6% to 98.9% of the rounds, 6 in the rest, never fewer. Gemini's 99th percentile latency (1,514 ms) sits at
+  the timeout: a longer timeout would recover most of those 55 readings but delays the observation of the round by
+  as much; with seven sources and `minSources` = 3 the lost readings do not matter. KEEP 1,500 ms.
+- Disagreement between venues: the largest gap between two valid venues of a market was 14 bps at the median, 23
+  to 24 bps at the 99th percentile, 43 bps at most; `maxSourceDeviationBps` = 200 was never approached and no
+  reading was cut as an outlier, frozen, stale or wide. Almost all of that gap is ONE venue: Bitfinex stood 12.6
+  to 13.1 bps ABOVE the feeder's observation at the median on all three markets, while the other six stood within
+  3 bps of it (L3). The USDT/USD rate of the hour was 0.99862 to 0.99882, i.e. USDT 12 to 14 bps under the dollar:
+  Bitfinex's USD prices sat where an UNCONVERTED USDT price would sit. Recorded as R432-3 (Info, SOURCES.md): it
+  does not move the median (one source of seven), but Bitfinex behaved like a third USDT-correlated source in this
+  hour, not like a fifth independent USD venue.
+- Round-to-round move of the feeder's observation (3 s): 0.5 to 0.8 bps at the median, 2.3 to 2.7 bps at the 90th
+  percentile, 5.2 to 5.4 bps at the 99th, 22.7 / 14.6 / 14.8 bps at most. This is the upper proxy used for the
+  spread between two honest feeders of one round (README 5a, R395-9): `agreeBps` = 100 is 18 times the 99th
+  percentile and 4 times the largest move of the hour. KEEP. It is also the measured size of the sequencer's
+  selection reach in a calm hour: about half a basis point per round at the median, about 5 bps at the 99th
+  percentile.
+- Sampling: the observation time was the round's first millisecond in 90% of the rounds and at most 2 ms after it
+  (rule C2d never applies to such a feeder).
+
+A second, short live run fed the real venues' prices into the node's ingest (section 5).
+
+## 5. The live feeder into the node (2026-11-19 00:30 UTC)
+
+`live-into-node.sh`, evidence `results/live-into-node-b897344.json`: the live feeder (`perps-oracle run --key-dir DIR
+--node http://127.0.0.1:53230 --token-file F`, the seven public venues, a run-time throwaway committee of seven in
+one process) posting to the ingest of 431's node `b897344` on loopback for 25 rounds. 25 of 25 updates answered
+200 with all seven observations held; the node's markets left INIT on the third round and its engine index was the
+venues' price from then on (BTC 62,837.77 at the first index, 62,739.26 at the last round; ETH 1,777.47 to
+1,774.57; SOL 73.43 to 73.32). The node was stopped by its PID. The scripted path (authored tape, refusals, halts)
+is `ingest-integration.sh` and `results/ingest-integration-node-b897344.json`.
+
+## 6. Not done / not proven
+
+- Section 1's limits of minute candles stand: 3 s moves are bounded, not resolved; four venues; 34 chosen days.
+- One hour, one host, one calm market (BTC moved 1.0% between its lowest and highest observation). Nothing here
+  shows the feeder in a fast market, under a venue outage, or under rate limiting; the drop rule never fired live
+  (it is tested offline only).
+- The spread between independent feeders on different hosts was not measured; the round-to-round move of one
+  feeder is its upper proxy.
+- No order-book depth was measured: what it costs to move a majority of a market's venues is unknown here.
+- R432-3 (Bitfinex's USD prices at the USDT level) rests on this one hour.
+- The proposals of section 3 are not in `compliance/markets.json` or in the engine's defaults.

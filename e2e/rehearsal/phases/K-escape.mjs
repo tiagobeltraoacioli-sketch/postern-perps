@@ -25,7 +25,7 @@ export default async function (ctx) {
   const send = (sig, args = [], from = anyone) => chain.send(from, stack.vault, sig, args);
   const all = [...CAST.map((c) => ({ label: c.label, address: c.address })), ...Object.entries(SYSTEM).map(([label, address]) => ({ label, address }))];
   // the account the PAGE deposited from in phase P (anvil's development account #9), when the engine knows it
-  try { const page = (await chain.rpc('eth_accounts'))[9]?.toLowerCase(); if (page && !all.some((a) => a.address === page)) all.push({ label: 'page', address: page }); } catch { /* no such account */ }
+  try { const dev = await chain.rpc('eth_accounts'); for (const i of [8, 9]) { const page = dev[i]?.toLowerCase(); if (page && !all.some((a) => a.address === page)) all.push({ label: `page-${i}`, address: page }); } } catch { /* no such account */ }
   let H, proofs = {}, cp, totalEscape, lastCp;
 
   await ctx.check('K-01', 'before the silence: the vault holds the node\'s latest final checkpoint, and every account\'s escape leaf and 32 siblings for THAT checkpoint are fetched and verified against the root the vault stores', async () => {

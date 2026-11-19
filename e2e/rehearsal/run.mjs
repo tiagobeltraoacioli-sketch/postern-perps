@@ -97,11 +97,13 @@ for (const name of PHASES) {
 }
 
 const n = (s) => checks.filter((c) => c.status === s).length;
-const summary = { total: checks.length, passed: n('pass'), failed: n('fail'), blocked: n('blocked') };
+let tunnelRestarts = null;
+try { tunnelRestarts = readFileSync(join(dirname(stackPath), 'tunnel-restarts.log'), 'utf8').trim().split('\n').filter(Boolean); } catch { /* no supervised tunnel */ }
+const summary = { total: checks.length, passed: n('pass'), failed: n('fail'), blocked: n('blocked'), networkRetries: ctx.api.networkRetries ?? 0, tunnelRestarts: tunnelRestarts?.length ?? null, variant: process.env.REHEARSAL_ESCAPE === 'forced' ? 'escape by an overdue forced request' : 'escape by silence' };
 const outDir = resolve(opt('out', `${process.env.HOME}/Desktop/POSTERNDEX-PERPS-20261117/agents/435-evidence`));
 mkdirSync(outDir, { recursive: true });
 const stamp = started.replace(/[-:]/g, '').slice(0, 15);
 const file = join(outDir, `rehearsal-${stack.label}-${(stack.commit || 'unknown').slice(0, 8)}-${stamp}Z.json`);
 writeFileSync(file, JSON.stringify({ unaudited: true, note: 'local stack, throwaway keys, no real network', stack, started, finished: new Date().toISOString(), phases: only ?? PHASES.map((p) => p[0]).filter((l) => !skip.includes(l)), summary, checks }, null, 1) + '\n');
-process.stdout.write(`\nrehearsal: ${summary.passed}/${summary.total} checks passed, ${summary.failed} failed, ${summary.blocked} blocked\nevidence: ${file}\n`);
+process.stdout.write(`\nrehearsal: ${summary.passed}/${summary.total} checks passed, ${summary.failed} failed, ${summary.blocked} blocked (network retries ${summary.networkRetries}, tunnel restarts ${summary.tunnelRestarts})\nevidence: ${file}\n`);
 process.exit(summary.failed ? 1 : 0);

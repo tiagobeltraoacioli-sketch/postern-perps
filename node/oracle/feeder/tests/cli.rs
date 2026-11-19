@@ -262,3 +262,55 @@ fn tape_from_the_recorded_rounds_is_the_pipeline_output() {
         vec![steps[0].clone(), steps[2].clone(), steps[4].clone()]
     );
 }
+
+/// The tape of the live hour (2026-11-18, seven public venues, read-only) is what the pipeline gives from the raw
+/// recording: the first 40 recorded rounds are committed as a fixture (the whole recording, about 13 MB, stays on
+/// the build host; its sha256 is in `calibration/CALIBRATION.md`) and replay to the first 40 rows of the tape,
+/// byte for byte. The whole tape parses, prices every market in every round it claims to, and never moves more
+/// than `jumpBps` between consecutive rounds (so replaying it never halts a market by itself).
+#[test]
+fn live_hour_tape_is_the_pipeline_output_of_the_recording() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let tape_text = fs::read_to_string(root.join("tapes/live-hour-20261118.jsonl")).unwrap();
+    let out = bin()
+        .args(["tape", "--recording"])
+        .arg(root.join("fixtures/live-20261118/rounds-first-40.jsonl"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let first: Vec<&str> = tape_text.lines().take(40).collect();
+    assert_eq!(
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        first
+    );
+
+    let steps = perps_oracle_feeder::tape::parse(&tape_text).unwrap();
+    assert!(
+        steps.len() >= 1200,
+        "an hour of 3 s rounds: {}",
+        steps.len()
+    );
+    let jump = [(1u32, 500u64), (2, 500), (3, 800)];
+    let mut priced = [0usize; 3];
+    for w in steps.windows(2) {
+        for (i, (m, bps)) in jump.iter().enumerate() {
+            if let (Some(a), Some(b)) = (w[0].prices.get(m), w[1].prices.get(m)) {
+                assert!(a.0.abs_diff(b.0) as u128 * 10_000 <= u128::from(*bps) * u128::from(a.0));
+                assert!(b.1 >= 3, "at least minSources venues behind every price");
+                priced[i] += 1;
+            }
+        }
+    }
+    // Every market is priced in at least 99% of the rounds.
+    assert!(
+        priced.iter().all(|n| *n * 100 >= (steps.len() - 1) * 99),
+        "{priced:?}"
+    );
+}

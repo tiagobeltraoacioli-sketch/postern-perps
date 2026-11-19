@@ -56,7 +56,8 @@ tar -C "$HERE/host" -cf - . | e2e_ssh "mkdir -p $S/bin && tar -x -C $S/bin && ch
 FWD="-L 127.0.0.1:$M_API:127.0.0.1:$H_API -L 127.0.0.1:$M_ANVIL:127.0.0.1:$H_ANVIL -L 127.0.0.1:$M_PROXY:127.0.0.1:$H_PROXY"
 [ "$LOCALV" != 7 ] && [ "$VREAD" = on ] && FWD="$FWD -L 127.0.0.1:$M_VALIDATOR:127.0.0.1:$((H_VALIDATOR + LOCALV))"
 [ "$L2" = fake ] && FWD="$FWD -R 127.0.0.1:53512:127.0.0.1:49912 -R 127.0.0.1:53513:127.0.0.1:49913"
-mac_start tunnel ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -i "$E2E_SSH_KEY" $FWD "$E2E_HOST"
+: > "$RUN/tunnel-restarts.log"
+mac_start tunnel bash "$HERE/tunnel-loop.sh" $FWD   # supervised: restarts on a drop, every restart logged
 sleep 2; mac_alive tunnel || { echo "tunnel failed:" >&2; tail -3 "$RUN/tunnel.log" >&2; exit 1; }
 say "tunnel up: API http://127.0.0.1:$M_API, L2 http://127.0.0.1:$M_ANVIL"
 
