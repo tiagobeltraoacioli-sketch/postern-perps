@@ -25,7 +25,10 @@ export type WireMarket = {
   liquidationFeeBps: string;
   fundingIntervalSec: number;
   maxFundingRate: string;
-  oracle: { sources: string[]; minSources: number; maxStalenessMs: number; maxDeviationBps: string };
+  /** Published by the node since API 0.3 of 2026-11-19 (F434-5, F434-6); the mock and older nodes have none. */
+  markBandBps?: number;
+  marketSlippageBps?: number;
+  oracle: { sources: string[]; minSources: number; maxStalenessMs: number; maxDeviationBps: string; exitHaircutBps?: number; exitHaircutPerMinBps?: number; exitMaxHaircutBps?: number; maxHaltMs?: number };
   openInterestCap: string;
   haltReason?: string | null;
 };
@@ -53,6 +56,8 @@ export type WirePosition = {
   symbol: string;
   size: string;
   entryPrice: string;
+  /** Signed open notional, integer string in notional units (1e-16 USD): the node's exact figure (since b810675). */
+  openNotional?: string;
   markPrice: string;
   notional: string;
   unrealizedPnl: string;
@@ -215,7 +220,16 @@ export type Market = {
   fundingIntervalSec: number;
   maxFundingRate: bigint;
   oracle: WireMarket['oracle'];
+  /** The engine's band for market orders (and PRICE_BAND), ppm, as the exchange publishes it; null: not published. */
+  marketSlippagePpm?: bigint | null;
   openInterestCap: bigint;
+};
+/** `GET /v1/oracle/{symbol}`: only what the page reads (the engine's current exit band of a halted market). */
+export type WireOracleStatus = {
+  symbol: string;
+  status: string;
+  haltedSince?: number | null;
+  exitBand?: { low: string; high: string; settlePrice: string; settleDue: boolean; asOf: number } | null;
 };
 export type Ticker = {
   symbol: string;
@@ -238,6 +252,8 @@ export type Position = {
   symbol: string;
   size: bigint;
   entryPx: bigint;
+  /** The exchange's exact signed open notional (size x price units), or null when it gave none that can be used. */
+  openNotional: bigint | null;
   markPx: bigint;
   notional: bigint;
   unrealised: bigint;

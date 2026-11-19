@@ -43,7 +43,9 @@ export type BuiltOrder = {
   estimate: ReturnType<typeof estimateMarketFill> | null;
 };
 
-export const MAX_SLIPPAGE_PPM = 100_000n; // 10%: wider than this is refused by the form
+export const MAX_SLIPPAGE_PPM = 100_000n; // 10%: wider than this is refused by the form when the exchange publishes no band
+/** The widest price bound the form accepts: the exchange's published band for market orders, else 10%. */
+export const maxSlippagePpm = (market: { marketSlippagePpm?: bigint | null }): bigint => (market.marketSlippagePpm && market.marketSlippagePpm > 0n && market.marketSlippagePpm < MAX_SLIPPAGE_PPM ? market.marketSlippagePpm : MAX_SLIPPAGE_PPM);
 export const DEFAULT_SLIPPAGE_PPM = 10_000n; // 1%
 
 const PPM = 1_000_000n;
@@ -113,7 +115,9 @@ export function buildOrder(args: {
   let price: bigint | null = null;
   let estimate: BuiltOrder['estimate'] = null;
   if (isMarket) {
-    if (form.slippagePpm <= 0n || form.slippagePpm > MAX_SLIPPAGE_PPM) errors.push('The price bound must be between 0.01% and 10%.');
+    const widest = maxSlippagePpm(market);
+    if (form.slippagePpm <= 0n || form.slippagePpm > widest)
+      errors.push(widest === MAX_SLIPPAGE_PPM ? 'The price bound must be between 0.01% and 10%.' : `The price bound must be between 0.01% and ${Number(widest) / 10_000}%: the exchange fills no market order further than that from the mark.`);
     const reference = triggered ? trigger : mark;
     if (reference === null) {
       if (!triggered) errors.push('No mark price yet: a market order needs one to set its worst price.');

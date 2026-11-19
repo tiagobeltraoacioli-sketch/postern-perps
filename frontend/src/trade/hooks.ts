@@ -82,6 +82,7 @@ export function positionInputs(state: AccountState | null, markets: Market[], ti
         market: p.symbol,
         size: p.size,
         entryPx: p.entryPx,
+        openNotional: p.openNotional ?? undefined,
         markPx: tickers.get(p.symbol)?.mark ?? p.markPx,
         leverage: p.leverage,
         isolated: p.isolated,

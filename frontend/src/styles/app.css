@@ -3672,6 +3672,11 @@ td.strong {
 .gate-foot .account-mini dd {
   font-size: var(--text-small);
   color: var(--text);
+  gap: var(--s-1);
+}
+.gate-foot .account-mini .unit {
+  color: var(--text-3);
+  font-size: var(--text-micro);
 }
 .gate-foot .account-mini .mini-ratio {
   grid-column: 1 / -1;
@@ -3871,6 +3876,14 @@ td.strong {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 268px), 1fr));
 }
 
+/* A wide table in a narrow window gives up padding before it scrolls. */
+@media (max-width: 1279px) {
+  .page-wide th,
+  .page-wide td {
+    padding-inline: var(--s-2);
+  }
+}
+
 /* ---------- Home: the first screen ---------- */
 .home-first {
   display: grid;
@@ -3886,6 +3899,10 @@ td.strong {
 @media (min-width: 900px) {
   .hero {
     min-height: 0;
+  }
+  /* Each sentence of the headline keeps to one line beside the gate. */
+  .hero-title {
+    font-size: var(--text-herofit);
   }
   .gate-art {
     width: min(100%, 420px, calc((100dvh - var(--first-top, 124px)) * 0.62));
@@ -4077,7 +4094,7 @@ td.strong {
     gap: var(--s-2);
   }
   .trade-form .gate-body {
-    padding-block: var(--s-2);
+    padding-block: var(--s-1);
   }
   .side-switch button {
     min-height: 34px;
@@ -4120,6 +4137,11 @@ td.strong {
   .options .tif select {
     width: 100%;
     min-width: 0;
+    padding-left: var(--s-2);
+    font-size: var(--text-small);
+  }
+  .options .check {
+    font-size: var(--text-small);
   }
   .options .check {
     flex: none;

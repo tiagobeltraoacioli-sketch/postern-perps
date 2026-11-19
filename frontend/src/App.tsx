@@ -29,6 +29,7 @@ const Agents = lazy(() => import('./pages/Agents').then((m) => ({ default: m.Age
 const System = lazy(() => import('./pages/System').then((m) => ({ default: m.System })));
 const Legal = lazy(() => import('./pages/Legal').then((m) => ({ default: m.Legal })));
 import { OPERATOR_LINE, PROTOTYPE_LINE, restrictedText } from './compliance/notices';
+import { notePublishedMarkets } from './lib/exit-band';
 import { geoVerdict, RestrictedScreen } from './compliance/Restricted';
 
 type Page = Route['page'];
@@ -86,6 +87,9 @@ function Shell() {
   // exit-only mode (the order form says so and the signing guard refuses everything else).
   const [acknowledged, setAcknowledged] = useState(false);
   useEffect(() => feed.follow(account), [account]);
+  // The exit bands the exchange publishes with its markets (F434-6) reach every screen that states them.
+  const publishedMarkets = useStore(feed.markets);
+  notePublishedMarkets(publishedMarkets);
   // On every page, while a wallet is connected: keep the account's exit proof for the vault's latest checkpoint on
   // this device (R436-11 c). A slow read of the vault is enough; the Funds page reads it faster while open.
   const vault = useVault(deployment ? account : null, 60_000);
