@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: engine specification (`docs/SPEC.md`)
 
-**UNAUDITED PROTOTYPE. Version 0.2.3, 2026-11-19. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
+**UNAUDITED PROTOTYPE. Version 0.2.4, 2026-11-19. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
 here is deployed.
 The perpetuals are not to be deployed before an external audit and a legal review.
 
@@ -114,7 +114,7 @@ Field rules:
 | `nonce` | Unix ms chosen by the signer; section 2.5 |
 | `marketId` | a genesis market id `>= 1`; in `CancelAll`, `0` = every market |
 | `orderType` | `0` limit, `1` market, `2` stopMarket, `3` stopLimit, `4` takeProfitMarket, `5` takeProfitLimit; other values `MALFORMED` |
-| `timeInForce` | `0` GTC, `1` IOC, `2` POST_ONLY (ALO); market and *Market types MUST be IOC |
+| `timeInForce` | `0` GTC, `1` IOC, `2` POST_ONLY (ALO); market and *Market types (1, 2, 4) MUST be IOC; the limit trigger types (3, 5) MUST be GTC (0.2.4, R436-13: they enter the book as GTC when they fire, S-4.6, so an IOC or POST_ONLY one is `MALFORMED`, never coerced) |
 | `price` | MANDATORY, `>= 1`, a multiple of the market's `tick`: the limit price for limit types; for market types the WORST acceptable price (a buy never fills above it, a sell never below it). There is no "any price" order: `0` is `MALFORMED`. (Agreed with 391 and 389.) |
 | `size` | `>= minSize`, `<= maxSize`, a multiple of `step` |
 | `triggerPrice` | `0` for types 0 and 1; `>= 1` and a multiple of `tick` for types 2 to 5 |
@@ -329,17 +329,21 @@ block: it is recorded as a failed outcome with its error and has no other effect
   price were not. The update itself is still accepted (its form and signatures are valid; 394's `max-values`
   vector decodes and is accepted). Test `r430_2_committee_price_above_max_price_never_becomes_the_index` (fails on
   `f0e3967`).
-- S-5.1.2 (R436-12, 0.2.3; a change to 394's README rule that one invalid observation refuses the update; 432
-  notified). An `OracleUpdate` has two kinds of rule. UPDATE rules, on what the sequencer assembles: the round is
-  new, the observation count is between the quorum and `n`, signer indexes are valid and strictly ascending; a
-  defect refuses the update (`ORACLE_ROUND_NOT_NEW`, `ORACLE_MALFORMED`). OBSERVATION rules, on what ONE signer
-  authors: its price list (1 to 256 entries, market ids strictly ascending, no zero price), its signature, its
-  `timeMs` inside the round and inside the block-time window; an observation that fails its own rule is DROPPED and
-  the update is judged on the rest. The update is refused only when fewer than the quorum remain, with the first
-  dropped observation's error. Reason: the quorum is sized to tolerate `n - q` faulty signers; at `f0e3967` one
-  signer (or one feeder clock a second fast) refused every round and every market went stale (test
-  `r436_12_one_bad_observation_does_not_veto_the_round` fails there). A dropped observation leaves no trace in the
-  state; the round counts as consumed only when the update is accepted.
+- S-5.1.2 (R436-12; 0.2.4 = rule C2d of the oracle's README section 5 as its owner 432 restated it, implemented
+  identically; 0.2.3 had a wider split of this engine's own, which also dropped observations with a bad signature
+  or a malformed price list: withdrawn, the README is normative for C1 to C5). Whole input refused, no state
+  change, as before: C1 (round not new), C2 (structure: count, signer indexes ascending, every price list 1 to 256
+  entries with ascending market ids and no zero price), and per observation in input order C2c (`timeMs` outside
+  its round: `ORACLE_TIME`) then C2b (signature: `ORACLE_BAD_SIGNATURE`); these are facts about an observation
+  alone, which an honest sequencer filters, so a block never carries garbage. NEW C2d, per observation, NOT a
+  refusal: an observation with `timeMs > T + oracleMaxFutureMs` or `T - timeMs > oracleMaxAgeMs` is IGNORED for
+  this input (its prices enter no market); its signature is still checked. If fewer than the quorum remain the
+  whole input is refused `ORACLE_TIME` with no state change and the round is NOT consumed (the same update may be
+  presented again at a later block time); otherwise C3 to C5 run on the remaining observations. Reason: the two
+  bounds relative to the block time are the only ones a signer does not control and the sequencer cannot
+  pre-filter from the observation alone; at `f0e3967` one signer of seven, or one feeder clock a second fast,
+  refused every round and every market went stale. Tests `r436_12_one_bad_observation_does_not_veto_the_round`
+  (fails on `f0e3967`) and `c2d_vectors_of_432_through_apply_block` (432's 11 shared cases through `apply_block`).
 - S-5.2 Mark (bounded book component):
   `bookRef = median(bestBid, bestAsk, lastTradePrice)` using, for a missing value, the index (and for
   `lastTradePrice` older than `markTradeMaxAgeMs = 60000`, the index);
@@ -635,6 +639,15 @@ backstop's or a third account's. An order whose backing was lost to a mark move 
 the sequencer, which orders the takers, can keep such an order of its own in the book for one sample or one mark
 (bounded by `markBandBps` and the funding cap, as R395-16 below).
 
+Sizing of the insurance fund (436's note with R436-13, stated; parameters are 354/392's and the owner's, not this
+document's): two accounts of one owner holding the same size long and short at maximum leverage are flat and pay
+no net funding; any index gap larger than their initial margin (a jump halt that resumes by confirmation has no
+upper bound on the move) makes the losing account's deficit an INSURANCE payout to the winning one, about
+`(gap - margin) * notional`: at the proposed BTC `oiCap` 30 and 20x, one 8% gap is about 60,000 USDC, the whole
+proposed seed. No engine rule removes this (it is the model's gap risk, not a fill: S-4.9.1 does not apply); the
+fund size, `oiCap` and `maxLeverage` have to be chosen against it, and after the fund is empty the deficit is
+deleveraged (6.3 step 5).
+
 Data availability of the exit (R436-11, stated; the rule belongs to VAULT.md and the node): an escape claim needs
 the account's leaf and its 32 siblings against the vault's last accepted `accountsRoot`, and the siblings depend
 on every account's state at that height. The engine produces them for anyone who holds the input log up to that
@@ -926,6 +939,7 @@ the paths it does reach: book fills, liquidations, ADL or backstop, funding, tri
 | 0.1.4 | 2026-11-17 | 394's exit band (README 6a) used for free collateral during a halt (replaces 0.1.3's x2 rule) and for forced closes in a halt (served at `settle`, never pending); X3 market settlement after `maxHaltMs`; genesis oracle exit fields; `Attestation` and other reserved type names (S-2.3.1) |
 | 0.1.5 | 2026-11-17 | systemHash adds withdrawalCount/withdrawalsTotal, nextForcedIndex = processed (VAULT 5.2; 390's vectors reproduced, new vector in tests/r395b.rs); R395-13 liquidation bound `lp` + no same-block makers; R395-14 backstop rules; R395-16 post-action samples + median; R395-23 insurance-first escape values |
 | 0.1.6 | 2026-11-17 | forced-request input and forcedHead = VAULT.md 0.2 fields (index, account, kind 0/1/2, deadline, arg), close = every market (390's report on 64072cb) |
+| 0.2.4 | 2026-11-19 | R436-12 aligned with the oracle owner's exact rule C2d (only observations outside the block-time window are ignored; a bad signature, a time outside the round or a malformed price list still refuse the whole input; below the quorum `ORACLE_TIME`, round not consumed); 432's `c2d.json` run through `apply_block`. R436-13: limit trigger types 3 and 5 must be GTC. Section 12: gap risk of paired accounts against the insurance fund's size |
 | 0.2.3 | 2026-11-19 | review 436's findings, each with a test that fails on `f0e3967`: R436-1 High (S-4.9.1 maintenance at every fill for makers and reducing takers; S-4.9 backing at placement; S-4.12 price band, error `PRICE_BAND`; forced close never past the bankruptcy price, section 14); R436-10 High (forced close in a halt at the band side worse for the closer; X3 only with a committee price since the halt); R436-4 High, engine half (S-3.2.0: a long agent name fails its input, never the block); R436-12 (S-5.1.2: an observation that fails its own rule is dropped); R436-2 (liquidations skip same-block orders instead of stopping); R436-8 (`impactNotional >= 1`, strict integers in the converter); R436-5 (BACKSTOP's realised loss settled and reported every block). R395-39 restated (orders in halted markets are cancelled before a forced withdrawal is judged). Section 12 states the residuals, 432's R395-9 bound and the escape's data-availability assumption (R436-11). 431's requests: events `Accepted`, `Fill` realised results, `Funding` mark and premium; public requirement queries. BEHAVIOUR CHANGES for clients: `PRICE_BAND`; under-backed orders refused at placement or cancelled when reached; forced-close prices |
 | 0.2.2 | 2026-11-18 | worked-example vectors (section 15: `engine/vectors/worked-examples.json`, 175 cases, independent Python checker, S-15.1 displayed liquidation price), proof vectors (`proofs-example.json`, CLI `prove`), formulas in one module (`calc.rs`) called by the state machine, properties P-1 to P-5 (section 17), 394's oracle vectors and 392's compliance files read at their source by tests. No state, root or encoding change |
 | 0.2.1 | 2026-11-18 | snapshots (section 16, format version 1; closes O-8): canonical state serialization, strict loader with magnitude bounds, mandatory expected root in the CLI, `logHash` stated as not covered by the root; `Engine::snapshot` / `Engine::restore`, CLI `snapshot` and `resume`; shared vector `engine/vectors/snapshot-v1.json`. No state, root or input encoding changes |

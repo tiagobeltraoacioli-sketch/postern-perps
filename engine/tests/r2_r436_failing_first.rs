@@ -277,40 +277,67 @@ fn observation(r: &Rig, signer: usize, round: u64, time_ms: u64, price: u64, key
     SignedObservation { signer: signer as u8, time_ms, prices, signature: sign_digest(key_of, &d) }
 }
 
-/// R436-12: ONE observation that fails its own rule (here: a `timeMs` at the end of the round, beyond the block
-/// time + oracleMaxFutureMs; then a signature by the wrong key) refused the WHOLE update on f0e3967, so one signer
-/// of seven, or one clock a second fast, vetoed every round. Fixed: the observation is dropped and the round
-/// stands on the other six (quorum 5); with fewer than the quorum valid the update is refused as before.
+/// R436-12, rule C2d as 432 restated it (README section 5; vectors c2d.json in `r2_regression.rs`): ONE observation
+/// whose `timeMs` is outside the block-time window (here at the end of the round, beyond block time +
+/// oracleMaxFutureMs) refused the WHOLE update on f0e3967, so one signer of seven, or one feeder clock a second
+/// fast, vetoed every round. Fixed: that observation is IGNORED and the round stands on the other six (quorum 5);
+/// with fewer than the quorum left the update is refused ORACLE_TIME and the round is NOT consumed, so the same
+/// update is accepted at a later block time. A bad signature or a malformed price list stays a refusal of the
+/// whole input (facts about the observation alone, which an honest sequencer filters).
 #[test]
 fn r436_12_one_bad_observation_does_not_veto_the_round() {
     let mut r = Rig::one();
     let keys = oracle_keys(7);
-    for (case, bad) in ["late clock", "wrong key", "zero price"].iter().enumerate() {
-        r.t += 3000;
-        r.h += 1;
-        let round = r.t / ROUND_MS;
-        let start = round * ROUND_MS;
-        let t = start + 400;
-        let mut obs: Vec<SignedObservation> = (0..6).map(|i| observation(&r, i, round, start, P, &keys[i])).collect();
-        obs.push(match case {
-            0 => observation(&r, 6, round, start + ROUND_MS - 1, P, &keys[6]),
-            1 => observation(&r, 6, round, start, P, &key(999)),
-            _ => observation(&r, 6, round, start, 0, &keys[6]),
-        });
-        let out = r.e.apply_block(&Block { height: r.h, time: t, inputs: vec![Input::Oracle(OracleUpdate { round, observations: obs })] }).unwrap();
-        r.t = t;
-        assert_eq!(out.outcomes, [Ok(())], "{bad}: the round stands on six valid observations");
-        assert_eq!((r.e.markets[&1].oracle.index, r.e.markets[&1].oracle.status), (P, Status::Active), "{bad}");
-    }
-    // three bad of seven: four valid < quorum 5: refused, the index does not move, the round is not consumed
     r.t += 3000;
     r.h += 1;
     let round = r.t / ROUND_MS;
     let start = round * ROUND_MS;
+    let t = start + 400;
+    let late = start + ROUND_MS - 1;
+    let mut obs: Vec<SignedObservation> = (0..6).map(|i| observation(&r, i, round, start, P, &keys[i])).collect();
+    obs.push(observation(&r, 6, round, late, P, &keys[6]));
+    let out = r.e.apply_block(&Block { height: r.h, time: t, inputs: vec![Input::Oracle(OracleUpdate { round, observations: obs })] }).unwrap();
+    r.t = t;
+    assert_eq!(out.outcomes, [Ok(())], "late clock: the round stands on six observations");
+    assert_eq!((r.e.markets[&1].oracle.index, r.e.markets[&1].oracle.status), (P, Status::Active));
+    // three of seven outside the window: four left < quorum 5: refused, nothing moves, the round is not consumed
+    r.t += 3000;
+    r.h += 1;
+    let round = r.t / ROUND_MS;
+    let start = round * ROUND_MS;
+    let late = start + ROUND_MS - 1;
     let mut obs: Vec<SignedObservation> = (0..4).map(|i| observation(&r, i, round, start, P + TICK, &keys[i])).collect();
-    obs.extend((4..7).map(|i| observation(&r, i, round, start, P + TICK, &key(990 + i as u32))));
+    obs.extend((4..7).map(|i| observation(&r, i, round, late, P + TICK, &keys[i])));
+    let update = Input::Oracle(OracleUpdate { round, observations: obs });
     let before = r.e.last_oracle_round;
-    let out = r.e.apply_block(&Block { height: r.h, time: start + 400, inputs: vec![Input::Oracle(OracleUpdate { round, observations: obs })] }).unwrap();
-    assert_eq!(out.outcomes, [Err(Error::OracleBadSignature)]);
+    let out = r.e.apply_block(&Block { height: r.h, time: start + 400, inputs: vec![update.clone()] }).unwrap();
+    assert_eq!(out.outcomes, [Err(Error::OracleTime)]);
     assert_eq!((r.e.markets[&1].oracle.index, r.e.last_oracle_round), (P, before));
+    // the same update 1.7 s later: every observation is inside the window now
+    r.h += 1;
+    let out = r.e.apply_block(&Block { height: r.h, time: start + 2100, inputs: vec![update] }).unwrap();
+    assert_eq!(out.outcomes, [Ok(())], "the round was not consumed by the refusal");
+    assert_eq!(r.e.markets[&1].oracle.index, P + TICK);
+}
+
+/// R436-13: a stop-limit / take-profit-limit signed IOC was accepted and entered the book as GTC when it fired
+/// (the remainder rested although the user signed immediate-or-cancel). Fixed: types 3 and 5 MUST be GTC; anything
+/// else is MALFORMED at placement.
+#[test]
+fn r436_13_limit_triggers_must_be_gtc() {
+    let mut r = Rig::one();
+    let ka = key(1);
+    let a = addr(&ka);
+    let d = r.dep(a, 10_000);
+    r.block(3000, &[(1, P)], vec![d]);
+    let mk = |r: &Rig, n: u64, ty: u8, tif: u8| {
+        let mut x = place(a, r.t + 3000 + n, 1, true, ty, tif, P + 110 * TICK, 100_000, false);
+        if let Action::PlaceOrder(p) = &mut x {
+            p.trigger_price = P + 100 * TICK;
+        }
+        sign_action(&r.e, &ka, x)
+    };
+    let inputs = vec![mk(&r, 0, ORDER_STOP_LIMIT, TIF_IOC), mk(&r, 1, ORDER_TP_LIMIT, TIF_IOC), mk(&r, 2, ORDER_STOP_LIMIT, TIF_GTC), mk(&r, 3, ORDER_STOP_MARKET, TIF_IOC)];
+    let out = r.block(3000, &[(1, P)], inputs);
+    assert_eq!(out.outcomes[1..], [Err(Error::Malformed), Err(Error::Malformed), Ok(()), Ok(())]);
 }

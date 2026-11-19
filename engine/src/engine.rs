@@ -1442,6 +1442,11 @@ impl Engine {
         if is_trigger && p.time_in_force == TIF_POST_ONLY {
             return Err(Error::Malformed);
         }
+        // R436-13: a stop-limit / take-profit-limit enters the book as GTC when it fires (S-4.6) and the stored
+        // order keeps no time in force: IOC cannot be honoured for types 3 and 5, so it is refused, never coerced
+        if is_trigger && !is_market_type && p.time_in_force != TIF_GTC {
+            return Err(Error::Malformed);
+        }
         if p.price == 0 || p.price > MAX_PRICE {
             return Err(Error::Malformed);
         }

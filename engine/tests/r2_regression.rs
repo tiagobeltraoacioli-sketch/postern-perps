@@ -190,6 +190,87 @@ fn eip712_vectors_at_their_source() {
     }
 }
 
+/// 432's vectors of rule C2d (README section 5 as restated for R436-12; branch codex/perps-oracle-r2-20261118 at
+/// 2c9b0f6) through the WHOLE engine: a genesis with the file's committee, vault, quorum, time bounds and per-market
+/// oracle parameters; each case is one block at its block time on a fresh engine, the update decoded from the
+/// file's canonical bytes. The engine must refuse with the file's error (and not consume the round) or accept and
+/// leave each market as the file's report says.
+#[test]
+fn c2d_vectors_of_432_through_apply_block() {
+    let text = include_str!("fixtures/oracle-2c9b0f6/c2d.json");
+    let live = format!("{}/../node/oracle/vectors/c2d.json", env!("CARGO_MANIFEST_DIR"));
+    if let Ok(now) = std::fs::read_to_string(&live) {
+        assert!(now == text, "node/oracle/vectors/c2d.json differs from the copy taken at 2c9b0f6: re-read 432's change, then update the copy");
+    }
+    let v: Value = serde_json::from_str(text).unwrap();
+    let c = &v["committee"];
+    let markets: Vec<postern_perps_engine::genesis::MarketParams> = c["markets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            let u = |k: &str| m[k].as_u64().unwrap();
+            let mut x = market(u("marketId") as u32, &format!("M{}-USD", u("marketId")));
+            x.oracle = postern_perps_engine::genesis::OracleParams {
+                min_sources: u("minSources") as u8,
+                agree_bps: u("agreeBps") as u32,
+                jump_bps: u("jumpBps") as u32,
+                max_staleness_ms: u("maxStalenessMs"),
+                confirm_rounds: u("confirmRounds") as u32,
+                exit_haircut_bps: u("exitHaircutBps") as u32,
+                exit_haircut_per_min_bps: u("exitHaircutPerMinBps") as u32,
+                exit_max_haircut_bps: u("exitMaxHaircutBps") as u32,
+                max_halt_ms: u("maxHaltMs"),
+            };
+            x
+        })
+        .collect();
+    let mut g = genesis_raw(7, markets);
+    g.verifying_contract = c["verifyingContract"].as_str().unwrap().to_string();
+    g.oracle_signers = c["signers"].as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect();
+    g.oracle_quorum = c["quorum"].as_u64().unwrap() as u8;
+    g.oracle_max_future_ms = c["maxFutureMs"].as_u64().unwrap();
+    g.oracle_max_age_ms = c["maxAgeMs"].as_u64().unwrap();
+    let checked = g.check().expect("a genesis with 432's committee");
+    let cases = v["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 11, "432's file has 11 cases (a change must be re-read, not absorbed)");
+    let (mut accepted, mut refused) = (0, 0);
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let bytes = hex::decode(&case["canonicalBytes"].as_str().unwrap()[2..]).unwrap();
+        let input = decode_payload(0x01, &bytes).unwrap_or_else(|e| panic!("{name}: canonical bytes do not decode: {}", e.0));
+        assert_eq!(&encode_input(&input)[5..], &bytes[..], "{name}: re-encoding");
+        let mut e = Engine::new(checked.clone());
+        let out = e.apply_block(&Block { height: 1, time: case["blockTime"].as_u64().unwrap(), inputs: vec![input] }).unwrap();
+        let x = &case["expect"];
+        if let Some(err) = x.get("error").and_then(|s| s.as_str()) {
+            assert_eq!(out.outcomes[0].map_err(|e| e.name()), Err(err), "{name}");
+            assert_eq!(e.last_oracle_round, None, "{name}: a refused update does not consume its round");
+            for m in e.markets.values() {
+                assert_eq!((m.oracle.index, m.oracle.run), (0, None), "{name}: no state change");
+            }
+            refused += 1;
+        } else {
+            assert_eq!(out.outcomes, [Ok(())], "{name}");
+            assert_eq!(e.last_oracle_round, x["report"]["round"].as_u64(), "{name}");
+            for m in x["report"]["markets"].as_array().unwrap() {
+                let o = &e.markets[&(m["marketId"].as_u64().unwrap() as u32)].oracle;
+                match m["outcome"].as_str().unwrap() {
+                    "confirming" => {
+                        let price: u64 = m["price"].as_str().unwrap().parse().unwrap();
+                        assert_eq!(o.run.map(|r| (r.0, r.1 as u64)), Some((price, m["count"].as_u64().unwrap())), "{name}: market {}", m["marketId"]);
+                        assert_ne!(o.status, Status::Active);
+                    }
+                    "noQuorum" => assert_eq!((o.index, o.run), (0, None), "{name}: market {} got no committee price", m["marketId"]),
+                    other => panic!("{name}: outcome {other} is not known to this test (re-read 432's vectors)"),
+                }
+            }
+            accepted += 1;
+        }
+    }
+    assert_eq!((accepted, refused), (8, 3));
+}
+
 fn live_compliance(name: &str) -> Value {
     let p = format!("{}/../compliance/{name}", env!("CARGO_MANIFEST_DIR"));
     serde_json::from_str(&std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"))).unwrap()
