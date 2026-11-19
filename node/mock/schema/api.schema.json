@@ -132,6 +132,18 @@
     },
     "maxDeviationBps": {
      "$ref": "#/$defs/UDec"
+    },
+    "exitHaircutBps": {
+     "$ref": "#/$defs/Int"
+    },
+    "exitHaircutPerMinBps": {
+     "$ref": "#/$defs/Int"
+    },
+    "exitMaxHaircutBps": {
+     "$ref": "#/$defs/Int"
+    },
+    "maxHaltMs": {
+     "$ref": "#/$defs/Int"
     }
    },
    "required": [
@@ -231,6 +243,12 @@
        "type": "null"
       }
      ]
+    },
+    "markBandBps": {
+     "$ref": "#/$defs/Int"
+    },
+    "marketSlippageBps": {
+     "$ref": "#/$defs/Int"
     }
    },
    "required": [
@@ -611,6 +629,51 @@
      "type": [
       "string",
       "null"
+     ]
+    },
+    "haltedSince": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/Ms"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "exitBand": {
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "low": {
+         "$ref": "#/$defs/UDec"
+        },
+        "high": {
+         "$ref": "#/$defs/UDec"
+        },
+        "settlePrice": {
+         "$ref": "#/$defs/UDec"
+        },
+        "settleDue": {
+         "type": "boolean"
+        },
+        "asOf": {
+         "$ref": "#/$defs/Ms"
+        }
+       },
+       "required": [
+        "low",
+        "high",
+        "settlePrice",
+        "settleDue",
+        "asOf"
+       ],
+       "additionalProperties": false
+      },
+      {
+       "type": "null"
+      }
      ]
     }
    },
