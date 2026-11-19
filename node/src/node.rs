@@ -58,6 +58,8 @@ pub struct App {
     pub collateral_token: crate::util::Address,
     /// Bearer token of the oracle ingest paths (`--oracle-token-file`); `None` = ingest disabled.
     pub oracle_token: Option<Vec<u8>>,
+    /// Limits of `/v1/blocks/stream` (R436-14)
+    pub streams: Arc<crate::api::StreamLimits>,
     /// Bearer token of the operator's reads (`--operator-token-file`; `None`: no operator path exists)
     pub operator_token: Mutex<Option<Vec<u8>>>,
     /// Attestation records (`crate::attest`)
@@ -101,6 +103,7 @@ impl App {
             rebuild_gate: tokio::sync::Mutex::new(()),
             attestations: Mutex::new(crate::attest::Attestations::default()),
             operator_token: Mutex::new(None),
+            streams: Arc::new(crate::api::StreamLimits::new(crate::api::STREAM_SLOTS)),
             g,
             seq: Mutex::new(seq),
             geo,
@@ -228,6 +231,9 @@ pub async fn run_remote_validator_with(base: String, mut v: Validator, mut stop:
         for h in 1..=last {
             let b = st.lock().unwrap().log.read(h)?.ok_or("own log read")?;
             v.replay_own(&b)?;
+            if let Some(e) = v.engine.real() {
+                st.lock().unwrap().anchor(h, e);
+            }
         }
         let mut s = st.lock().unwrap();
         s.replayed_own = last;

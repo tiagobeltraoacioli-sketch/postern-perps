@@ -227,7 +227,7 @@ checkpoint from `GET /v1/committee` plus this object without trusting the API ho
 |---|---|
 | `GET /v1/blocks/{height}` | `Block` |
 | `GET /v1/blocks?from=H&limit=N` | `{"blocks":[Block]}` oldest first, max 500 |
-| `GET /v1/blocks/stream?from=H` | `application/x-ndjson`, one `Block` per line (bulk replay) |
+| `GET /v1/blocks/stream?from=H` | `application/x-ndjson`, one `Block` per line (bulk replay): at most 10,001 blocks per request, produced as the client reads (backpressure); continue with `from` = the last height received + 1 until an empty answer. At most 4 streams at once and one per client address (`429 RATE_LIMITED`); a client that does not read for 10 s is disconnected, so a stream can end early: always continue from the last complete line |
 
 `Block`:
 
@@ -697,8 +697,12 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 - The machine-readable schema is still the draft `node/mock/schema/api.schema.json` (agent 435): the v0.3
   additions (`ForcedAction` extras, `WithdrawalProof`, `OracleIngestAck`, `OracleRounds`, `AccountProof.leafData`
   fields) are specified here and not yet in that file.
-- A validator's read service has no rate limit and no CORS headers of its own (put it behind the operator's
-  proxy); a state rebuild replays from genesis when no nearer state is held (linear in the height).
+- A validator's read service (R436-14): reads are limited per client address (20 per second, burst 40, `429`),
+  its block stream to 2 at once and one per address; a state is rebuilt once (requests for it wait), the 4
+  newest rebuilt states are kept, and a rebuild starts from the nearest state held (a checkpoint it signed, a
+  kept rebuild, or the anchor it keeps every 1,000 blocks, the newest 16), so inside the anchored range it replays
+  at most 1,000 blocks; older heights replay from genesis (linear). It sends no CORS headers (put it behind the
+  operator's proxy). Each kept state is a whole copy of the engine state in memory.
 - The node's geoblock decision is still the node's own function (round 1) plus the edge assertion and the
   attestation step; it is not 397's `decide()` port, and its equality with 397's decision vectors is not proven
   (sanctions-list freshness, subdivision rules and the hosting rule of the design are not in the node).

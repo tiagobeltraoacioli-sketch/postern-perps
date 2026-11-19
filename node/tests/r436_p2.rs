@@ -309,3 +309,72 @@ fn r436_16_a_snapshot_whose_engine_log_hash_is_not_the_logs_is_refused() {
     assert_eq!((s.engine.state_root(), s.log.last_height), (root, h));
     assert_eq!(s.engine.real().unwrap().log_hash, s.log.last_log_hash, "the engine's own logHash is the log's");
 }
+
+/// A validator's own store with `n` applied blocks (one deposit each), served on a loopback listener.
+async fn validator_service(name: &str, n: u64) -> (String, perps_node::vserve::SharedStore, Arc<perps_node::genesis::Genesis>, Vec<perps_node::types::Block>) {
+    let mut net = net_real(name, 1000);
+    let ua = perps_node::sig::key_address(&user(44));
+    let mut blocks = Vec::new();
+    for i in 0..n {
+        net.seq_view.lock().unwrap().deposits.insert(i, deposit(i, ua, 1_000_000_000 + i));
+        blocks.push((*net.seq.produce(now() + i).unwrap().unwrap().block).clone());
+    }
+    let (_, _, checked) = perps_node::dev::dev_genesis_real(&format!("test-{name}"), 7, 5, 1000, 0);
+    let genesis_engine: Box<dyn perps_node::engine::Engine> = Box::new(perps_node::engine::real::RealEngine::new(net.g.clone(), checked).unwrap());
+    let mut store = perps_node::vserve::ValidatorStore::open(net.g.clone(), &tmpdir(&format!("{name}-val")), genesis_engine, "0xvalidator".into()).unwrap();
+    for b in &blocks {
+        store.applied(b, None, None).unwrap();
+    }
+    let store = Arc::new(Mutex::new(store));
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    let r = perps_node::vserve::router(store.clone());
+    tokio::spawn(async move { axum::serve(l, r.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap() });
+    (url, store, net.g.clone(), blocks)
+}
+
+async fn http_get(url: &str) -> (u16, serde_json::Value) {
+    let (s, b) = perps_node::watcher::http_call("GET", url, None, &[]).await.unwrap();
+    (s, serde_json::from_slice(&b).unwrap_or(serde_json::Value::Null))
+}
+
+/// R436-14 (validator read service): every proof request for a height without a held state replayed the log
+/// again, any number at once, and the service had no rate limit. Properties: a rebuilt state is kept, so the
+/// same height again costs no replay; requests arriving together for one height share ONE rebuild; a rebuild
+/// starts from the nearest state already held, not from genesis; reads are rate-limited per client address.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r436_14_the_validator_service_rebuilds_once_keeps_the_state_and_limits_reads() {
+    let (url, store, _g, blocks) = validator_service("r436-14-val", 12).await;
+    let insurance = "0x0000000000000000000000000000000000000002";
+    let rebuilds = || store.lock().unwrap().rebuilds;
+    let (s, p5) = http_get(&format!("{url}/v1/accounts/{insurance}/proof?height=5")).await;
+    assert_eq!((s, p5["stateRoot"].as_str()), (200, Some(to_hex(&blocks[4].header.state_root).as_str())), "{p5}");
+    assert_eq!(rebuilds(), 1);
+    // the same height again: served from the kept state
+    for _ in 0..3 {
+        let (s, again) = http_get(&format!("{url}/v1/accounts/{insurance}/proof?height=5")).await;
+        assert_eq!((s, &again["proof"]), (200, &p5["proof"]));
+    }
+    assert_eq!(rebuilds(), 1, "no replay for a height whose state is kept");
+    // six requests at once for another height: one rebuild, six equal answers
+    let mut hs = Vec::new();
+    for _ in 0..6 {
+        let u = format!("{url}/v1/accounts/{insurance}/proof?height=9");
+        hs.push(tokio::spawn(async move { http_get(&u).await }));
+    }
+    let mut answers = Vec::new();
+    for h in hs {
+        answers.push(h.await.unwrap());
+    }
+    assert!(answers.iter().all(|(s, p)| *s == 200 && p["stateRoot"] == to_hex(&blocks[8].header.state_root).as_str() && p["proof"] == answers[0].1["proof"]), "{answers:?}");
+    assert_eq!(rebuilds(), 2, "requests arriving together share one rebuild");
+    // the rebuild of 9 started from the kept state of 5 (4 blocks replayed), not from genesis
+    assert_eq!(store.lock().unwrap().rebuild_blocks, 5 + 4, "blocks replayed in all: 5 for height 5, then 4 from it to 9");
+    // reads are rate-limited per client address (the service had no limit at all)
+    store.lock().unwrap().read_rate = perps_node::sequencer::RateLimit::new(1.0, 3.0);
+    let mut codes = Vec::new();
+    for _ in 0..5 {
+        codes.push(http_get(&format!("{url}/v1/validator")).await.0);
+    }
+    assert_eq!(codes, vec![200, 200, 200, 429, 429]);
+}

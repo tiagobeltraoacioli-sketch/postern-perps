@@ -1054,3 +1054,83 @@ fn r436_17_the_store_of_accounts_without_a_deposit_is_bounded() {
     store.submit(&rec(cap + 1), t, &|a: &Address| *a == first).unwrap();
     assert_eq!(store.len() as u64, cap + 2);
 }
+
+/// A raw GET from a chosen loopback source address that sends the request and reads NOTHING until asked.
+async fn raw_get(from_ip: &str, url: &str, path: &str) -> tokio::net::TcpStream {
+    use tokio::io::AsyncWriteExt;
+    let target: SocketAddr = url.trim_start_matches("http://").parse().unwrap();
+    let sock = tokio::net::TcpSocket::new_v4().unwrap();
+    sock.bind(format!("{from_ip}:0").parse().unwrap()).unwrap();
+    let mut s = sock.connect(target).await.unwrap();
+    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: node\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+    s
+}
+
+/// R436-14 (`/v1/blocks/stream`): the stream was built whole in memory for any number of callers. Properties: one
+/// stream per client address and four in all (429 beyond); a consumer that does not read is disconnected after
+/// the slow-consumer time and its slot is free again; a reader gets every block, in order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r436_14_block_streams_are_bounded_backpressured_and_slow_consumers_cut() {
+    use tokio::io::AsyncReadExt;
+    let n = start_node("stream").await;
+    let base = n.url.clone();
+    // 60 blocks of 2,000 deposits: about 25 MB of ndjson, far more than loopback socket buffers hold
+    {
+        let mut v = n.app.view.lock().unwrap();
+        let a = key_address(&user(70));
+        for i in 0..120_000u64 {
+            v.deposits.insert(i, deposit(i, a, 1_000_000 + i));
+        }
+    }
+    for _ in 0..600 {
+        if n.app.seq.lock().unwrap().engine.next_deposit_index() == 120_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // every deposit is in a block; nothing else makes blocks in this test, so the height is fixed from here on
+    // (read AFTER the last deposit was credited: reading it before raced with the last block)
+    assert_eq!(n.app.seq.lock().unwrap().engine.next_deposit_index(), 120_000);
+    let height = n.app.seq.lock().unwrap().log.last_height;
+    assert!(height >= 60, "{height}");
+    *n.app.read_rate.lock().unwrap() = perps_node::sequencer::RateLimit::new(0.0, 0.0);
+    n.app.streams.slow_ms.store(600, std::sync::atomic::Ordering::Relaxed);
+    let path = "/v1/blocks/stream?from=1";
+    // a consumer that never reads holds its address's stream
+    let mut idle = raw_get("127.0.0.1", &base, path).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let (s, e) = get_json(&format!("{base}{path}")).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (429, Some("RATE_LIMITED")), "a second stream from the same address: {e}");
+    // three more addresses fill the four slots; a fifth address is refused
+    let mut others = Vec::new();
+    for ip in ["127.0.0.2", "127.0.0.3", "127.0.0.4"] {
+        others.push(raw_get(ip, &base, path).await);
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let mut fifth = raw_get("127.0.0.5", &base, path).await;
+    let mut head = vec![0u8; 12];
+    fifth.read_exact(&mut head).await.unwrap();
+    assert_eq!(std::str::from_utf8(&head).unwrap(), "HTTP/1.1 429", "four streams at once is the limit");
+    // the silent consumers are cut once they have not taken a chunk for the slow-consumer time (600 ms here):
+    // their slots come back without anyone reading a byte
+    for _ in 0..300 {
+        if n.app.streams.slots.available_permits() == perps_node::api::STREAM_SLOTS {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(n.app.streams.slots.available_permits(), perps_node::api::STREAM_SLOTS, "every slot was given back");
+    assert!(n.app.streams.ips.lock().unwrap().is_empty());
+    // a consumer that reads gets every block, in order
+    let (s, body) = http_call("GET", &format!("{base}{path}"), None, &[]).await.unwrap();
+    assert_eq!(s, 200);
+    let heights: Vec<u64> = std::str::from_utf8(&body).unwrap().lines().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["height"].as_u64().unwrap()).collect();
+    assert_eq!(heights, (1..=height).collect::<Vec<_>>());
+    // what the cut consumer finds when it finally reads: the head of the stream, not all of it
+    let mut got = Vec::new();
+    let _ = idle.read_to_end(&mut got).await;
+    assert!(got.starts_with(b"HTTP/1.1 200"));
+    assert!(got.len() < body.len(), "the silent consumer was cut: {} of {} bytes", got.len(), body.len());
+    drop(others);
+    let _ = n.stop.send(true);
+}

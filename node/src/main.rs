@@ -182,7 +182,7 @@ async fn remote_validator(a: HashMap<String, String>) {
         let Some(st) = store.clone() else { die("--listen needs --data DIR (the validator serves its own log)".into()) };
         let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| die(format!("bind {listen}: {e}")));
         tokio::spawn(async move {
-            let _ = axum::serve(listener, perps_node::vserve::router(st)).await;
+            let _ = axum::serve(listener, perps_node::vserve::router(st).into_make_service_with_connect_info::<SocketAddr>()).await;
         });
         eprintln!("validator read service on http://{listen}");
     }
