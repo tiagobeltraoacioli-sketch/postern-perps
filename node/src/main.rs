@@ -55,7 +55,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A[,http://B] --relay-key-file F [--relay-poll-ms 2000]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A[,http://B] --relay-key-file F [--relay-poll-ms 2000]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -315,6 +315,7 @@ async fn dev(a: HashMap<String, String>) {
         }
     };
     seq.snapshot_every = get(&a, "snapshot-every", 1000);
+    seq.block_actions = get(&a, "block-actions", perps_node::sequencer::DEFAULT_BLOCK_ACTIONS);
     seq.rate = RateLimit::new(get(&a, "account-rate", 20.0), get(&a, "account-rate", 20.0) * 2.0);
     seq.oracle_pool.gather_ms = get(&a, "oracle-gather-ms", perps_node::oracle_pool::DEFAULT_GATHER_MS);
     eprintln!("recovered: {:?}", seq.recovered);

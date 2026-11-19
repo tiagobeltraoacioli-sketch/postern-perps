@@ -36,6 +36,13 @@ pub const MAX_ACTIONS_PER_BLOCK: usize = 5_000;
 /// R436-3: a block takes at most this many pending L2 inputs (each a consecutive prefix in vault index order); the
 /// rest follow in the next blocks. 1 + 2,000 + 1,000 + 5,000 stays below the engine's MAX_INPUTS (10,000), and
 /// `produce` also keeps the block inside the engine's own input and byte bounds (`Engine::block_limits`).
+/// Default number of actions a block takes (`Sequencer::block_actions`, `--block-actions`). Measured on the build
+/// host (agents/431-node-r2.md, performance): a block costs about 0.29 ms per action to build and 0.27 ms per
+/// action for a validator to replay, and a validator does not sign a checkpoint that covers a block it first saw
+/// more than 2 s after the block's own time (R395-29). With 5,000 actions per block a burst made every block late
+/// and the committee signed nothing until the burst ended (finality stalled, fail closed); 600 actions keep a
+/// block inside the 200 ms interval and the validators in step. The hard cap stays `MAX_ACTIONS_PER_BLOCK`.
+pub const DEFAULT_BLOCK_ACTIONS: usize = 600;
 pub const MAX_DEPOSITS_PER_BLOCK: usize = 2_000;
 pub const MAX_FORCED_PER_BLOCK: usize = 1_000;
 pub const MAX_MEMPOOL: usize = 100_000;
@@ -163,6 +170,8 @@ pub struct Sequencer {
     pub rate: RateLimit,
     pub view: SharedView,
     pub snapshot_every: u64,
+    /// actions per block (at most `MAX_ACTIONS_PER_BLOCK`)
+    pub block_actions: usize,
     pub recent: VecDeque<Arc<BlockInfo>>,
     pub recent_keep: usize,
     /// withdrawal id -> height it was created
@@ -267,6 +276,7 @@ impl Sequencer {
             rate: RateLimit::new(20.0, 40.0),
             view,
             snapshot_every: 1000,
+            block_actions: DEFAULT_BLOCK_ACTIONS,
             recent: VecDeque::new(),
             recent_keep: 2000,
             withdrawal_heights: BTreeMap::new(),
@@ -649,7 +659,8 @@ impl Sequencer {
         }
         let fixed = inputs.len();
         let mut actions: Vec<(SignedAction, H256)> = Vec::new();
-        while actions.len() < MAX_ACTIONS_PER_BLOCK && fixed + actions.len() < max_inputs {
+        let action_cap = self.block_actions.clamp(1, MAX_ACTIONS_PER_BLOCK);
+        while actions.len() < action_cap && fixed + actions.len() < max_inputs {
             let Some((a, _)) = self.mempool.front() else { break };
             let sz = match size_of(&self.g.types, &Input::Action(a.clone())) {
                 Ok(sz) => sz,

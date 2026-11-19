@@ -386,3 +386,31 @@ fn r436_6_withdrawal_proofs_from_the_incremental_tree_equal_the_engines() {
     assert_eq!(users.iter().map(|u| s.wd_by_account[&key_address(u)].len()).collect::<Vec<_>>(), lens);
     assert!(s.certificate(0).is_some(), "final checkpoints reloaded: certificates are served again");
 }
+
+/// Round-2 measurement turned into a rule: a block takes at most `block_actions` actions (default 600, never above
+/// the hard cap); the rest wait in arrival order for the next blocks, and nothing is lost.
+#[test]
+fn a_block_takes_at_most_block_actions_and_the_rest_wait_in_order() {
+    let mut n = net("block-actions", 1000);
+    assert_eq!(n.seq.block_actions, perps_node::sequencer::DEFAULT_BLOCK_ACTIONS);
+    n.seq.block_actions = 5;
+    n.seq.rate = perps_node::sequencer::RateLimit::new(0.0, 0.0);
+    let u = user(60);
+    let ua = key_address(&u);
+    n.deposit_everywhere(deposit(0, ua, 1_000_000_000));
+    n.step();
+    let t = now();
+    let acks: Vec<_> = (0..13u64).map(|i| n.seq.admit(&request(&n.g, &place_order(&n.g, &u, ua, t + i, 1, 10 + i, 1, false)), t).unwrap()).collect();
+    let mut sizes = Vec::new();
+    while n.seq.mempool_len() > 0 {
+        let info = n.seq.produce(now()).unwrap().unwrap();
+        sizes.push(info.outcome.outcomes.len());
+    }
+    assert_eq!(sizes, vec![5, 5, 3]);
+    let heights: Vec<u64> = acks.iter().map(|a| n.seq.acks[&a.action_hash].height.unwrap()).collect();
+    assert!(heights.windows(2).all(|w| w[0] <= w[1]), "arrival order is kept across blocks: {heights:?}");
+    assert!(acks.iter().all(|a| n.seq.acks[&a.action_hash].status == "included"));
+    // a setting above the hard cap is clamped to it
+    n.seq.block_actions = usize::MAX;
+    assert!(n.seq.produce(now()).unwrap().is_none());
+}

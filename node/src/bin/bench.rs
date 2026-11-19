@@ -67,6 +67,7 @@ fn main() {
     let mut seq = Sequencer::open(g.clone(), keys.sequencer.clone(), mk(), dir.clone(), view.clone()).unwrap();
     seq.rate = RateLimit::new(0.0, 0.0);
     seq.snapshot_every = snap_every;
+    seq.block_actions = per_block as usize;
     let mut val = if with_val > 0 { Some(Validator::new(g.clone(), keys.validators[0].clone(), mk(), view.clone(), None).unwrap()) } else { None };
 
     // accounts and their deposits
