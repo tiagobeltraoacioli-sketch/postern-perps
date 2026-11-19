@@ -365,8 +365,17 @@ export function describeTx(d: Deployment, tx: { to: string; data: Hex }): TxDesc
         notes: ['The vault pays the account itself. If the vault holds less than all users are owed, every claim is reduced in the same proportion.'],
       };
     }
-    case 'refundDeposit':
-      return { title: `Refund deposit #${a[0]}: ${usdc(a[2] as bigint)} to ${String(a[1]).toLowerCase()}`, rows: [{ label: 'Amount', value: usdc(a[2] as bigint), emphasis: true }, { label: 'Paid to', value: String(a[1]).toLowerCase(), emphasis: true }, contract, chain], notes: ['In escape mode a deposit the exchange never credited is returned in full from the vault\'s own records.'] };
+    case 'refundDeposit': {
+      // Vault 0.3: a deposit made FOR the insurance fund (0x…02) or the backstop (0x…03) is refunded to whoever funded it.
+      const credited = String(a[1]).toLowerCase();
+      const system = BigInt(credited) === 2n || BigInt(credited) === 3n;
+      const payee = system ? 'the address that funded it' : credited;
+      return {
+        title: `Refund deposit #${a[0]}: ${usdc(a[2] as bigint)} to ${payee}`,
+        rows: [{ label: 'Amount', value: usdc(a[2] as bigint), emphasis: true }, { label: 'Paid to', value: system ? `The funder of this ${BigInt(credited) === 2n ? 'insurance' : 'backstop'} deposit, as the vault recorded it` : credited, emphasis: true }, contract, chain],
+        notes: ['In escape mode a deposit the exchange never credited is returned in full from the vault\'s own records.'],
+      };
+    }
     default:
       throw new UnknownTx('a vault function this interface never calls');
   }

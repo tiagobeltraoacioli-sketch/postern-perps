@@ -151,6 +151,27 @@ describe('value refusals', () => {
     expect(a({ expiresAt: String(Math.floor(NOW / 1000) + 3600) })).toMatch(/future/);
     expect(a({ name: 'bot‮' })).toMatch(/plain characters/);
   });
+  // Engine 0.2.3 (430, cross-area 2026-11-19 00:13): limit trigger types 3 and 5 with a time in force other than GTC
+  // are MALFORMED; a Withdraw to the vault, to the collateral token or to a keyless address is BAD_RECIPIENT.
+  it('a stop-limit or take-profit-limit order must be good-till-cancelled', () => {
+    for (const orderType of [3, 5]) {
+      const base = { orderType, triggerPrice: (66_000n * 10n ** 8n).toString() };
+      expect(valueProblems('PlaceOrder', order({ ...base, timeInForce: 0 }), markets(), NOW)).toEqual([]);
+      expect(valueProblems('PlaceOrder', order({ ...base, timeInForce: 1 }), markets(), NOW).join()).toMatch(/must be good till cancelled/);
+      expect(valueProblems('PlaceOrder', order({ ...base, timeInForce: 2 }), markets(), NOW).join()).toMatch(/must be good till cancelled/);
+    }
+  });
+  it('a withdrawal to the vault, to the collateral token or to a keyless address is refused before signing', () => {
+    const w = (recipient: string) => ({ account, nonce: '1', amount: '1000000', recipient });
+    const g = guard(account, { collateralToken: `0x${'bb'.repeat(20)}` });
+    expect(refusals('Withdraw', w(account), localSigner(), g)).toEqual([]);
+    expect(refusals('Withdraw', w(TEST_DOMAIN.verifyingContract), localSigner(), g).join()).toMatch(/the recipient is the exchange's vault/);
+    expect(refusals('Withdraw', w(TEST_DOMAIN.verifyingContract.toUpperCase().replace('0X', '0x')), localSigner(), g).join()).toMatch(/the recipient is the exchange's vault/);
+    expect(refusals('Withdraw', w(`0x${'BB'.repeat(20)}`), localSigner(), g).join()).toMatch(/the recipient is the collateral token/);
+    expect(refusals('Withdraw', w(`0x${'0'.repeat(36)}ffff`), localSigner(), g).join()).toMatch(/not an address anyone holds a key for/);
+    expect(refusals('Withdraw', w(`0x${'0'.repeat(39)}2`), localSigner(), g).join()).toMatch(/not an address anyone holds a key for/);
+    expect(refusals('Withdraw', w(`0x${'0'.repeat(35)}10000`), localSigner(), g)).toEqual([]);
+  });
   it('leverage bounds', () => {
     // The bound is the market table's (compliance/markets.json 0.2.1: SOL 10x, BTC 20x; the round-1 fixture said 20 and 50).
     expect(valueProblems('UpdateLeverage', { account, nonce: '1', marketId: 3, leverage: 21, isolated: false }, markets(), NOW).join()).toMatch(/1 to 10/);

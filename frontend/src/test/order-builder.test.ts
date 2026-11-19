@@ -59,6 +59,14 @@ describe('buildOrder', () => {
     const none = build({ kind: 'market' }, 67_000n * PX, [{ px: 70_000n * PX, size: 10n ** 9n }]);
     expect(none.warnings.join()).toMatch(/would not fill/);
   });
+  it('a stop-limit built while the form still holds IOC or post-only is sent good-till-cancelled (engine 0.2.3)', () => {
+    for (const tif of ['IOC', 'POST_ONLY', 'GTC'] as const) {
+      const b = build({ kind: 'stopLimit', trigger: '66000', price: '65900', tif });
+      expect(b.errors).toEqual([]);
+      expect(b.message!.timeInForce).toBe(0);
+    }
+    expect(build({ kind: 'limit', tif: 'IOC' }).message!.timeInForce).toBe(1);
+  });
   it('price off tick, size off step, too many places: errors, no message', () => {
     expect(build({ price: '67000.3' }).errors.join()).toMatch(/multiple of 0.5/);
     expect(build({ size: '0.00015' }).errors.join()).toMatch(/at most 4 decimal/);

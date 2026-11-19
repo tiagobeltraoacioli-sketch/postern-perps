@@ -75,6 +75,10 @@ describe('vault ABI pin', () => {
     const source = readFileSync(resolve(process.cwd(), '../contracts/src/PerpsVault.sol'));
     expect(createHash('sha256').update(source).digest('hex')).toBe(VAULT_SOURCE_SHA256);
   });
+  it('equals the ABI the contracts area commits (contracts/abi/PerpsVault.abi.json, 433), entry for entry', () => {
+    const committed = JSON.parse(readFileSync(resolve(process.cwd(), '../contracts/abi/PerpsVault.abi.json'), 'utf8')) as { type: string }[];
+    expect(JSON.stringify(VAULT_ABI)).toBe(JSON.stringify(committed.filter((e) => e.type !== 'constructor')));
+  });
   it('holds every function the page calls with the documented signature (docs/VAULT.md 4)', () => {
     const signatures = new Set(
       (VAULT_ABI as unknown as { type: string; name?: string; inputs?: { type: string; components?: { type: string }[] }[] }[])
@@ -205,6 +209,10 @@ describe('transactions: a closed list, described from the calldata', () => {
     const leaf = { account: USER, index: 3, balance: 5n, escapeValue: 750n * U, positionsHash: ZERO32 };
     expect(describeTx(d, buildTx(d, { kind: 'claimEscape', leaf, siblings: Array<Hex>(32).fill(ZERO32), want: 1n })).title).toBe(`Claim the escape balance of ${USER}`);
     expect(describeTx(d, buildTx(d, { kind: 'refundDeposit', index: 2n, account: USER, amount: 100n * U })).title).toBe(`Refund deposit #2: 100.00 bUSDC to ${USER}`);
+    // Vault 0.3: a system deposit is refunded to its funder, and the review says so instead of naming 0x…02.
+    const system = describeTx(d, buildTx(d, { kind: 'refundDeposit', index: 5n, account: `0x${'0'.repeat(39)}2` as Hex, amount: 100n * U }));
+    expect(system.title).toBe('Refund deposit #5: 100.00 bUSDC to the address that funded it');
+    expect(system.rows.find((r) => r.label === 'Paid to')?.value).toMatch(/funder of this insurance deposit/);
   });
   it('anything else is not described: another contract, a vault function outside the list, junk', () => {
     expect(() => describeTx(d, { to: OTHER, data: '0x' })).toThrow(UnknownTx);

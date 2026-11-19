@@ -190,8 +190,11 @@ describe.skipIf(!RPC || !OUT)('vault module against PerpsVault on anvil (chain 7
   });
 
   it('the pinned ABI is the ABI of the build under test', () => {
+    // Entry for entry, whatever the key order of the file each came from (forge artifact, committed ABI).
+    const canonical = (v: unknown): unknown => (Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as object).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canonical(x)])) : v);
     const built = artifact('PerpsVault.sol/PerpsVault.json').abi.filter((e) => e.type !== 'constructor');
-    expect(JSON.stringify(VAULT_ABI)).toBe(JSON.stringify(built));
+    expect(VAULT_ABI.length).toBe(built.length);
+    expect(JSON.stringify(canonical(VAULT_ABI)) === JSON.stringify(canonical(built)), 'the pinned ABI differs from the build under test').toBe(true);
   });
 
   it('refuses an endpoint on another chain, and a vault whose token is not the configured one', async () => {

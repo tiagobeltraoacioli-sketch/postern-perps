@@ -1,2107 +1,2126 @@
 {
  "note": "UNAUDITED prototype. PerpsVault ABI pinned by scripts/pin-vault-abi.mjs from a forge build of contracts/src/PerpsVault.sol. Do not edit by hand.",
  "contract": "PerpsVault",
- "sourceSha256": "2cba9f396ab4825bbdd75e9fb30b9d15c6fcf5decf7a7db826875296e3931a7a",
+ "sourceSha256": "09edb216f7d6808fb581903b75eced57f953538683b7bde4d17cfd5de5046a40",
  "abi": [
   {
-   "type": "function",
+   "inputs": [],
    "name": "CHECKPOINT_TYPEHASH",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "SURPLUS_DELAY",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "UNPAUSE_TYPEHASH",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "availableToRelease",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint256",
      "name": "",
-     "type": "uint256",
-     "internalType": "uint256"
+     "type": "uint256"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "bucket",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "bucketUpdatedAt",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "cap",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "checkpointCount",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint64",
+       "name": "height",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "time",
+       "type": "uint64"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "logHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "accountsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "marketsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "withdrawalsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextDepositIndex",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextForcedIndex",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextOrderId",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint128",
+       "name": "totalEscape",
+       "type": "uint128"
+      },
+      {
+       "internalType": "uint128",
+       "name": "dust",
+       "type": "uint128"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "auxHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "depositsHead",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "forcedHead",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "uint64",
+       "name": "withdrawalCount",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "withdrawalsTotal",
+       "type": "uint64"
+      }
+     ],
+     "internalType": "struct PerpsVault.Checkpoint",
+     "name": "cp",
+     "type": "tuple"
+    }
+   ],
    "name": "checkpointDigest",
-   "inputs": [
-    {
-     "name": "cp",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Checkpoint",
-     "components": [
-      {
-       "name": "height",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "time",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "logHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "accountsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "marketsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "withdrawalsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "nextDepositIndex",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "nextForcedIndex",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "nextOrderId",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "totalEscape",
-       "type": "uint128",
-       "internalType": "uint128"
-      },
-      {
-       "name": "dust",
-       "type": "uint128",
-       "internalType": "uint128"
-      },
-      {
-       "name": "auxHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "depositsHead",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "forcedHead",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "withdrawalCount",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "withdrawalsTotal",
-       "type": "uint64",
-       "internalType": "uint64"
-      }
-     ]
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "claimEscape",
    "inputs": [
     {
+     "components": [
+      {
+       "internalType": "address",
+       "name": "account",
+       "type": "address"
+      },
+      {
+       "internalType": "uint32",
+       "name": "index",
+       "type": "uint32"
+      },
+      {
+       "internalType": "int128",
+       "name": "balance",
+       "type": "int128"
+      },
+      {
+       "internalType": "uint64",
+       "name": "escapeValue",
+       "type": "uint64"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "positionsHash",
+       "type": "bytes32"
+      }
+     ],
+     "internalType": "struct PerpsVault.Account",
      "name": "a",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Account",
-     "components": [
-      {
-       "name": "account",
-       "type": "address",
-       "internalType": "address"
-      },
-      {
-       "name": "index",
-       "type": "uint32",
-       "internalType": "uint32"
-      },
-      {
-       "name": "balance",
-       "type": "int128",
-       "internalType": "int128"
-      },
-      {
-       "name": "escapeValue",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "positionsHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      }
-     ]
+     "type": "tuple"
     },
     {
+     "internalType": "bytes32[]",
      "name": "siblings",
-     "type": "bytes32[]",
-     "internalType": "bytes32[]"
+     "type": "bytes32[]"
     },
     {
+     "internalType": "uint64",
      "name": "want",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
+   "name": "claimEscape",
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "key",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "committedOut",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "custody",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "decimals",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint8",
      "name": "",
-     "type": "uint8",
-     "internalType": "uint8"
+     "type": "uint8"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "amount",
+     "type": "uint64"
+    },
+    {
+     "internalType": "address",
+     "name": "account",
+     "type": "address"
+    }
+   ],
    "name": "deposit",
-   "inputs": [
-    {
-     "name": "amount",
-     "type": "uint64",
-     "internalType": "uint64"
-    },
-    {
-     "name": "account",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "index",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "depositCount",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "count",
+     "type": "uint64"
+    }
+   ],
    "name": "depositHead",
-   "inputs": [
-    {
-     "name": "count",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "",
+     "type": "uint64"
+    }
+   ],
    "name": "depositTotalAt",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "depositedTotal",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "domainSeparator",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "escapeAt",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "escapeClaimedTotal",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "escapeDelay",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "account",
+     "type": "address"
+    }
+   ],
    "name": "escapeKey",
-   "inputs": [
-    {
-     "name": "account",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "pure"
+   "stateMutability": "pure",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "escapePayable",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "escapePool",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "escapeReason",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint8",
      "name": "",
-     "type": "uint8",
-     "internalType": "uint8"
+     "type": "uint8"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "feeRecipient",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "address",
      "name": "",
-     "type": "address",
-     "internalType": "address"
+     "type": "address"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "forcedCount",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "",
+     "type": "uint64"
+    }
+   ],
    "name": "forcedDeadline",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "forcedDelay",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "count",
+     "type": "uint64"
+    }
+   ],
    "name": "forcedHead",
-   "inputs": [
-    {
-     "name": "count",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "guardianBlockedUntil",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "guardian",
+     "type": "address"
+    }
+   ],
    "name": "guardianCanPause",
-   "inputs": [
-    {
-     "name": "guardian",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "guardianCount",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint256",
      "name": "",
-     "type": "uint256",
-     "internalType": "uint256"
+     "type": "uint256"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "",
+     "type": "address"
+    }
+   ],
    "name": "guardianLastChain",
-   "inputs": [
-    {
-     "name": "",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "guardianPause",
-   "inputs": [],
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint256",
+     "name": "",
+     "type": "uint256"
+    }
+   ],
    "name": "guardians",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint256",
-     "internalType": "uint256"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "address",
      "name": "",
-     "type": "address",
-     "internalType": "address"
+     "type": "address"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "",
+     "type": "address"
+    }
+   ],
    "name": "hasDeposited",
-   "inputs": [
-    {
-     "name": "",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "inEscape",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "",
+     "type": "address"
+    }
+   ],
    "name": "isGuardian",
-   "inputs": [
-    {
-     "name": "",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "",
+     "type": "address"
+    }
+   ],
    "name": "isValidator",
-   "inputs": [
-    {
-     "name": "",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "largeDelay",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "largeThreshold",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "lastCheckpointAt",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "address",
+     "name": "",
+     "type": "address"
+    }
+   ],
    "name": "lastForcedPlusOne",
-   "inputs": [
-    {
-     "name": "",
-     "type": "address",
-     "internalType": "address"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "latest",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "height",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "time",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "nextDepositIndex",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "nextForcedIndex",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "withdrawalCount",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "withdrawalsTotal",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint128",
      "name": "totalEscape",
-     "type": "uint128",
-     "internalType": "uint128"
+     "type": "uint128"
     },
     {
+     "internalType": "bytes32",
      "name": "accountsRoot",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     },
     {
+     "internalType": "bytes32",
      "name": "stateRoot",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "minDeposit",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "pauseChain",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "pauseCooldown",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "pauseCount",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "pauseDuration",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "paused",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "pausedUntil",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "bytes32",
+     "name": "",
+     "type": "bytes32"
+    }
+   ],
    "name": "payouts",
-   "inputs": [
-    {
-     "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "address",
      "name": "recipient",
-     "type": "address",
-     "internalType": "address"
+     "type": "address"
     },
     {
+     "internalType": "uint64",
      "name": "total",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "paid",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint64",
      "name": "readyAt",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "proveSystemShares",
    "inputs": [
     {
+     "components": [
+      {
+       "internalType": "address",
+       "name": "account",
+       "type": "address"
+      },
+      {
+       "internalType": "uint32",
+       "name": "index",
+       "type": "uint32"
+      },
+      {
+       "internalType": "int128",
+       "name": "balance",
+       "type": "int128"
+      },
+      {
+       "internalType": "uint64",
+       "name": "escapeValue",
+       "type": "uint64"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "positionsHash",
+       "type": "bytes32"
+      }
+     ],
+     "internalType": "struct PerpsVault.Account",
      "name": "insurance",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Account",
-     "components": [
-      {
-       "name": "account",
-       "type": "address",
-       "internalType": "address"
-      },
-      {
-       "name": "index",
-       "type": "uint32",
-       "internalType": "uint32"
-      },
-      {
-       "name": "balance",
-       "type": "int128",
-       "internalType": "int128"
-      },
-      {
-       "name": "escapeValue",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "positionsHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      }
-     ]
+     "type": "tuple"
     },
     {
+     "internalType": "bytes32[]",
      "name": "insuranceSiblings",
-     "type": "bytes32[]",
-     "internalType": "bytes32[]"
+     "type": "bytes32[]"
     },
     {
-     "name": "backstop",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Account",
      "components": [
       {
+       "internalType": "address",
        "name": "account",
-       "type": "address",
-       "internalType": "address"
+       "type": "address"
       },
       {
+       "internalType": "uint32",
        "name": "index",
-       "type": "uint32",
-       "internalType": "uint32"
+       "type": "uint32"
       },
       {
+       "internalType": "int128",
        "name": "balance",
-       "type": "int128",
-       "internalType": "int128"
+       "type": "int128"
       },
       {
+       "internalType": "uint64",
        "name": "escapeValue",
-       "type": "uint64",
-       "internalType": "uint64"
+       "type": "uint64"
       },
       {
+       "internalType": "bytes32",
        "name": "positionsHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
+       "type": "bytes32"
       }
-     ]
+     ],
+     "internalType": "struct PerpsVault.Account",
+     "name": "backstop",
+     "type": "tuple"
     },
     {
+     "internalType": "bytes32[]",
      "name": "backstopSiblings",
-     "type": "bytes32[]",
-     "internalType": "bytes32[]"
+     "type": "bytes32[]"
     }
    ],
+   "name": "proveSystemShares",
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "index",
+     "type": "uint64"
+    },
+    {
+     "internalType": "address",
+     "name": "account",
+     "type": "address"
+    },
+    {
+     "internalType": "uint64",
+     "name": "amount",
+     "type": "uint64"
+    }
+   ],
    "name": "refundDeposit",
-   "inputs": [
-    {
-     "name": "index",
-     "type": "uint64",
-     "internalType": "uint64"
-    },
-    {
-     "name": "account",
-     "type": "address",
-     "internalType": "address"
-    },
-    {
-     "name": "amount",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "",
+     "type": "uint64"
+    }
+   ],
    "name": "refunded",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "refundedTotal",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "bytes32",
+     "name": "key",
+     "type": "bytes32"
+    },
+    {
+     "internalType": "uint64",
+     "name": "want",
+     "type": "uint64"
+    }
+   ],
    "name": "release",
-   "inputs": [
-    {
-     "name": "key",
-     "type": "bytes32",
-     "internalType": "bytes32"
-    },
-    {
-     "name": "want",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint8",
+     "name": "kind",
+     "type": "uint8"
+    },
+    {
+     "internalType": "uint64",
+     "name": "arg",
+     "type": "uint64"
+    }
+   ],
    "name": "requestForced",
-   "inputs": [
-    {
-     "name": "kind",
-     "type": "uint8",
-     "internalType": "uint8"
-    },
-    {
-     "name": "arg",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "index",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "reserved",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint64",
+       "name": "height",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "time",
+       "type": "uint64"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "logHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "accountsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "marketsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "withdrawalsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextDepositIndex",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextForcedIndex",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextOrderId",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint128",
+       "name": "totalEscape",
+       "type": "uint128"
+      },
+      {
+       "internalType": "uint128",
+       "name": "dust",
+       "type": "uint128"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "auxHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "depositsHead",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "forcedHead",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "uint64",
+       "name": "withdrawalCount",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "withdrawalsTotal",
+       "type": "uint64"
+      }
+     ],
+     "internalType": "struct PerpsVault.Checkpoint",
+     "name": "cp",
+     "type": "tuple"
+    }
+   ],
    "name": "stateRootOf",
-   "inputs": [
-    {
-     "name": "cp",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Checkpoint",
-     "components": [
-      {
-       "name": "height",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "time",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "logHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "accountsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "marketsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "withdrawalsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "nextDepositIndex",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "nextForcedIndex",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "nextOrderId",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "totalEscape",
-       "type": "uint128",
-       "internalType": "uint128"
-      },
-      {
-       "name": "dust",
-       "type": "uint128",
-       "internalType": "uint128"
-      },
-      {
-       "name": "auxHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "depositsHead",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "forcedHead",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "withdrawalCount",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "withdrawalsTotal",
-       "type": "uint64",
-       "internalType": "uint64"
-      }
-     ]
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "pure"
+   "stateMutability": "pure",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint64",
+       "name": "height",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "time",
+       "type": "uint64"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "logHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "accountsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "marketsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "withdrawalsRoot",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextDepositIndex",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextForcedIndex",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "nextOrderId",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint128",
+       "name": "totalEscape",
+       "type": "uint128"
+      },
+      {
+       "internalType": "uint128",
+       "name": "dust",
+       "type": "uint128"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "auxHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "depositsHead",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "forcedHead",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "uint64",
+       "name": "withdrawalCount",
+       "type": "uint64"
+      },
+      {
+       "internalType": "uint64",
+       "name": "withdrawalsTotal",
+       "type": "uint64"
+      }
+     ],
+     "internalType": "struct PerpsVault.Checkpoint",
+     "name": "cp",
+     "type": "tuple"
+    },
+    {
+     "internalType": "bytes[]",
+     "name": "signatures",
+     "type": "bytes[]"
+    }
+   ],
    "name": "submitCheckpoint",
-   "inputs": [
-    {
-     "name": "cp",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Checkpoint",
-     "components": [
-      {
-       "name": "height",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "time",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "logHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "accountsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "marketsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "withdrawalsRoot",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "nextDepositIndex",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "nextForcedIndex",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "nextOrderId",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "totalEscape",
-       "type": "uint128",
-       "internalType": "uint128"
-      },
-      {
-       "name": "dust",
-       "type": "uint128",
-       "internalType": "uint128"
-      },
-      {
-       "name": "auxHash",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "depositsHead",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "forcedHead",
-       "type": "bytes32",
-       "internalType": "bytes32"
-      },
-      {
-       "name": "withdrawalCount",
-       "type": "uint64",
-       "internalType": "uint64"
-      },
-      {
-       "name": "withdrawalsTotal",
-       "type": "uint64",
-       "internalType": "uint64"
-      }
-     ]
-    },
-    {
-     "name": "signatures",
-     "type": "bytes[]",
-     "internalType": "bytes[]"
-    }
-   ],
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "subordinatedTotal",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint128",
      "name": "",
-     "type": "uint128",
-     "internalType": "uint128"
+     "type": "uint128"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "surplusSwept",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "sweepEscapeSurplus",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "amount",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "",
+     "type": "uint64"
+    }
+   ],
+   "name": "systemFunder",
+   "outputs": [
+    {
+     "internalType": "address",
+     "name": "",
+     "type": "address"
+    }
+   ],
+   "stateMutability": "view",
+   "type": "function"
+  },
+  {
+   "inputs": [],
    "name": "systemSharesProven",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "bool",
      "name": "",
-     "type": "bool",
-     "internalType": "bool"
+     "type": "bool"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "threshold",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint8",
      "name": "",
-     "type": "uint8",
-     "internalType": "uint8"
+     "type": "uint8"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "token",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "address",
      "name": "",
-     "type": "address",
-     "internalType": "address"
+     "type": "address"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "triggerEscape",
-   "inputs": [],
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "unpause",
    "inputs": [
     {
+     "internalType": "uint64",
      "name": "count",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint256",
      "name": "validUntil",
-     "type": "uint256",
-     "internalType": "uint256"
+     "type": "uint256"
     },
     {
+     "internalType": "bytes[]",
      "name": "signatures",
-     "type": "bytes[]",
-     "internalType": "bytes[]"
+     "type": "bytes[]"
     }
    ],
+   "name": "unpause",
    "outputs": [],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "unpauseDigest",
    "inputs": [
     {
+     "internalType": "uint64",
      "name": "count",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "internalType": "uint256",
      "name": "validUntil",
-     "type": "uint256",
-     "internalType": "uint256"
+     "type": "uint256"
     }
    ],
+   "name": "unpauseDigest",
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "unpauseThreshold",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint8",
      "name": "",
-     "type": "uint8",
-     "internalType": "uint8"
+     "type": "uint8"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "validatorCount",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint256",
      "name": "",
-     "type": "uint256",
-     "internalType": "uint256"
+     "type": "uint256"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint256",
+     "name": "",
+     "type": "uint256"
+    }
+   ],
    "name": "validators",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint256",
-     "internalType": "uint256"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "address",
      "name": "",
-     "type": "address",
-     "internalType": "address"
+     "type": "address"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "windowLimit",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [],
    "name": "windowSeconds",
-   "inputs": [],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "withdraw",
    "inputs": [
     {
+     "internalType": "uint64",
      "name": "seq",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
-     "name": "w",
-     "type": "tuple",
-     "internalType": "struct PerpsVault.Withdrawal",
      "components": [
       {
+       "internalType": "uint64",
        "name": "withdrawalId",
-       "type": "uint64",
-       "internalType": "uint64"
+       "type": "uint64"
       },
       {
+       "internalType": "address",
        "name": "account",
-       "type": "address",
-       "internalType": "address"
+       "type": "address"
       },
       {
+       "internalType": "address",
        "name": "recipient",
-       "type": "address",
-       "internalType": "address"
+       "type": "address"
       },
       {
+       "internalType": "uint64",
        "name": "amount",
-       "type": "uint64",
-       "internalType": "uint64"
+       "type": "uint64"
       },
       {
+       "internalType": "uint64",
        "name": "height",
-       "type": "uint64",
-       "internalType": "uint64"
+       "type": "uint64"
       }
-     ]
+     ],
+     "internalType": "struct PerpsVault.Withdrawal",
+     "name": "w",
+     "type": "tuple"
     },
     {
+     "internalType": "bytes32[]",
      "name": "siblings",
-     "type": "bytes32[]",
-     "internalType": "bytes32[]"
+     "type": "bytes32[]"
     },
     {
+     "internalType": "uint64",
      "name": "want",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
+   "name": "withdraw",
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "key",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "nonpayable"
+   "stateMutability": "nonpayable",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "",
+     "type": "uint64"
+    }
+   ],
    "name": "withdrawalCountAt",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "withdrawalKey",
    "inputs": [
     {
+     "internalType": "uint64",
      "name": "withdrawalId",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
+   "name": "withdrawalKey",
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "pure"
+   "stateMutability": "pure",
+   "type": "function"
   },
   {
-   "type": "function",
+   "inputs": [
+    {
+     "internalType": "uint64",
+     "name": "",
+     "type": "uint64"
+    }
+   ],
    "name": "withdrawalsRootAt",
-   "inputs": [
-    {
-     "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
-    }
-   ],
    "outputs": [
     {
+     "internalType": "bytes32",
      "name": "",
-     "type": "bytes32",
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "function",
-   "name": "withdrawnTotal",
    "inputs": [],
+   "name": "withdrawnTotal",
    "outputs": [
     {
+     "internalType": "uint64",
      "name": "",
-     "type": "uint64",
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "stateMutability": "view"
+   "stateMutability": "view",
+   "type": "function"
   },
   {
-   "type": "event",
-   "name": "CheckpointAccepted",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "uint64",
      "name": "seq",
-     "type": "uint64",
-     "indexed": true,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": true,
+     "internalType": "uint64",
      "name": "height",
-     "type": "uint64",
-     "indexed": true,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "bytes32",
      "name": "stateRoot",
-     "type": "bytes32",
-     "indexed": false,
-     "internalType": "bytes32"
+     "type": "bytes32"
     },
     {
+     "indexed": false,
+     "internalType": "bytes32",
      "name": "withdrawalsRoot",
-     "type": "bytes32",
-     "indexed": false,
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "anonymous": false
+   "name": "CheckpointAccepted",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "Deposit",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "uint64",
      "name": "index",
-     "type": "uint64",
-     "indexed": true,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "account",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "sender",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "amount",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
-     "name": "head",
-     "type": "bytes32",
      "indexed": false,
-     "internalType": "bytes32"
+     "internalType": "bytes32",
+     "name": "head",
+     "type": "bytes32"
     }
    ],
-   "anonymous": false
+   "name": "Deposit",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "EscapeTriggered",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "at",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "uint8",
      "name": "reason",
-     "type": "uint8",
-     "indexed": false,
-     "internalType": "uint8"
+     "type": "uint8"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "checkpointSeq",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "payable_",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "uint128",
      "name": "totalEscape",
-     "type": "uint128",
-     "indexed": false,
-     "internalType": "uint128"
+     "type": "uint128"
     }
    ],
-   "anonymous": false
+   "name": "EscapeTriggered",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "ForcedRequest",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "uint64",
      "name": "index",
-     "type": "uint64",
-     "indexed": true,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "account",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
+     "indexed": false,
+     "internalType": "uint8",
      "name": "kind",
-     "type": "uint8",
-     "indexed": false,
-     "internalType": "uint8"
+     "type": "uint8"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "deadline",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "arg",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "bytes32",
      "name": "head",
-     "type": "bytes32",
-     "indexed": false,
-     "internalType": "bytes32"
+     "type": "bytes32"
     }
    ],
-   "anonymous": false
+   "name": "ForcedRequest",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "GuardianPaused",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "guardian",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
+     "indexed": true,
+     "internalType": "uint64",
      "name": "pauseCount",
-     "type": "uint64",
-     "indexed": true,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "pausedUntil",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "anonymous": false
+   "name": "GuardianPaused",
+   "type": "event"
   },
   {
-   "type": "event",
+   "anonymous": false,
+   "inputs": [
+    {
+     "indexed": true,
+     "internalType": "bytes32",
+     "name": "key",
+     "type": "bytes32"
+    },
+    {
+     "indexed": true,
+     "internalType": "address",
+     "name": "recipient",
+     "type": "address"
+    },
+    {
+     "indexed": false,
+     "internalType": "uint64",
+     "name": "amount",
+     "type": "uint64"
+    }
+   ],
    "name": "Paid",
-   "inputs": [
-    {
-     "name": "key",
-     "type": "bytes32",
-     "indexed": true,
-     "internalType": "bytes32"
-    },
-    {
-     "name": "recipient",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
-    },
-    {
-     "name": "amount",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
-    }
-   ],
-   "anonymous": false
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "PayoutRegistered",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "bytes32",
      "name": "key",
-     "type": "bytes32",
-     "indexed": true,
-     "internalType": "bytes32"
+     "type": "bytes32"
     },
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "recipient",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "total",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": false,
+     "internalType": "uint64",
      "name": "readyAt",
-     "type": "uint64",
-     "indexed": false,
-     "internalType": "uint64"
+     "type": "uint64"
     }
    ],
-   "anonymous": false
+   "name": "PayoutRegistered",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "Refunded",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "uint64",
      "name": "index",
-     "type": "uint64",
-     "indexed": true,
-     "internalType": "uint64"
+     "type": "uint64"
     },
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "account",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
-     "name": "amount",
-     "type": "uint64",
      "indexed": false,
-     "internalType": "uint64"
+     "internalType": "uint64",
+     "name": "amount",
+     "type": "uint64"
     }
    ],
-   "anonymous": false
+   "name": "Refunded",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "SurplusSwept",
+   "anonymous": false,
    "inputs": [
     {
+     "indexed": true,
+     "internalType": "address",
      "name": "recipient",
-     "type": "address",
-     "indexed": true,
-     "internalType": "address"
+     "type": "address"
     },
     {
-     "name": "amount",
-     "type": "uint64",
      "indexed": false,
-     "internalType": "uint64"
+     "internalType": "uint64",
+     "name": "amount",
+     "type": "uint64"
     }
    ],
-   "anonymous": false
+   "name": "SurplusSwept",
+   "type": "event"
   },
   {
-   "type": "event",
-   "name": "Unpaused",
+   "anonymous": false,
    "inputs": [
     {
-     "name": "pauseCount",
-     "type": "uint64",
      "indexed": true,
-     "internalType": "uint64"
+     "internalType": "uint64",
+     "name": "pauseCount",
+     "type": "uint64"
     },
     {
-     "name": "guardianBlockedUntil",
-     "type": "uint64",
      "indexed": false,
-     "internalType": "uint64"
+     "internalType": "uint64",
+     "name": "guardianBlockedUntil",
+     "type": "uint64"
     }
    ],
-   "anonymous": false
+   "name": "Unpaused",
+   "type": "event"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "AlreadyRegistered",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "EscapeActive",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "EscapeNotDue",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "Insolvent",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidCertificate",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidCheckpoint",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidConfiguration",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidDeposit",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidForced",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidPause",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidProof",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidRefund",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidSurplus",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidTransfer",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "InvalidWithdrawal",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "NotEscape",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "NotGuardian",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "NotReady",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "NotRegistered",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "Paused",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "RateLimited",
-   "inputs": []
+   "type": "error"
   },
   {
-   "type": "error",
+   "inputs": [],
    "name": "Reentrancy",
-   "inputs": []
+   "type": "error"
   }
  ]
 }

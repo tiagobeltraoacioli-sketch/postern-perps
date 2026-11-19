@@ -144,7 +144,9 @@ export function buildOrder(args: {
     }
   }
 
-  const tif: TimeInForce = isMarket ? 'IOC' : form.tif;
+  // A market order is immediate-or-cancel; a limit TRIGGER order (stop-limit, take-profit-limit) is always
+  // good-till-cancelled (engine 0.2.3 refuses any other as MALFORMED), whatever the form held from another mode.
+  const tif: TimeInForce = isMarket ? 'IOC' : triggered ? 'GTC' : form.tif;
   if (form.tif === 'POST_ONLY' && isMarket) warnings.push('Post-only does not apply to market orders.');
   if (!account) errors.push('Connect a wallet to place orders.');
 

@@ -98,6 +98,12 @@ export function engineErrorWords(code: string | null | undefined): string {
       return 'The market is halted.';
     case 'NO_LIQUIDITY':
       return 'Nothing filled: no liquidity inside the price limit.';
+    case 'PRICE_BAND':
+      return 'Rejected: the limit price is too far through the mark price. To trade at once, send a market order or a limit inside the band.';
+    case 'BAD_RECIPIENT':
+      return 'Rejected: the recipient is the vault, the token or an address without a key. Nothing left your account.';
+    case 'SELF_TRADE':
+      return 'Cancelled: it would have traded against your own order.';
     case 'INSUFFICIENT_BALANCE':
       return 'Not enough withdrawable balance.';
     default:

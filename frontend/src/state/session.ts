@@ -11,7 +11,7 @@
 import { useMemo } from 'react';
 import { api } from '../lib/api';
 import { compareWithNode, DOMAIN, domainFor, type Domain } from '../lib/eip712';
-import { LOCAL_RENDER } from '../lib/config';
+import { config, LOCAL_RENDER } from '../lib/config';
 import { Feed } from '../lib/feed';
 import { tableProblems } from '../lib/pins';
 import { Store, useStore } from '../lib/store';
@@ -82,6 +82,8 @@ export function currentGuard(account: string | null, walletChainId?: string | nu
   const markets = feed.markets.get();
   return {
     walletChainId,
+    // The token of the build configuration; a local render against the mock takes the mock's own.
+    collateralToken: config.collateral ?? feed.status.get()?.network?.collateralToken ?? null,
     domain: signingDomain.get(),
     account: account?.toLowerCase() ?? null,
     eip712Problem: eip712Problem.get(),

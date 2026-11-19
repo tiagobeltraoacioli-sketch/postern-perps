@@ -19,6 +19,7 @@
  *  - the market is halted (only cancels) or close-only (only cancels and reduce-only orders);
  *  - the sequencer reports it is not running;
  *  - a wallet signature while the wallet is on another network than the one the domain names (round 2);
+ *  - a withdrawal to the vault, the collateral token or a keyless address (engine BAD_RECIPIENT; round 2);
  *  - a value the engine would read differently from the review: a PlaceOrder without a positive price (a market
  *    order always carries its worst price), a price off the tick, a size off the step or outside the market's
  *    bounds, a uint64 out of range, a withdrawal to the zero address, an agent approval for the account itself, in
@@ -59,6 +60,8 @@ export type Guard = {
   now: number;
   /** Exchange clock minus this device's clock (from /v1/status), or undefined when not measured. */
   clockSkewMs?: number | null;
+  /** The collateral token of the build (config), when known: a withdrawal to it is refused (engine BAD_RECIPIENT). */
+  collateralToken?: string | null;
   /**
    * The chain id the connected wallet reports (hex), or undefined when there is no wallet-side network to check
    * (tests, an agent key). A wallet signs EIP-712 data only for its active network, and the domain names the Bloch
@@ -140,6 +143,8 @@ export function valueProblems(type: ActionType, message: Message, markets: Marke
       if (!triggered && trigger !== 0n) out.push('only stop and take-profit orders carry a trigger price');
       if ((kind === 1 || kind === 2 || kind === 4) && Number(message.timeInForce) !== 1) out.push('a market order must be immediate-or-cancel');
       if (Number(message.timeInForce) === 2 && kind !== 0 && kind !== 3 && kind !== 5) out.push('post-only applies to limit orders only');
+      // Engine 0.2.3: limit trigger types with another time in force are MALFORMED.
+      if ((kind === 3 || kind === 5) && Number(message.timeInForce) !== 0) out.push('a stop-limit or take-profit-limit order must be good till cancelled');
       break;
     }
     case 'UpdateLeverage': {
@@ -212,6 +217,14 @@ export function refusals(type: ActionType, message: Message, signer: Signer | nu
     out.push(`This device's clock is ${Math.round(Math.abs(skew) / 1000)} s ${skew > 0 ? 'behind' : 'ahead of'} the exchange; the exchange accepts a signature only within 2 minutes behind or 30 s ahead of its clock. Correct the clock; nothing was signed.`);
   if (guard.status && guard.status.sequencer.state !== 'running') out.push(`The exchange is not accepting actions (sequencer ${guard.status.sequencer.state}).`);
   for (const p of valueProblems(type, message, guard.markets, guard.now)) out.push(`Refused: ${p}.`);
+  // Engine 0.2.2 S-9.2.1 (BAD_RECIPIENT): a withdrawal to the vault, to the collateral token or to a keyless address
+  // (at or below 0x…ffff) would be refused by the engine; the vault never pays those either. Refused here, in words.
+  if (type === 'Withdraw' && typeof message.recipient === 'string' && /^0x[0-9a-fA-F]{40}$/.test(message.recipient)) {
+    const to = message.recipient.toLowerCase();
+    if (guard.domain && to === guard.domain.verifyingContract.toLowerCase()) out.push("Refused: the recipient is the exchange's vault itself. Funds sent there could never be paid out.");
+    else if (guard.collateralToken && to === guard.collateralToken.toLowerCase()) out.push('Refused: the recipient is the collateral token contract, not a wallet.');
+    else if (BigInt(to) <= 0xffffn) out.push('Refused: the recipient is not an address anyone holds a key for.');
+  }
   return [...new Set(out)];
 }
 
