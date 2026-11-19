@@ -15,6 +15,17 @@
 //!   Decision 3 holds with or without the flag: a valid record declaring a residence the list does NOT allow
 //!   makes the account exit-only, whatever its IP says (a declaration can only add a refusal).
 //!
+//! WHO MAY READ A RECORD (R436-17; decided here as a technical default, the legal question is for counsel): a
+//! record names an address's declared country of residence, so it is not public. `GET /v1/attestations/{address}`
+//! answers only (a) the account itself, proven by a fresh signature (`read_digest`: EIP-712 `AttestationRead
+//! (address account,uint64 timestamp)` under the engine domain, timestamp within `READ_WINDOW_MS` of the node's
+//! clock), or (b) the operator, by the bearer token of `--operator-token-file`. Anyone else gets 401, the same
+//! answer whether a record exists or not. The node's own admission reads the store in process.
+//!
+//! WHAT THE STORE HOLDS (R436-17): the same record again stores nothing; a replacement must be issued at least
+//! `MIN_REPLACE_MS` after the record it replaces (at most one line per account per minute); records of accounts
+//! the engine does not know (no deposit) are held up to `MAX_UNKNOWN_ACCOUNTS`, then refused.
+//!
 //! UNAUDITED PROTOTYPE.
 
 use crate::util::{parse_address, to_hex, Address};
@@ -28,9 +39,13 @@ pub struct Attestations {
     pub statements: BTreeMap<String, String>,
     pub vault: String,
     records: BTreeMap<Address, serde_json::Value>,
+    /// accounts whose record was stored while the engine did not know them
+    unknown: std::collections::BTreeSet<Address>,
     file: Option<PathBuf>,
     /// step 6 enforced at admission
     pub required: bool,
+    /// places for accounts the engine does not know (`MAX_UNKNOWN_ACCOUNTS` unless a test sets it lower)
+    pub max_unknown: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,13 +72,13 @@ pub fn statements_from_notices(notices: &serde_json::Value) -> Result<BTreeMap<S
 
 impl Attestations {
     pub fn new(statements: BTreeMap<String, String>, vault: &Address, file: Option<PathBuf>, now_ms: u64) -> Attestations {
-        let mut a = Attestations { statements, vault: to_hex(vault), records: BTreeMap::new(), file: None, required: false };
+        let mut a = Attestations { statements, vault: to_hex(vault), records: BTreeMap::new(), unknown: Default::default(), file: None, required: false, max_unknown: MAX_UNKNOWN_ACCOUNTS };
         if let Some(p) = &file {
             if let Ok(txt) = std::fs::read_to_string(p) {
                 for line in txt.lines().filter(|l| !l.trim().is_empty()) {
                     if let Ok(rec) = serde_json::from_str::<serde_json::Value>(line) {
                         // re-verified at load; expired ones are kept as records (their status says so)
-                        let _ = a.accept(&rec, now_ms, true);
+                        let _ = a.accept(&rec, now_ms, true, &|_| true);
                     }
                 }
             }
@@ -76,7 +91,8 @@ impl Attestations {
         postern_geoblock::attestation::verify(record, &self.statements, now_ms, Some(&self.vault)).map_err(|e| e.to_string())
     }
 
-    fn accept(&mut self, record: &serde_json::Value, now_ms: u64, loading: bool) -> Result<Address, String> {
+    /// `Ok((account, stored))`: `stored` is false when the identical record was already held.
+    fn accept(&mut self, record: &serde_json::Value, now_ms: u64, loading: bool, known: &dyn Fn(&Address) -> bool) -> Result<(Address, bool), String> {
         let only: Vec<&str> = record.as_object().map(|o| o.keys().map(|k| k.as_str()).collect()).unwrap_or_default();
         if only.len() != 2 || !only.contains(&"message") || !only.contains(&"signature") {
             return Err("record: exactly {message, signature}".into());
@@ -87,16 +103,37 @@ impl Attestations {
         }
         let account = parse_address(v.signer.as_deref().ok_or("no signer")?)?;
         let issued = |r: &serde_json::Value| r["message"]["issuedAt"].as_str().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        if self.records.get(&account).is_some_and(|old| issued(old) > issued(record)) {
-            return Err("an attestation issued later is already held for this account".into());
+        if let Some(old) = self.records.get(&account) {
+            if old == record {
+                return Ok((account, false));
+            }
+            if issued(old) > issued(record) {
+                return Err("an attestation issued later is already held for this account".into());
+            }
+            if !loading && issued(record) < issued(old).saturating_add(MIN_REPLACE_MS) {
+                return Err("a replacement must be issued at least one minute after the record it replaces".into());
+            }
+        } else if !loading {
+            // bounded: accounts the engine does not know (no deposit yet) share a fixed number of places
+            self.unknown.retain(|a| !known(a));
+            if !known(&account) {
+                if self.unknown.len() >= self.max_unknown {
+                    return Err("STORE FULL for accounts without a deposit: deposit first, then attest".into());
+                }
+                self.unknown.insert(account);
+            }
         }
         self.records.insert(account, record.clone());
-        Ok(account)
+        Ok((account, true))
     }
 
     /// Verifies and stores a record `{message, signature}`. Returns the account it speaks for.
-    pub fn submit(&mut self, record: &serde_json::Value, now_ms: u64) -> Result<Address, String> {
-        let account = self.accept(record, now_ms, false)?;
+    /// `known(account)`: does the engine have this account (a credited deposit)?
+    pub fn submit(&mut self, record: &serde_json::Value, now_ms: u64, known: &dyn Fn(&Address) -> bool) -> Result<Address, String> {
+        let (account, stored) = self.accept(record, now_ms, false, known)?;
+        if !stored {
+            return Ok(account);
+        }
         if let Some(p) = &self.file {
             let line = serde_json::to_string(record).map_err(|e| e.to_string())?;
             let r = std::fs::OpenOptions::new().create(true).append(true).open(p).and_then(|mut f| {
@@ -105,6 +142,7 @@ impl Attestations {
             });
             if let Err(e) = r {
                 self.records.remove(&account);
+                self.unknown.remove(&account);
                 return Err(format!("the record could not be stored: {e}"));
             }
         }
@@ -128,6 +166,33 @@ impl Attestations {
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
+}
+
+pub const READ_WINDOW_MS: u64 = 60_000;
+pub const MIN_REPLACE_MS: u64 = 60_000;
+pub const MAX_UNKNOWN_ACCOUNTS: usize = 10_000;
+
+/// The digest an account signs to read its own record: EIP-712 `AttestationRead(address account,uint64 timestamp)`
+/// under the engine domain of this deployment (`timestamp` = Unix ms).
+pub fn read_digest(g: &crate::genesis::Genesis, account: &Address, timestamp_ms: u64) -> crate::util::H256 {
+    use crate::eip712::{digest, Registry, Val};
+    use std::sync::OnceLock;
+    static R: OnceLock<Registry> = OnceLock::new();
+    let r = R.get_or_init(|| Registry::from_json(&serde_json::json!({"AttestationRead": [{"name": "account", "type": "address"}, {"name": "timestamp", "type": "uint64"}]})).expect("static type"));
+    let sh = r.hash_struct("AttestationRead", &Val::Struct(vec![Val::Address(*account), Val::Uint(timestamp_ms as u128)])).expect("static type");
+    digest(&g.engine_domain.separator(), &sh)
+}
+
+/// Is this read of `account`'s record signed by the account itself, now? (`time` and `signature` are the values
+/// of the headers `X-Postern-Read-Time` and `X-Postern-Read-Signature`.)
+pub fn read_authorised(g: &crate::genesis::Genesis, account: &Address, time: Option<&str>, signature: Option<&str>, now_ms: u64) -> bool {
+    let (Some(t), Some(sig)) = (time, signature) else { return false };
+    let Ok(t) = t.parse::<u64>() else { return false };
+    if t > now_ms.saturating_add(READ_WINDOW_MS) || now_ms > t.saturating_add(READ_WINDOW_MS) {
+        return false;
+    }
+    let Ok(sig) = crate::util::parse_hex_fixed::<65>(sig) else { return false };
+    crate::sig::recover(&read_digest(g, account, t), &sig).is_ok_and(|a| a == *account)
 }
 
 /// 397's "exit-like" set of step 6: actions that never need an attestation.

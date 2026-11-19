@@ -532,7 +532,16 @@ An agent wallet is a second key that may trade for an account but can never with
   be the current text of `compliance/legal/notices.json`; signature strict and by the account; validity at most
   400 days) and stores the newest valid record per account. `GET /v1/attestations/{address}` returns
   `AttestationStatus`: `{"account","status":"valid|expired|missing","residenceCountry","statementId","issuedAt",
-  "expiresAt","record"}` (`record` is the signed record itself, re-verifiable by anyone). Refusals:
+  "expiresAt","record"}` (`record` is the signed record itself). **Who may read it (R436-17; a technical default,
+  the legal question is for counsel):** a record names a declared country of residence and is NOT public. The
+  `GET` answers only (a) the account itself: headers `X-Postern-Read-Time: <Unix ms>` and
+  `X-Postern-Read-Signature: 0x…` = the account's signature of the EIP-712 message `AttestationRead(address
+  account,uint64 timestamp)` under the engine domain, with the time within 60 s of the node's clock (a captured
+  pair can be replayed inside that minute: use TLS); or (b) the operator: `Authorization: Bearer <token>` of
+  `--operator-token-file` (no file: no operator path). Anyone else: `401 UNAUTHORIZED`, the same answer whether a
+  record exists or not. The `POST` answer carries the status with `record: null`. The store is bounded: the same
+  record again stores nothing; a replacement must be issued at least 60 s after the record it replaces; accounts
+  the engine does not know (no credited deposit) share 10,000 places, then `503 ATTESTATION_UNAVAILABLE`. Refusals:
   `400 ATTESTATION_INVALID`, `503 ATTESTATION_UNAVAILABLE` (no statement configured). At admission: a valid record
   that declares a residence the list does not allow makes the account exit-only whatever its IP says (`451
   GEO_RESTRICTED`, `details.reason` `RESIDENCE_DECLARED_RESTRICTED`); with `--require-attestation` an action that

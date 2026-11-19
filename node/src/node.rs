@@ -58,6 +58,8 @@ pub struct App {
     pub collateral_token: crate::util::Address,
     /// Bearer token of the oracle ingest paths (`--oracle-token-file`); `None` = ingest disabled.
     pub oracle_token: Option<Vec<u8>>,
+    /// Bearer token of the operator's reads (`--operator-token-file`; `None`: no operator path exists)
+    pub operator_token: Mutex<Option<Vec<u8>>>,
     /// Attestation records (`crate::attest`)
     pub attestations: Mutex<crate::attest::Attestations>,
     /// One state rebuild from the log at a time (`api::rebuild_frame`)
@@ -98,6 +100,7 @@ impl App {
             cors_origin: Mutex::new("*".into()),
             rebuild_gate: tokio::sync::Mutex::new(()),
             attestations: Mutex::new(crate::attest::Attestations::default()),
+            operator_token: Mutex::new(None),
             g,
             seq: Mutex::new(seq),
             geo,

@@ -179,7 +179,7 @@ async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: ax
     h.insert("vary", HeaderValue::from_static("origin"));
     if preflight {
         h.insert("access-control-allow-methods", HeaderValue::from_static("GET, POST, OPTIONS"));
-        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country"));
+        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-signature"));
         h.insert("access-control-max-age", HeaderValue::from_static("600"));
     }
     resp
@@ -734,21 +734,40 @@ async fn post_attestation(State(app): State<Arc<App>>, ConnectInfo(peer): Connec
         Ok(v) => v,
         Err(e) => return error(400, "MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
     };
+    // lock order: seq before attestations (the store asks the engine whether it knows the account)
+    let s = app.seq.lock().unwrap();
+    let known = |a: &Address| s.engine.real().is_some_and(|e| e.by_addr.contains_key(a));
     let mut at = app.attestations.lock().unwrap();
     if at.statements.is_empty() {
         return error(503, "ATTESTATION_UNAVAILABLE", "this node has no attestation statement configured (--attestation-statements)", serde_json::json!({}));
     }
-    match at.submit(&rec, now) {
-        Ok(account) => Json(attestation_json(&account, &at.status(&account, now))).into_response(),
+    match at.submit(&rec, now, &known) {
+        // the answer goes to whoever holds the signed record (the account's own client): its status, not an echo
+        Ok(account) => {
+            let mut j = attestation_json(&account, &at.status(&account, now));
+            j["record"] = serde_json::Value::Null;
+            Json(j).into_response()
+        }
+        Err(e) if e.starts_with("STORE FULL") => error(503, "ATTESTATION_UNAVAILABLE", &e, serde_json::json!({})),
         Err(e) => error(400, "ATTESTATION_INVALID", &e, serde_json::json!({"statements": at.statements})),
     }
 }
 
-async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
+/// R436-17: a record names a declared residence; it is read only by the account itself (a fresh signature) or
+/// by the operator (bearer token). Everyone else: 401, the same answer whether a record exists or not.
+async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>, headers: HeaderMap) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
         Err(r) => return r,
     };
+    let h = |k: &str| headers.get(k).and_then(|v| v.to_str().ok());
+    let operator = match (&*app.operator_token.lock().unwrap(), h("authorization").and_then(|v| v.strip_prefix("Bearer "))) {
+        (Some(tok), Some(p)) => crate::oracle_pool::token_ok(tok, p.as_bytes()),
+        _ => false,
+    };
+    if !operator && !crate::attest::read_authorised(&app.g, &a, h("x-postern-read-time"), h("x-postern-read-signature"), now_ms()) {
+        return error(401, "UNAUTHORIZED", "an attestation record is read by its account (X-Postern-Read-Time + X-Postern-Read-Signature, API.md section 6) or by the operator", serde_json::json!({}));
+    }
     let at = app.attestations.lock().unwrap();
     Json(attestation_json(&a, &at.status(&a, now_ms()))).into_response()
 }

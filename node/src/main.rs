@@ -55,7 +55,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN|*] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--operator-token-file F] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -338,6 +338,15 @@ async fn dev(a: HashMap<String, String>) {
         let mut at = perps_node::attest::Attestations::new(statements, &g.vault, Some(data.join("attestations.jsonl")), perps_node::node::now_ms());
         at.required = a.contains_key("require-attestation");
         *app.attestations.lock().unwrap() = at;
+    }
+    // the operator's token (reads that are not public: attestation records), from a file like the ingest token
+    if let Some(p) = a.get("operator-token-file") {
+        let raw = std::fs::read(p).unwrap_or_else(|e| die(format!("--operator-token-file: {e}")));
+        let t = String::from_utf8_lossy(&raw).trim().as_bytes().to_vec();
+        if t.len() < 16 {
+            die("--operator-token-file: the token must be at least 16 bytes".into());
+        }
+        *app.operator_token.lock().unwrap() = Some(t);
     }
     if let Some(o) = a.get("cors-origin") {
         *app.cors_origin.lock().unwrap() = o.clone();
