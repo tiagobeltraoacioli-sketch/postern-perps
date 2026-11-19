@@ -227,7 +227,7 @@ checkpoint from `GET /v1/committee` plus this object without trusting the API ho
 |---|---|
 | `GET /v1/blocks/{height}` | `Block` |
 | `GET /v1/blocks?from=H&limit=N` | `{"blocks":[Block]}` oldest first, max 500 |
-| `GET /v1/blocks/stream?from=H` | `application/x-ndjson`, one `Block` per line (bulk replay) |
+| `GET /v1/blocks/stream?from=H` | `application/x-ndjson`, one `Block` per line (bulk replay): at most 10,001 blocks per request, produced as the client reads (backpressure); continue with `from` = the last height received + 1 until an empty answer. At most 4 streams at once and one per client address (`429 RATE_LIMITED`); a client that does not read for 10 s is disconnected, so a stream can end early: always continue from the last complete line |
 
 `Block`:
 
@@ -532,7 +532,16 @@ An agent wallet is a second key that may trade for an account but can never with
   be the current text of `compliance/legal/notices.json`; signature strict and by the account; validity at most
   400 days) and stores the newest valid record per account. `GET /v1/attestations/{address}` returns
   `AttestationStatus`: `{"account","status":"valid|expired|missing","residenceCountry","statementId","issuedAt",
-  "expiresAt","record"}` (`record` is the signed record itself, re-verifiable by anyone). Refusals:
+  "expiresAt","record"}` (`record` is the signed record itself). **Who may read it (R436-17; a technical default,
+  the legal question is for counsel):** a record names a declared country of residence and is NOT public. The
+  `GET` answers only (a) the account itself: headers `X-Postern-Read-Time: <Unix ms>` and
+  `X-Postern-Read-Signature: 0x…` = the account's signature of the EIP-712 message `AttestationRead(address
+  account,uint64 timestamp)` under the engine domain, with the time within 60 s of the node's clock (a captured
+  pair can be replayed inside that minute: use TLS); or (b) the operator: `Authorization: Bearer <token>` of
+  `--operator-token-file` (no file: no operator path). Anyone else: `401 UNAUTHORIZED`, the same answer whether a
+  record exists or not. The `POST` answer carries the status with `record: null`. The store is bounded: the same
+  record again stores nothing; a replacement must be issued at least 60 s after the record it replaces; accounts
+  the engine does not know (no credited deposit) share 10,000 places, then `503 ATTESTATION_UNAVAILABLE`. Refusals:
   `400 ATTESTATION_INVALID`, `503 ATTESTATION_UNAVAILABLE` (no statement configured). At admission: a valid record
   that declares a residence the list does not allow makes the account exit-only whatever its IP says (`451
   GEO_RESTRICTED`, `details.reason` `RESIDENCE_DECLARED_RESTRICTED`); with `--require-attestation` an action that
@@ -688,8 +697,12 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 - The machine-readable schema is still the draft `node/mock/schema/api.schema.json` (agent 435): the v0.3
   additions (`ForcedAction` extras, `WithdrawalProof`, `OracleIngestAck`, `OracleRounds`, `AccountProof.leafData`
   fields) are specified here and not yet in that file.
-- A validator's read service has no rate limit and no CORS headers of its own (put it behind the operator's
-  proxy); a state rebuild replays from genesis when no nearer state is held (linear in the height).
+- A validator's read service (R436-14): reads are limited per client address (20 per second, burst 40, `429`),
+  its block stream to 2 at once and one per address; a state is rebuilt once (requests for it wait), the 4
+  newest rebuilt states are kept, and a rebuild starts from the nearest state held (a checkpoint it signed, a
+  kept rebuild, or the anchor it keeps every 1,000 blocks, the newest 16), so inside the anchored range it replays
+  at most 1,000 blocks; older heights replay from genesis (linear). It sends no CORS headers (put it behind the
+  operator's proxy). Each kept state is a whole copy of the engine state in memory.
 - The node's geoblock decision is still the node's own function (round 1) plus the edge assertion and the
   attestation step; it is not 397's `decide()` port, and its equality with 397's decision vectors is not proven
   (sanctions-list freshness, subdivision rules and the hosting rule of the design are not in the node).

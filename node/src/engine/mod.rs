@@ -332,6 +332,11 @@ pub trait Engine: Send + Sync {
     fn with_real_state(&self, _state: postern_perps_engine::Engine) -> Option<Box<dyn Engine>> {
         None
     }
+    /// The logHash the engine's own state carries (`None` for an engine that keeps none). A snapshot's state root
+    /// does not bind it, so the loader compares it with the log (R436-16, SPEC S-16.4).
+    fn log_hash(&self) -> Option<H256> {
+        None
+    }
     /// The real engine behind this adapter (`None` for the stub): read-only access for the API views and the index.
     fn real(&self) -> Option<&postern_perps_engine::Engine> {
         None

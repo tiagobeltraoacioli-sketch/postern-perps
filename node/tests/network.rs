@@ -813,6 +813,17 @@ async fn r436_11_account_proof_at_an_old_final_checkpoint_is_rebuilt_from_the_lo
     let _ = n.stop.send(true);
 }
 
+/// The headers with which an account reads its own attestation record (R436-17).
+fn read_auth(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, t: u64) -> (String, String) {
+    (t.to_string(), to_hex(&perps_node::sig::sign(key, &perps_node::attest::read_digest(g, &key_address(key), t))))
+}
+
+async fn get_own_attestation(base: &str, g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey) -> (u16, serde_json::Value) {
+    let (t, sig) = read_auth(g, key, now());
+    let (s, b) = http_call("GET", &format!("{base}/v1/attestations/{}", to_hex(&key_address(key))), None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Signature", &sig)]).await.unwrap();
+    (s, serde_json::from_slice(&b).unwrap_or(serde_json::Value::Null))
+}
+
 fn attestation(g: &perps_node::genesis::Genesis, key: &k256::ecdsa::SigningKey, statements: &std::collections::BTreeMap<String, String>, residence: &str, issued: u64, expires: u64) -> serde_json::Value {
     let (id, hash) = statements.iter().next().unwrap();
     let msg = serde_json::json!({"account": to_hex(&key_address(key)), "statementId": id, "statementHash": hash, "residenceCountry": residence,
@@ -847,7 +858,8 @@ async fn attestation_records_are_verified_stored_and_enforced_when_required() {
     let (s, e) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
     assert_eq!((s, e["error"]["code"].as_str()), (503, Some("ATTESTATION_UNAVAILABLE")));
     *n.app.attestations.lock().unwrap() = perps_node::attest::Attestations::new(statements.clone(), &g.vault, Some(file.clone()), t);
-    let (s, st) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&ua))).await;
+    // (reads are the account's own since R436-17: the same assertions, with the account's signature)
+    let (s, st) = get_own_attestation(&base, &g, &u).await;
     assert_eq!((s, st["status"].as_str(), st["record"].is_null()), (200, Some("missing"), true));
 
     // refused records: another signer, an altered message, an outdated statement, too long a validity, extra fields
@@ -877,8 +889,8 @@ async fn attestation_records_are_verified_stored_and_enforced_when_required() {
     // the valid record: stored, served, and the same order is admitted
     let (s, st) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
     assert_eq!((s, st["status"].as_str(), st["residenceCountry"].as_str(), st["account"].as_str()), (200, Some("valid"), Some("PA"), Some(to_hex(&ua).as_str())), "{st}");
-    let (_, st) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&ua))).await;
-    assert_eq!((st["status"].as_str(), st["record"]["signature"].as_str()), (Some("valid"), rec["signature"].as_str()), "the record is served for anyone to re-verify");
+    let (_, st) = get_own_attestation(&base, &g, &u).await;
+    assert_eq!((st["status"].as_str(), st["record"]["signature"].as_str()), (Some("valid"), rec["signature"].as_str()), "the record is served to its account, re-verifiable");
     let (s, e) = post_json(&format!("{base}/v1/actions"), &request(&g, &place_order(&g, &u, ua, t + 4, 1, 672_505, 2_500, false)), &pa).await;
     assert_eq!(s, 200, "{e}");
     // an older record does not replace a newer one
@@ -914,7 +926,7 @@ async fn attestation_records_are_verified_stored_and_enforced_when_required() {
     let (s, _) = post_json(&format!("{base}/v1/attestations"), &short, &[]).await;
     assert_eq!(s, 200);
     tokio::time::sleep(Duration::from_millis(600)).await;
-    let (_, st) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&key_address(&user(82))))).await;
+    let (_, st) = get_own_attestation(&base, &g, &user(82)).await;
     assert_eq!(st["status"], "expired");
     // records survive a restart of the store (re-verified at load); a tampered line is not loaded
     let reloaded = perps_node::attest::Attestations::new(statements.clone(), &g.vault, Some(file.clone()), now());
@@ -922,5 +934,203 @@ async fn attestation_records_are_verified_stored_and_enforced_when_required() {
     assert_eq!(reloaded.status(&ua, now()).status, "valid");
     let other_vault = perps_node::attest::Attestations::new(statements.clone(), &[0x99; 20], Some(file.clone()), now());
     assert_eq!(other_vault.len(), 0, "records signed for another deployment do not verify");
+    let _ = n.stop.send(true);
+}
+
+/// R436-17 (Low, privacy; the legal side is for counsel): anyone could read any address's declared residence and
+/// signed attestation, and anyone could make the store grow without bound. Properties: a read needs the account's
+/// own signature or the operator's token (fail closed: 401, and not even the status leaks); posting the same
+/// record again stores nothing; a replacement must be issued at least a minute after the record it replaces;
+/// records of accounts the engine does not know are bounded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn r436_17_attestation_records_are_read_only_by_the_account_or_the_operator() {
+    let n = start_node("attest-read").await;
+    let g = n.g.clone();
+    let base = n.url.clone();
+    let notices: serde_json::Value = serde_json::from_slice(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../compliance/legal/notices.json")).unwrap()).unwrap();
+    let statements = perps_node::attest::statements_from_notices(&notices).unwrap();
+    let file = tmpdir("attest-read-file").join("attestations.jsonl");
+    *n.app.attestations.lock().unwrap() = perps_node::attest::Attestations::new(statements.clone(), &g.vault, Some(file.clone()), now());
+    let u = user(85);
+    let ua = key_address(&u);
+    let t = now();
+    let rec = attestation(&g, &u, &statements, "PA", t - 1000, t + 86_400_000);
+    let (s, _) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
+    assert_eq!(s, 200);
+    let url = format!("{base}/v1/attestations/{}", to_hex(&ua));
+    // a stranger learns nothing: not the record, not the residence, not even whether one exists
+    let (s, e) = get_json(&url).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (401, Some("UNAUTHORIZED")), "{e}");
+    assert!(e.get("residenceCountry").is_none() && e.get("status").is_none() && e.get("record").is_none());
+    let (s, e2) = get_json(&format!("{base}/v1/attestations/{}", to_hex(&key_address(&user(86))))).await;
+    assert_eq!((s, e2.clone()), (401, e), "an account with no record answers exactly the same");
+    // the same record posted again and again stores nothing more
+    let lines = || std::fs::read_to_string(&file).unwrap().lines().count();
+    assert_eq!(lines(), 1);
+    for _ in 0..3 {
+        let (s, _) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
+        assert_eq!(s, 200, "idempotent");
+    }
+    assert_eq!(lines(), 1, "the store did not grow");
+    // the account reads its own record with a fresh signature
+    let (s, st) = get_own_attestation(&base, &g, &u).await;
+    assert_eq!((s, st["status"].as_str(), st["residenceCountry"].as_str(), st["record"]["signature"].as_str()), (200, Some("valid"), Some("PA"), rec["signature"].as_str()), "{st}");
+    // refused: another key's signature for this address, a signature for another address, a stale or future time,
+    // a time that is not the signed one, one header missing
+    let get_with = |t: String, sig: String| {
+        let url = url.clone();
+        async move { http_call("GET", &url, None, &[("X-Postern-Read-Time", &t), ("X-Postern-Read-Signature", &sig)]).await.unwrap().0 }
+    };
+    let now_t = now();
+    let other = user(86);
+    let by_other = to_hex(&perps_node::sig::sign(&other, &perps_node::attest::read_digest(&g, &ua, now_t)));
+    assert_eq!(get_with(now_t.to_string(), by_other).await, 401, "another key");
+    let (t2, sig_for_other_addr) = read_auth(&g, &other, now_t);
+    assert_eq!(get_with(t2, sig_for_other_addr).await, 401, "a signature over another address");
+    for skew in [-61_000i64, 61_000] {
+        let ts = (now() as i64 + skew) as u64;
+        let (t3, s3) = read_auth(&g, &u, ts);
+        assert_eq!(get_with(t3, s3).await, 401, "outside the 60 s window: {skew}");
+    }
+    let (_, s4) = read_auth(&g, &u, now_t);
+    assert_eq!(get_with((now_t + 1).to_string(), s4.clone()).await, 401, "the time is part of what is signed");
+    assert_eq!(http_call("GET", &url, None, &[("X-Postern-Read-Signature", &s4)]).await.unwrap().0, 401);
+    // the operator: no path without a configured token; with it, the token and nothing else
+    let bearer = "Bearer operator-token-0123456789abcdef";
+    assert_eq!(http_call("GET", &url, None, &[("Authorization", bearer)]).await.unwrap().0, 401, "no operator token configured: fail closed");
+    *n.app.operator_token.lock().unwrap() = Some(b"operator-token-0123456789abcdef".to_vec());
+    let (s, b) = http_call("GET", &url, None, &[("Authorization", bearer)]).await.unwrap();
+    let st: serde_json::Value = serde_json::from_slice(&b).unwrap();
+    assert_eq!((s, st["residenceCountry"].as_str()), (200, Some("PA")));
+    assert_eq!(http_call("GET", &url, None, &[("Authorization", "Bearer operator-token-0123456789abcdeX")]).await.unwrap().0, 401);
+    assert_eq!(http_call("GET", &url, None, &[("Authorization", &format!("Bearer {ORACLE_TOKEN}"))]).await.unwrap().0, 401, "the oracle feeder's token is not the operator's");
+    // the POST answer does not echo the record
+    let (s, st) = post_json(&format!("{base}/v1/attestations"), &rec, &[]).await;
+    assert_eq!((s, st["status"].as_str(), st["record"].is_null()), (200, Some("valid"), true));
+    // a replacement issued less than a minute after the held record is refused; a later one replaces it
+    let soon = attestation(&g, &u, &statements, "PA", t - 1000 + 59_999, t + 86_400_000);
+    let (s, e) = post_json(&format!("{base}/v1/attestations"), &soon, &[]).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (400, Some("ATTESTATION_INVALID")), "{e}");
+    let later = attestation(&g, &u, &statements, "PA", t - 1000 + 60_000, t + 86_400_000);
+    let (s, _) = post_json(&format!("{base}/v1/attestations"), &later, &[]).await;
+    assert_eq!((s, lines()), (200, 2));
+    // accounts the engine does not know are bounded (unit level: the bound is 10,000)
+    let mut store = perps_node::attest::Attestations::new(statements.clone(), &g.vault, None, now());
+    let nobody = |_: &Address| false;
+    for i in 0..3u64 {
+        store.submit(&attestation(&g, &user(900 + i), &statements, "PA", t - 1000, t + 86_400_000), now(), &nobody).unwrap();
+    }
+    assert_eq!(store.len(), 3);
+    assert_eq!(perps_node::attest::MAX_UNKNOWN_ACCOUNTS, 10_000);
+    let _ = n.stop.send(true);
+}
+
+/// R436-17: the bound itself (accounts without a deposit share a fixed number of places; an account the engine
+/// knows is never refused for it, and frees its place once it is known).
+#[test]
+fn r436_17_the_store_of_accounts_without_a_deposit_is_bounded() {
+    let (g, _) = perps_node::dev::dev_genesis("attest-bound", 7, 5, 10, 0);
+    let notices: serde_json::Value = serde_json::from_slice(&std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../compliance/legal/notices.json")).unwrap()).unwrap();
+    let statements = perps_node::attest::statements_from_notices(&notices).unwrap();
+    let t = now();
+    let mut store = perps_node::attest::Attestations::new(statements.clone(), &g.vault, None, t);
+    let rec = |i: u64| attestation(&g, &user(5_000 + i), &statements, "PA", t - 1000, t + 86_400_000);
+    let nobody = |_: &Address| false;
+    // the default is 10,000 places; the rule is the same with 40 (signing 10,000 records takes a minute)
+    assert_eq!(store.max_unknown, perps_node::attest::MAX_UNKNOWN_ACCOUNTS);
+    store.max_unknown = 40;
+    let cap = store.max_unknown as u64;
+    for i in 0..cap {
+        store.submit(&rec(i), t, &nobody).unwrap();
+    }
+    let e = store.submit(&rec(cap), t, &nobody).expect_err("no place left for an account without a deposit");
+    assert!(e.starts_with("STORE FULL"), "{e}");
+    assert_eq!(store.len() as u64, cap);
+    // an account the engine knows is stored all the same
+    let known_one = key_address(&user(5_000 + cap));
+    store.submit(&rec(cap), t, &|a: &Address| *a == known_one).unwrap();
+    // and when earlier accounts became known (they deposited), their places are free again
+    let first = key_address(&user(5_000));
+    store.submit(&rec(cap + 1), t, &|a: &Address| *a == first).unwrap();
+    assert_eq!(store.len() as u64, cap + 2);
+}
+
+/// A raw GET from a chosen loopback source address that sends the request and reads NOTHING until asked.
+async fn raw_get(from_ip: &str, url: &str, path: &str) -> tokio::net::TcpStream {
+    use tokio::io::AsyncWriteExt;
+    let target: SocketAddr = url.trim_start_matches("http://").parse().unwrap();
+    let sock = tokio::net::TcpSocket::new_v4().unwrap();
+    sock.bind(format!("{from_ip}:0").parse().unwrap()).unwrap();
+    let mut s = sock.connect(target).await.unwrap();
+    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: node\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+    s
+}
+
+/// R436-14 (`/v1/blocks/stream`): the stream was built whole in memory for any number of callers. Properties: one
+/// stream per client address and four in all (429 beyond); a consumer that does not read is disconnected after
+/// the slow-consumer time and its slot is free again; a reader gets every block, in order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r436_14_block_streams_are_bounded_backpressured_and_slow_consumers_cut() {
+    use tokio::io::AsyncReadExt;
+    let n = start_node("stream").await;
+    let base = n.url.clone();
+    // 60 blocks of 2,000 deposits: about 25 MB of ndjson, far more than loopback socket buffers hold
+    {
+        let mut v = n.app.view.lock().unwrap();
+        let a = key_address(&user(70));
+        for i in 0..120_000u64 {
+            v.deposits.insert(i, deposit(i, a, 1_000_000 + i));
+        }
+    }
+    for _ in 0..600 {
+        if n.app.seq.lock().unwrap().engine.next_deposit_index() == 120_000 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // every deposit is in a block; nothing else makes blocks in this test, so the height is fixed from here on
+    // (read AFTER the last deposit was credited: reading it before raced with the last block)
+    assert_eq!(n.app.seq.lock().unwrap().engine.next_deposit_index(), 120_000);
+    let height = n.app.seq.lock().unwrap().log.last_height;
+    assert!(height >= 60, "{height}");
+    *n.app.read_rate.lock().unwrap() = perps_node::sequencer::RateLimit::new(0.0, 0.0);
+    n.app.streams.slow_ms.store(600, std::sync::atomic::Ordering::Relaxed);
+    let path = "/v1/blocks/stream?from=1";
+    // a consumer that never reads holds its address's stream
+    let mut idle = raw_get("127.0.0.1", &base, path).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let (s, e) = get_json(&format!("{base}{path}")).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (429, Some("RATE_LIMITED")), "a second stream from the same address: {e}");
+    // three more addresses fill the four slots; a fifth address is refused
+    let mut others = Vec::new();
+    for ip in ["127.0.0.2", "127.0.0.3", "127.0.0.4"] {
+        others.push(raw_get(ip, &base, path).await);
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let mut fifth = raw_get("127.0.0.5", &base, path).await;
+    let mut head = vec![0u8; 12];
+    fifth.read_exact(&mut head).await.unwrap();
+    assert_eq!(std::str::from_utf8(&head).unwrap(), "HTTP/1.1 429", "four streams at once is the limit");
+    // the silent consumers are cut once they have not taken a chunk for the slow-consumer time (600 ms here):
+    // their slots come back without anyone reading a byte
+    for _ in 0..300 {
+        if n.app.streams.slots.available_permits() == perps_node::api::STREAM_SLOTS {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(n.app.streams.slots.available_permits(), perps_node::api::STREAM_SLOTS, "every slot was given back");
+    assert!(n.app.streams.ips.lock().unwrap().is_empty());
+    // a consumer that reads gets every block, in order
+    let (s, body) = http_call("GET", &format!("{base}{path}"), None, &[]).await.unwrap();
+    assert_eq!(s, 200);
+    let heights: Vec<u64> = std::str::from_utf8(&body).unwrap().lines().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["height"].as_u64().unwrap()).collect();
+    assert_eq!(heights, (1..=height).collect::<Vec<_>>());
+    // what the cut consumer finds when it finally reads: the head of the stream, not all of it
+    let mut got = Vec::new();
+    let _ = idle.read_to_end(&mut got).await;
+    assert!(got.starts_with(b"HTTP/1.1 200"));
+    assert!(got.len() < body.len(), "the silent consumer was cut: {} of {} bytes", got.len(), body.len());
+    drop(others);
     let _ = n.stop.send(true);
 }
