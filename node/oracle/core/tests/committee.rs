@@ -812,3 +812,118 @@ fn parameter_validation() {
     assert_eq!(p.validate(), Err(ParamError::NoMarkets));
     assert!(OracleState::genesis(&p).is_err());
 }
+
+/// R436-12 (Medium, reviewer 436, round 2). Round 1 refused the WHOLE update when any one observation failed a
+/// time bound relative to the block time. With a sequencer that includes every observation it holds (R395-9), one
+/// signer of seven whose `timeMs` is late in the round (a clock one second fast, or on purpose) vetoed every round:
+/// no index, STALE after 10 s. Rule C2d: such an observation is IGNORED and the update is judged on the rest.
+#[test]
+fn r436_12_one_signer_with_a_late_time_does_not_veto_the_round() {
+    let (prm, mut st, r) = active_at(648_700);
+    // Six honest signers sample at the round's 100th ms; signer 6 signs the round's last millisecond and a far
+    // price. The block is built 400 ms into the round: signer 6 is 2,599 ms in the block's future (> 1000).
+    let mut u = honest(r, 648_900);
+    let mut late = obs(6, r, &[(1, 700_000, 5)]);
+    late.time_ms = r * ROUND_MS + ROUND_MS - 1;
+    let dom = eip712::domain_separator(&prm.verifying_contract);
+    late.signature = sig::sign(&key(6), &eip712::digest(&dom, &late.message(r)));
+    u.observations[6] = late;
+    let rep =
+        apply_update(&prm, &mut st, &u, t_of(r)).expect("the round is judged on the six others");
+    assert_eq!(rep.ignored, vec![6]);
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_900 });
+    assert_eq!(st.last_round, r);
+
+    // The same for an observation too OLD at the block time (the block is built late; one signer sampled early
+    // in the round, the others late): only the old one is ignored.
+    let (prm, mut st, r) = active_at(648_700);
+    let mut u = honest(r, 648_900);
+    let dom = eip712::domain_separator(&prm.verifying_contract);
+    for o in u.observations.iter_mut().skip(1) {
+        o.time_ms = r * ROUND_MS + 2_900;
+        o.signature = sig::sign(&key(o.signer), &eip712::digest(&dom, &o.message(r)));
+    }
+    let t = r * ROUND_MS + 100 + 6_001; // observation 0 (sampled at +100 ms) is 6,001 ms old
+    let rep = apply_update(&prm, &mut st, &u, t).unwrap();
+    assert_eq!(rep.ignored, vec![0]);
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_900 });
+}
+
+/// C2d keeps every refusal that protects a block from garbage: fewer than `q` observations inside the time
+/// bounds refuse the whole input WITHOUT consuming the round (it can come again at a later block time); an
+/// ignored observation still needs a valid signature and a time inside its round; its price enters no median.
+#[test]
+fn r436_12_ignored_is_not_accepted_and_too_few_in_time_still_refuses() {
+    let (prm, mut st, r) = active_at(648_700);
+    let dom = eip712::domain_separator(&prm.verifying_contract);
+    let at = |signer: u8, ms: u64, price: u64| {
+        let mut o = obs(signer, r, &[(1, price, 5)]);
+        o.time_ms = r * ROUND_MS + ms;
+        o.signature = sig::sign(&key(signer), &eip712::digest(&dom, &o.message(r)));
+        o
+    };
+    // Three of seven are late in the round: four in time < q = 5. Refused, nothing changes, round not consumed.
+    let mut u = honest(r, 648_900);
+    for s in 4..7u8 {
+        u.observations[usize::from(s)] = at(s, 2_999, 648_900);
+    }
+    assert_rejected_unchanged(
+        &prm,
+        &mut st,
+        &u,
+        t_of(r),
+        OracleError::Time { observation: 4 },
+    );
+    // 1,600 ms later the three are no longer in the block's future: the SAME update is accepted with all seven.
+    let rep = apply_update(&prm, &mut st.clone(), &u, t_of(r) + 1_600).unwrap();
+    assert!(rep.ignored.is_empty());
+    assert_eq!(rep.outcomes[0].1, MarketOutcome::Moved { price: 648_900 });
+
+    // Two ignored liars cannot push the median even together with one included liar: V has only in-time values.
+    let mut u = honest(r, 648_900);
+    u.observations[5] = at(5, 2_999, 900_000);
+    u.observations[6] = at(6, 2_999, 900_000);
+    u.observations[4] = at(4, 100, 900_000);
+    let rep = apply_update(&prm, &mut st.clone(), &u, t_of(r)).unwrap();
+    assert_eq!(rep.ignored, vec![5, 6]);
+    // Five in time, one of them lying: the median of {648900 x4, 900000} is honest; C4 then finds only four in
+    // agreement (< q) and the round does not move the index: fail closed.
+    assert_eq!(
+        rep.outcomes[0].1,
+        MarketOutcome::Disagree {
+            median: 648_900,
+            agree: 4
+        }
+    );
+
+    // An ignored observation with a bad signature refuses the whole input (order: round membership, signature,
+    // then C2d), so a block can never carry an unsigned observation behind a late time.
+    let mut u = honest(r, 648_900);
+    let mut bad = at(6, 2_999, 648_900);
+    bad.prices[0].price += 1;
+    u.observations[6] = bad;
+    assert_rejected_unchanged(
+        &prm,
+        &mut st,
+        &u,
+        t_of(r),
+        OracleError::BadSignature {
+            observation: 6,
+            reason: None,
+        },
+    );
+    // An observation outside its round refuses the whole input whatever the block time (a fact of the
+    // observation alone: an honest sequencer never includes it).
+    let mut u = honest(r, 648_900);
+    let mut out = obs(6, r, &[(1, 648_900, 5)]);
+    out.time_ms = (r + 1) * ROUND_MS;
+    out.signature = sig::sign(&key(6), &eip712::digest(&dom, &out.message(r)));
+    u.observations[6] = out;
+    assert_rejected_unchanged(
+        &prm,
+        &mut st,
+        &u,
+        t_of(r),
+        OracleError::Time { observation: 6 },
+    );
+}

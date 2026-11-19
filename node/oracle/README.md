@@ -125,20 +125,30 @@ distinct and non-zero, markets strictly ascending (1 to 256), `minSources >= 1`,
 
 Validity of the whole input (any failure: the input is rejected with the named error and NO state changes). Error
 order, normative so every implementation reports the same error: C1; then C2 over the whole input; then for each
-observation in input order C2c before C2b; the first failing check is reported:
+observation in input order C2c, then C2b, then the C2d mark; then the C2d count; the first failing check is reported:
 
 - C1 `ORACLE_ROUND_NOT_NEW`: `round > lastOracleRound`.
 - C2 `ORACLE_MALFORMED`: `q <= count <= n`; `signer` strictly ascending and `< n`; every `prices` list strictly
   ascending by `marketId`, 1 to 256 entries, every `price > 0`.
+- C2c `ORACLE_TIME`: every `timeMs` is inside the round (`timeMs / 3000 = round`). A fact of the observation alone.
 - C2b `ORACLE_BAD_SIGNATURE`: every signature is 65 bytes, low-s, `v` in `{27, 28}`, and recovers to
   `signers[signer]`.
-- C2c `ORACLE_TIME`: every `timeMs` is inside the round, `timeMs <= T + maxFutureMs` and `T - timeMs <= maxAgeMs`.
+- C2d (round 2, R436-12): an observation with `timeMs > T + maxFutureMs` or `T - timeMs > maxAgeMs` is IGNORED for
+  this input: it is not a refusal, its prices enter no market's `V`, and the report lists its signer. If fewer than
+  `q` observations remain, the whole input is refused with `ORACLE_TIME` (reporting the first ignored observation)
+  and NO state changes: the round is not consumed and may be presented again at a later block time. Version 0.2
+  refused the whole input for one observation outside these two bounds; with a sequencer that includes every
+  observation it holds (section 5a) one signer with a clock a second fast, or a hostile one, vetoed every round
+  and every market went STALE. Only these two bounds depend on the block time, which no signer controls; every
+  other defect stays a whole-input refusal, so a block can never carry an unsigned or misplaced observation.
+  Tests `core/tests/committee.rs::r436_12_*`; the round-1 tests of the two bounds (all observations outside them)
+  hold unchanged.
 
 Then `lastOracleRound = round`, and for each market `m` the engine knows (entries for unknown markets are ignored),
 in ascending `marketId` order:
 
 - A round rejected by C3 or C4 for a market still consumes the round number (C1 is about the input).
-- C3 values `V` = the `price` of `m` in each observation whose entry has `sources >= minSources(m)`. If `|V| < q`:
+- C3 values `V` = the `price` of `m` in each observation NOT ignored by C2d whose entry has `sources >= minSources(m)`. If `|V| < q`:
   no change for `m` (`NO_QUORUM`). Else `M = sort(V)[|V| / 2]` (the median; the upper median when `|V|` is even).
 - C4 `A` = the number of `v` in `V` with `|v - M| * 10000 <= agreeBps * M` (u128). If `A < q`: no change for `m`
   (`DISAGREE`). Else `M` is the committee price of `m` for round `round`, at time `tau = round * 3000`.

@@ -983,3 +983,190 @@ fn r432_2_a_restarted_feed_never_signs_the_round_it_started_in() {
         assert_eq!(r, [round_of(start + offset + 1) + 1], "offset {offset}");
     }
 }
+
+/// Shared vectors of rule C2d (R436-12) for the engine's own implementation (430): `vectors/c2d.json`. Each case is
+/// one update applied to the GENESIS oracle state of the file's committee at `blockTime`; the expected result is
+/// the error (code and observation index) or the ignored signers, the per-market outcomes and the state bytes.
+/// Throwaway keys from public labels; the file carries the signatures, no key.
+/// Regenerate on purpose only: `ORACLE_WRITE_VECTORS=1 cargo test --test r2`.
+#[test]
+fn c2d_shared_vectors() {
+    let mut ks: Vec<_> = (0..7)
+        .map(|i| dev_key(&format!("c2d-vector-{i}")))
+        .collect();
+    ks.sort_by_key(|k| sig::address_of(k.verifying_key()));
+    let prm = committee(&ks, 5);
+    let dom = eip712::domain_separator(&VAULT);
+    let round = 598_400_000u64;
+    let start = round * ROUND_MS;
+    let mk = |times: [u64; 7], prices: [u64; 7]| -> perps_oracle::types::OracleUpdate {
+        perps_oracle::types::OracleUpdate {
+            round,
+            observations: (0..7usize)
+                .map(|i| {
+                    let o = perps_oracle::types::Observation {
+                        round,
+                        time_ms: start + times[i],
+                        prices: vec![perps_oracle::types::OraclePrice {
+                            market_id: 1,
+                            price: prices[i],
+                            sources: 5,
+                        }],
+                    };
+                    perps_oracle::types::SignedObservation {
+                        signer: i as u8,
+                        time_ms: o.time_ms,
+                        signature: sig::sign(&ks[i], &eip712::digest(&dom, &o)),
+                        prices: o.prices,
+                    }
+                })
+                .collect(),
+        }
+    };
+    let p = 6_725_000_000_000u64;
+    let mut bad_sig = mk([100, 100, 100, 100, 100, 100, 2_999], [p; 7]);
+    bad_sig.observations[6].prices[0].price += 1;
+    let cases: Vec<(&str, perps_oracle::types::OracleUpdate, u64)> = vec![
+        ("all-in-time", mk([100; 7], [p; 7]), start + 400),
+        (
+            "one-in-the-future-ignored",
+            mk(
+                [100, 100, 100, 100, 100, 100, 2_999],
+                [p, p, p, p, p, p, 9_000_000_000_000],
+            ),
+            start + 400,
+        ),
+        (
+            "exactly-max-future-not-ignored",
+            mk([100, 100, 100, 100, 100, 100, 1_400], [p; 7]),
+            start + 400,
+        ),
+        (
+            "one-ms-beyond-max-future-ignored",
+            mk([100, 100, 100, 100, 100, 100, 1_401], [p; 7]),
+            start + 400,
+        ),
+        (
+            "two-ignored-five-left",
+            mk([100, 100, 100, 100, 100, 2_999, 2_999], [p; 7]),
+            start + 400,
+        ),
+        (
+            "three-ignored-refused",
+            mk([100, 100, 100, 100, 2_999, 2_999, 2_999], [p; 7]),
+            start + 400,
+        ),
+        (
+            "the-same-update-later-accepted",
+            mk([100, 100, 100, 100, 2_999, 2_999, 2_999], [p; 7]),
+            start + 2_000,
+        ),
+        (
+            "one-too-old-ignored",
+            mk([100, 2_900, 2_900, 2_900, 2_900, 2_900, 2_900], [p; 7]),
+            start + 6_101,
+        ),
+        (
+            "exactly-max-age-not-ignored",
+            mk([100, 2_900, 2_900, 2_900, 2_900, 2_900, 2_900], [p; 7]),
+            start + 6_100,
+        ),
+        ("all-too-old-refused", mk([100; 7], [p; 7]), start + 6_101),
+        ("ignored-with-bad-signature-refused", bad_sig, start + 400),
+    ];
+    let mut out = Vec::new();
+    for (name, u, t) in &cases {
+        let mut st = OracleState::genesis(&prm).unwrap();
+        begin_block(&prm, &mut st, *t);
+        let expect = match apply_update(&prm, &mut st, u, *t) {
+            Ok(r) => serde_json::json!({"ignored": r.ignored, "report": json::report_to_json(&r)}),
+            Err(e) => {
+                let observation = match e {
+                    OracleError::Time { observation }
+                    | OracleError::BadSignature { observation, .. } => Some(observation),
+                    _ => None,
+                };
+                serde_json::json!({"error": e.code(), "observation": observation})
+            }
+        };
+        out.push(serde_json::json!({
+            "name": name, "blockTime": t, "update": json::update_to_json(u),
+            "canonicalBytes": format!("0x{}", hex::encode(perps_oracle::encoding::encode(u))),
+            "expect": expect, "stateBytesAfter": format!("0x{}", hex::encode(st.encode())),
+        }));
+    }
+    let file = serde_json::json!({
+        "_note": "PosternDEX Perpetuals oracle, rule C2d (README section 5, R436-12). UNAUDITED PROTOTYPE. Each case: the update applied to the GENESIS oracle state of this committee at blockTime (H1 first). Throwaway keys.",
+        "committee": {
+            "verifyingContract": format!("0x{}", hex::encode(VAULT)),
+            "signers": prm.signers.iter().map(|a| format!("0x{}", hex::encode(a))).collect::<Vec<_>>(),
+            "quorum": 5, "maxFutureMs": 1000, "maxAgeMs": 6000,
+            "markets": [{"marketId": 1, "minSources": 3, "agreeBps": 100, "jumpBps": 500, "maxStalenessMs": 10000, "confirmRounds": 3,
+                         "exitHaircutBps": 500, "exitHaircutPerMinBps": 100, "exitMaxHaircutBps": 5000, "maxHaltMs": 3600000},
+                        {"marketId": 2, "minSources": 3, "agreeBps": 100, "jumpBps": 500, "maxStalenessMs": 10000, "confirmRounds": 3,
+                         "exitHaircutBps": 500, "exitHaircutPerMinBps": 100, "exitMaxHaircutBps": 5000, "maxHaltMs": 3600000},
+                        {"marketId": 3, "minSources": 3, "agreeBps": 100, "jumpBps": 800, "maxStalenessMs": 10000, "confirmRounds": 3,
+                         "exitHaircutBps": 800, "exitHaircutPerMinBps": 100, "exitMaxHaircutBps": 5000, "maxHaltMs": 3600000}],
+        },
+        "cases": out,
+    });
+    // The committee object is the one the cases were computed with.
+    assert_eq!(json::committee_from_json(&file["committee"]).unwrap(), prm);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../vectors/c2d.json");
+    let text = serde_json::to_string_pretty(&file).unwrap() + "\n";
+    if std::env::var_os("ORACLE_WRITE_VECTORS").is_some() {
+        fs::write(&path, &text).unwrap();
+    }
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        text,
+        "vectors/c2d.json is stale"
+    );
+    // What the cases must show, independently of the file.
+    let by_name = |n: &str| out.iter().find(|c| c["name"] == n).unwrap()["expect"].clone();
+    assert_eq!(by_name("all-in-time")["ignored"], serde_json::json!([]));
+    assert_eq!(
+        by_name("one-in-the-future-ignored")["ignored"],
+        serde_json::json!([6])
+    );
+    assert_eq!(
+        by_name("one-in-the-future-ignored")["report"]["markets"][0]["price"],
+        p.to_string()
+    );
+    assert_eq!(
+        by_name("exactly-max-future-not-ignored")["ignored"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        by_name("one-ms-beyond-max-future-ignored")["ignored"],
+        serde_json::json!([6])
+    );
+    assert_eq!(
+        by_name("two-ignored-five-left")["ignored"],
+        serde_json::json!([5, 6])
+    );
+    assert_eq!(
+        by_name("three-ignored-refused"),
+        serde_json::json!({"error": "ORACLE_TIME", "observation": 4})
+    );
+    assert_eq!(
+        by_name("the-same-update-later-accepted")["ignored"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        by_name("one-too-old-ignored")["ignored"],
+        serde_json::json!([0])
+    );
+    assert_eq!(
+        by_name("exactly-max-age-not-ignored")["ignored"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        by_name("all-too-old-refused"),
+        serde_json::json!({"error": "ORACLE_TIME", "observation": 0})
+    );
+    assert_eq!(
+        by_name("ignored-with-bad-signature-refused"),
+        serde_json::json!({"error": "ORACLE_BAD_SIGNATURE", "observation": 6})
+    );
+}

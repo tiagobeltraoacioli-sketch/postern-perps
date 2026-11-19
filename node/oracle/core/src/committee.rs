@@ -282,7 +282,9 @@ pub enum OracleError {
     RoundNotNew,
     /// C2 `ORACLE_MALFORMED`.
     Malformed(Malformed),
-    /// C2c `ORACLE_TIME`, with the index of the observation in the input.
+    /// `ORACLE_TIME`, with the index of the observation in the input: C2c (the observation is outside the
+    /// update's round), or C2d (fewer than `q` observations are inside the time bounds at this block time; the
+    /// index is the first one outside them).
     Time { observation: usize },
     /// C2b `ORACLE_BAD_SIGNATURE`, with the index of the observation in the input.
     BadSignature {
@@ -324,14 +326,19 @@ pub struct UpdateReport {
     pub round: u64,
     /// One entry per market of the parameters, ascending `market_id`.
     pub outcomes: Vec<(u32, MarketOutcome)>,
+    /// C2d: the signers (ascending) whose observation was outside the time bounds at this block time and
+    /// entered no median.
+    pub ignored: Vec<u8>,
 }
 
+/// C1, C2, then per observation in input order: round membership (`ORACLE_TIME`), signature (C2b), and C2d.
+/// Returns, per observation, whether C2d ignores it at block time `t`.
 fn validate(
     params: &CommitteeParams,
     last_round: u64,
     u: &OracleUpdate,
     t: u64,
-) -> Result<(), OracleError> {
+) -> Result<Vec<bool>, OracleError> {
     // C1
     if u.round <= last_round {
         return Err(OracleError::RoundNotNew);
@@ -366,15 +373,17 @@ fn validate(
         .checked_add(ROUND_MS)
         .ok_or(OracleError::Malformed(Malformed::RoundOverflow))?;
     let domain = eip712::domain_separator(&params.verifying_contract);
+    let mut ignored = vec![false; count];
     for (i, o) in u.observations.iter().enumerate() {
-        // C2c
-        if o.time_ms < start
-            || o.time_ms >= end
-            || o.time_ms > t.saturating_add(params.max_future_ms)
-            || t.saturating_sub(o.time_ms) > params.max_age_ms
-        {
+        // C2c: the observation belongs to this round. A fact of the observation alone: the whole input is
+        // refused (an honest sequencer never includes it).
+        if o.time_ms < start || o.time_ms >= end {
             return Err(OracleError::Time { observation: i });
         }
+        // C2d (R436-12): the two bounds relative to the block time do not refuse the input; the observation is
+        // ignored. One signer with a skewed clock must not veto a round that q others carry.
+        ignored[i] = o.time_ms > t.saturating_add(params.max_future_ms)
+            || t.saturating_sub(o.time_ms) > params.max_age_ms;
         // C2b
         let digest = eip712::digest(&domain, &o.message(u.round));
         match sig::recover(&digest, &o.signature) {
@@ -393,7 +402,14 @@ fn validate(
             }
         }
     }
-    Ok(())
+    // C2d: fewer than q observations inside the time bounds refuse the whole input (the round is NOT consumed:
+    // it may be presented again at a later block time). The first ignored observation is reported.
+    let in_time = ignored.iter().filter(|x| !**x).count();
+    if in_time < usize::from(params.quorum) {
+        let first = ignored.iter().position(|x| *x).unwrap_or(0);
+        return Err(OracleError::Time { observation: first });
+    }
+    Ok(ignored)
 }
 
 /// Applies one `oracle` block input at block time `t` (C1 to C5, then H2/H3 per market). On error nothing changes.
@@ -403,7 +419,7 @@ pub fn apply_update(
     u: &OracleUpdate,
     t: u64,
 ) -> Result<UpdateReport, OracleError> {
-    validate(params, state.last_round, u, t)?;
+    let ignored = validate(params, state.last_round, u, t)?;
     state.last_round = u.round;
     let tau = u.round * ROUND_MS; // no overflow: checked in validate
     let q = usize::from(params.quorum);
@@ -413,7 +429,9 @@ pub fn apply_update(
         let mut v: Vec<u64> = u
             .observations
             .iter()
-            .filter_map(|o| o.prices.iter().find(|e| e.market_id == p.market_id))
+            .zip(&ignored)
+            .filter(|(_, ig)| !**ig)
+            .filter_map(|(o, _)| o.prices.iter().find(|e| e.market_id == p.market_id))
             .filter(|e| e.sources >= p.min_sources)
             .map(|e| e.price)
             .collect();
@@ -449,6 +467,13 @@ pub fn apply_update(
     Ok(UpdateReport {
         round: u.round,
         outcomes,
+        ignored: u
+            .observations
+            .iter()
+            .zip(&ignored)
+            .filter(|(_, ig)| **ig)
+            .map(|(o, _)| o.signer)
+            .collect(),
     })
 }
 
