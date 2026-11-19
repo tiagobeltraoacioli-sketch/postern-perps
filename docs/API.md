@@ -50,10 +50,26 @@ Canonical data rules (action types, EIP-712 typed data, numeric scales, state ro
   orders (open orders are never dropped). The index is rebuilt from the input log at start, so a restarted node
   serves the same history.
 - **Rate limits.** Per IP and per account; `429 RATE_LIMITED` with `Retry-After` (seconds). Defaults in section 8.
-- **CORS.** `Access-Control-Allow-Origin` is the configured frontend origin (`--cors-origin`; `*` in mock mode and
-  by default in dev mode). A preflight (`OPTIONS`) is answered `204` with `GET, POST, OPTIONS` and the headers
-  `content-type, x-postern-geo, x-postern-geo-mac, x-mock-country`. No cookies, no sessions: authority comes only
-  from EIP-712 signatures.
+- **CORS (F434-2).** An explicit allowlist: `--cors-origin <origin>`, repeatable (or comma-separated). **Empty by
+  default**: the node then sends no CORS header and answers no preflight, so no page on another origin can call
+  it. An entry is exactly what a browser sends in `Origin` (`https://host[:port]`, lower case, nothing after it);
+  `*`, `null`, wildcards, paths and a trailing slash stop the node at start. With a list:
+  - a request whose `Origin` is byte for byte on the list gets `Access-Control-Allow-Origin: <that origin>` on
+    every answer (2xx, 4xx, 5xx), `Access-Control-Expose-Headers: retry-after` and `Vary: Origin`; any other
+    origin (and `null`, and two `Origin` headers) gets no CORS header (`Vary: Origin` still). Never `*`, never an
+    origin that is not listed, never `Access-Control-Allow-Credentials`: the page sends no credentials
+    (`credentials: 'omit'`); authority comes only from EIP-712 signatures.
+  - preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`, any path): from a listed origin `204`
+    with `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: content-type,
+    x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-nonce,
+    x-postern-read-signature` and `Access-Control-Max-Age: 600`; from any other origin `403 ORIGIN_NOT_ALLOWED`
+    with no CORS header. `Authorization` is not allowed: the operator and ingest tokens are not for pages.
+  - the WebSocket upgrade (browsers do not preflight it) is refused `403 ORIGIN_NOT_ALLOWED` when it carries an
+    `Origin` that is not listed. An upgrade WITHOUT `Origin` (a program, not a page) is served: the check keeps
+    other sites' pages out, it is not authentication.
+  CORS is a rule browsers enforce for pages; it does not stop a program from reading public data. **The
+  production value of the list is an owner input** (the page's final origin or origins); the mock keeps its own
+  rule (`node/mock`).
 
 ## 2. Market data (public, not geoblocked)
 
@@ -79,9 +95,21 @@ Canonical data rules (action types, EIP-712 typed data, numeric scales, state ro
  "marginTiers":[{"notionalFloor":"0","initialMarginFraction":"0.02","maintenanceMarginFraction":"0.01","maxLeverage":"50"}],
  "makerFeeBps":"1.5","takerFeeBps":"4.5","liquidationFeeBps":"50",
  "fundingIntervalSec":3600,"maxFundingRate":"0.0005",
- "oracle":{"sources":["sourceA","sourceB","sourceC"],"minSources":2,"maxStalenessMs":10000,"maxDeviationBps":"200"},
+ "markBandBps":50,"marketSlippageBps":500,
+ "oracle":{"sources":["sourceA","sourceB","sourceC"],"minSources":2,"maxStalenessMs":10000,"maxDeviationBps":"200",
+           "exitHaircutBps":500,"exitHaircutPerMinBps":100,"exitMaxHaircutBps":5000,"maxHaltMs":3600000},
  "openInterestCap":"1000"}
 ```
+
+The bands (F434-5, F434-6), integers, taken from the engine's own `MarketParams` like every other field of the
+real node's table (never from a second file): `markBandBps` (the mark stays within this of the index, SPEC 5),
+`marketSlippageBps` (a market order never fills, and an order is refused `PRICE_BAND`, beyond this from the mark),
+and in `oracle` the EXIT BAND of a halted market (SPEC 14, X1 to X3): its half-width in basis points is
+`min(exitHaircutBps + exitHaircutPerMinBps * floor(age / 60000), exitMaxHaircutBps)` with `age` = the engine's time
+minus the time of the last index, applied below the lowest and above the highest of the index and the committee
+prices seen since the halt; a halt older than `maxHaltMs` settles every position of the market at the settle price.
+The CURRENT band of a halted market is in `OracleStatus` (`exitBand`), computed by the engine. The stub engine and
+the mock publish the fixture's table and do not have these fields.
 
 `status`: `active`, `halted` (oracle unsafe or committee halt: no matching, cancels allowed), `closeOnly`
 (reduce-only orders and cancels), `settled`.
@@ -136,6 +164,14 @@ interval whose rate is zero, or whose market is halted at the boundary, settles 
             {"name":"sourceC","price":"66100.0","time":1794878411000,"used":false,"reason":"outlier"}],
  "signers":5,"threshold":5,"haltReason":null}
 ```
+
+While the market is halted and an index is held, `OracleStatus` also carries (F434-6; both `null` otherwise, and
+always present on the real engine):
+`"haltedSince":1794878412000,"exitBand":{"low":"63887.31","high":"70612.29","settlePrice":"67249.8","settleDue":false,"asOf":1794878600000}`.
+`exitBand` is the engine's own result (`exit_price` at its current time `asOf`), not a recomputation: `low` is what
+a forced close or escape of a LONG is valued at, `high` of a SHORT, `settlePrice` and `settleDue` are X3's.
+`haltedSince` is the time the band's age is counted from: the engine keeps no separate halt timestamp, the age of
+a halt is the age of its last index, so `haltedSince` equals `time`.
 
 `status`: `ok`, `stale` (no index yet, or the index is older than `maxStalenessMs`: engine halt reason `STALE`),
 `deviation` (jump halt, `JUMP`), `halted` (`ARITHMETIC`); `insufficientSources` is reserved. `price`, `time` and
@@ -678,6 +714,7 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 | 0.3 | 2026-11-18 | round 2: positions, margin summary, orders, fills, funding, trades, candles, tickers and the oracle status served from the real engine; rounding and pagination rules stated; `GET /v1/orders/{id}`; `?finalized=true`; `AccountProof` and `WithdrawalProof` (`/v1/withdrawals/{id}/proof`) as the vault's inputs; certificate `proof` = 32 siblings; `ForcedAction` + `arg`, `outcome`, `reason`, `processedHeight`; oracle ingest (2.1); `ActionResult` order and withdrawal ids; WebSocket `trades`, `candles`, `ticker` and full `account` updates; nonce text follows SPEC 2.5 |
 | 0.3 | 2026-11-19 | same version, later the same round: `GET /v1/genesis`; CORS; `Position.openNotional`; read rate limit; proofs for any final checkpoint (rebuilt from the log) and from a validator's own read service; attestation records (`/v1/attestations`); snapshots restore the history |
 | 0.2 | 2026-11-17 | follows SPEC 0.1.1 and VAULT.md 0.1: engine domain chainId 700770 + verifyingContract = vault; FIXED scales (price and size 1e-8, USDC 1e-6; per-market decimals are display only); nonce rule SPEC 2.5 (window and 64-set, errors NONCE_WINDOW / NONCE_USED inside `BAD_NONCE` admissions); checkpoint = VAULT 5.2 13 fields; certificate = VAULT `withdraw` inputs (sum-tree proof); block input tags 0x01-0x04 (SPEC 3.2) |
+| 0.3 | 2026-11-19 | same version, additive, after the frontend's asks: CORS is an explicit allowlist, EMPTY by default (was `*` in dev), with the WebSocket `Origin` check (F434-2); `Market.markBandBps`, `Market.marketSlippageBps`, `oracle.exitHaircutBps`, `exitHaircutPerMinBps`, `exitMaxHaircutBps`, `maxHaltMs`; `OracleStatus.haltedSince`, `OracleStatus.exitBand` (F434-5, F434-6) |
 
 ## 12. Not done / not proven (v0.3)
 

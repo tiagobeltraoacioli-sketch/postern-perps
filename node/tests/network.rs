@@ -689,9 +689,31 @@ async fn real_engine_oracle_ingest_market_data_and_websocket_channels() {
     assert_eq!(to_hex(&perps_node::util::keccak_parts(&[b"PosternPerps/genesis/v1", &doc])), ni["genesisLogHash"].as_str().unwrap(), "keccak(prefix || document) = logHash(0)");
     let parsed = postern_perps_engine::genesis::Genesis::from_json(std::str::from_utf8(&doc).unwrap()).expect("the engine CLI's own parser reads it");
     assert_eq!(parsed.g.markets.len(), 3);
-    // CORS preflight is answered by the node (API.md section 1)
+    // CORS preflight is answered by the node (API.md section 1). Restated for F434-2: the allowlist is empty by
+    // default (decided by the coordinator), so the origin is listed first; the old assertion (204) is kept, and
+    // the full rules are in f434_2_cors_is_an_exact_allowlist_with_preflight_and_a_websocket_origin_check.
+    *n.app.cors_origins.lock().unwrap() = vec!["http://127.0.0.1:49920".to_string()];
     let (st, _) = http_call("OPTIONS", &format!("{base}/v1/actions"), None, &[("Origin", "http://127.0.0.1:49920"), ("Access-Control-Request-Method", "POST")]).await.unwrap();
     assert_eq!(st, 204);
+    // F434-6 / F434-5: the bands in `Market` are the engine's own MarketParams (the genesis document just parsed)
+    let (_, ml) = get_json(&format!("{base}/v1/markets")).await;
+    for p in &parsed.g.markets {
+        let m = ml["markets"].as_array().unwrap().iter().find(|m| m["symbol"] == p.symbol.as_str()).expect("market");
+        assert_eq!((m["marketSlippageBps"].as_u64(), m["markBandBps"].as_u64()), (Some(p.market_slippage_bps as u64), Some(p.mark_band_bps as u64)), "{m}");
+        let o = &m["oracle"];
+        assert_eq!(
+            (o["exitHaircutBps"].as_u64(), o["exitHaircutPerMinBps"].as_u64(), o["exitMaxHaircutBps"].as_u64(), o["maxHaltMs"].as_u64()),
+            (Some(p.oracle.exit_haircut_bps as u64), Some(p.oracle.exit_haircut_per_min_bps as u64), Some(p.oracle.exit_max_haircut_bps as u64), Some(p.oracle.max_halt_ms)),
+            "{m}"
+        );
+        assert!(p.oracle.exit_haircut_bps > 0 && p.oracle.max_halt_ms > 0, "the comparison is not of zeros");
+        let (_, one) = get_json(&format!("{base}/v1/markets/{}", p.symbol)).await;
+        assert_eq!(&one, m);
+    }
+    // an ACTIVE market has no exit band and no halt time
+    let (_, os) = get_json(&format!("{base}/v1/oracle/BTC-USD")).await;
+    assert_eq!((os["status"].as_str(), os["haltedSince"].is_null(), os["exitBand"].is_null()), (Some("ok"), true, true), "{os}");
+    assert!(os.as_object().unwrap().contains_key("haltedSince") && os.as_object().unwrap().contains_key("exitBand"));
     assert_eq!(acc["positions"][0]["openNotional"], "94150000000000000000", "0.14 BTC x 67,250 in 1e-16 USD");
 
     // the account proof against the latest final checkpoint (the validators sign in real time)
@@ -1133,4 +1155,156 @@ async fn r436_14_block_streams_are_bounded_backpressured_and_slow_consumers_cut(
     assert!(got.len() < body.len(), "the silent consumer was cut: {} of {} bytes", got.len(), body.len());
     drop(others);
     let _ = n.stop.send(true);
+}
+
+/// One HTTP/1.1 exchange with the response HEADERS (the node's own client returns status and body only).
+/// Header names are lower-cased; a repeated header's values are joined with ", ".
+async fn raw_http(method: &str, base: &str, path: &str, headers: &[(&str, &str)], body: Option<&str>) -> (u16, BTreeMap<String, String>, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let host = base.trim_start_matches("http://");
+    let mut s = tokio::net::TcpStream::connect(host).await.unwrap();
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
+    for (k, v) in headers {
+        req += &format!("{k}: {v}\r\n");
+    }
+    if let Some(b) = body {
+        req += &format!("Content-Type: application/json\r\nContent-Length: {}\r\n", b.len());
+    }
+    req += "\r\n";
+    req += body.unwrap_or("");
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), s.read_to_end(&mut buf)).await.expect("the node answers and closes").unwrap();
+    let split = buf.windows(4).position(|w| w == b"\r\n\r\n").expect("a header block");
+    let head = String::from_utf8_lossy(&buf[..split]).to_string();
+    let mut lines = head.split("\r\n");
+    let status: u16 = lines.next().unwrap().split(' ').nth(1).unwrap().parse().unwrap();
+    let mut h: BTreeMap<String, String> = BTreeMap::new();
+    for l in lines {
+        let (k, v) = l.split_once(':').unwrap();
+        let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().to_string());
+        h.entry(k).and_modify(|x| *x = format!("{x}, {v}")).or_insert(v);
+    }
+    (status, h, buf[split + 4..].to_vec())
+}
+
+async fn ws_with_origin(base: &str, origin: Option<&str>) -> Result<Ws, u16> {
+    let url = format!("{}/v1/ws?country=PA", base.replace("http://", "ws://"));
+    let mut req = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(url.as_str()).unwrap();
+    if let Some(o) = origin {
+        req.headers_mut().insert("origin", o.parse().unwrap());
+    }
+    match tokio_tungstenite::connect_async(req).await {
+        Ok((ws, _)) => Ok(ws),
+        Err(tokio_tungstenite::tungstenite::Error::Http(r)) => Err(r.status().as_u16()),
+        Err(e) => panic!("neither an upgrade nor an HTTP refusal: {e}"),
+    }
+}
+
+/// F434-2 (434; decided by the coordinator): CORS is an explicit allowlist, empty by default; exact origin only,
+/// never `*`, never a reflected origin, no credentials; a correct preflight; the WebSocket upgrade checks `Origin`
+/// against the same list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn f434_2_cors_is_an_exact_allowlist_with_preflight_and_a_websocket_origin_check() {
+    const A: &str = "https://posterndex.example";
+    const B: &str = "http://127.0.0.1:49920";
+    const EVIL: &str = "https://evil.example";
+    let n = start_node("cors").await;
+    let base = n.url.clone();
+    let cors_headers = |h: &BTreeMap<String, String>| h.keys().filter(|k| k.starts_with("access-control-")).cloned().collect::<Vec<_>>();
+
+    // 1. DEFAULT (empty list): no CORS header for anyone, no preflight answered, the WebSocket is as before
+    for origin in [None, Some(A), Some(EVIL)] {
+        let hs: Vec<(&str, &str)> = origin.iter().map(|o| ("Origin", *o)).collect();
+        let (st, h, _) = raw_http("GET", &base, "/v1/status", &hs, None).await;
+        assert_eq!((st, cors_headers(&h)), (200, vec![]), "default: nothing is granted to {origin:?}: {h:?}");
+    }
+    let (st, h, _) = raw_http("OPTIONS", &base, "/v1/actions", &[("Origin", A), ("Access-Control-Request-Method", "POST")], None).await;
+    assert!(st != 204 && st != 200 && cors_headers(&h).is_empty(), "default: no preflight is answered: {st} {h:?}");
+    drop(ws_with_origin(&base, Some(EVIL)).await.expect("no list: the upgrade does not look at Origin"));
+
+    // 2. a list of two origins
+    *n.app.cors_origins.lock().unwrap() = vec![A.to_string(), B.to_string()];
+    for o in [A, B] {
+        // 2xx, 4xx and a POST refusal all carry the header, with exactly the caller's own listed origin
+        for (method, path, body, want) in [("GET", "/v1/status", None, 200), ("GET", "/v1/markets/NOPE-USD", None, 404), ("POST", "/v1/actions", Some("{}"), 400)] {
+            let (st, h, _) = raw_http(method, &base, path, &[("Origin", o)], body).await;
+            assert_eq!(st, want, "{method} {path}");
+            assert_eq!(h.get("access-control-allow-origin").map(String::as_str), Some(o), "{method} {path}: {h:?}");
+            assert!(h.get("vary").is_some_and(|v| v.to_ascii_lowercase().contains("origin")), "{h:?}");
+            assert!(!h.contains_key("access-control-allow-credentials"), "no credentials, ever: {h:?}");
+        }
+    }
+    // refused: another site, `null`, and every near miss of a listed origin; also two Origin headers
+    let near = [
+        EVIL,
+        "null",
+        "*",
+        "https://posterndex.example.evil.example",
+        "https://evilposterndex.example",
+        "https://posterndex.example:443",
+        "http://posterndex.example",
+        "https://POSTERNDEX.example",
+        "https://posterndex.example/",
+        "http://127.0.0.1:4992",
+        "http://127.0.0.1:49920.evil.example",
+        "http://127.0.0.1",
+    ];
+    for o in near {
+        let (st, h, _) = raw_http("GET", &base, "/v1/status", &[("Origin", o)], None).await;
+        assert_eq!(st, 200, "CORS is the browser's rule: the read itself is public");
+        assert_eq!(cors_headers(&h), Vec::<String>::new(), "nothing is granted to {o:?}: {h:?}");
+        assert!(h.get("vary").is_some_and(|v| v.to_ascii_lowercase().contains("origin")), "a cache must still key on Origin: {h:?}");
+    }
+    let (_, h, _) = raw_http("GET", &base, "/v1/status", &[("Origin", A), ("Origin", EVIL)], None).await;
+    assert_eq!(cors_headers(&h), Vec::<String>::new(), "two Origin headers: {h:?}");
+    let (_, h, _) = raw_http("GET", &base, "/v1/status", &[], None).await;
+    assert_eq!(cors_headers(&h), Vec::<String>::new(), "no Origin, no grant: {h:?}");
+    // never `*`, whatever is asked
+    for o in [A, EVIL, "*"] {
+        let (_, h, _) = raw_http("GET", &base, "/v1/markets", &[("Origin", o)], None).await;
+        assert_ne!(h.get("access-control-allow-origin").map(String::as_str), Some("*"));
+    }
+
+    // 3. preflight: the methods and every header API.md lets a page send
+    let (st, h, body) = raw_http("OPTIONS", &base, "/v1/actions", &[("Origin", A), ("Access-Control-Request-Method", "POST"), ("Access-Control-Request-Headers", "content-type, x-postern-geo, x-postern-geo-mac")], None).await;
+    assert_eq!((st, body.len()), (204, 0), "{h:?}");
+    assert_eq!(h.get("access-control-allow-origin").map(String::as_str), Some(A));
+    let methods: Vec<String> = h["access-control-allow-methods"].split(',').map(|x| x.trim().to_string()).collect();
+    assert_eq!(methods, vec!["GET", "POST", "OPTIONS"]);
+    let allowed: Vec<String> = h["access-control-allow-headers"].split(',').map(|x| x.trim().to_ascii_lowercase()).collect();
+    for need in ["content-type", "x-postern-geo", "x-postern-geo-mac", "x-postern-read-time", "x-postern-read-signature"] {
+        assert!(allowed.iter().any(|x| x == need), "{need} is in {allowed:?}");
+    }
+    assert!(!allowed.iter().any(|x| x == "authorization" || x == "*"), "operator tokens are not for pages: {allowed:?}");
+    assert_eq!(h.get("access-control-max-age").map(String::as_str), Some("600"));
+    assert!(!h.contains_key("access-control-allow-credentials"));
+    // any path, and GET too
+    let (st, h, _) = raw_http("OPTIONS", &base, "/v1/accounts/0x0000000000000000000000000000000000000001", &[("Origin", B), ("Access-Control-Request-Method", "GET")], None).await;
+    assert_eq!((st, h.get("access-control-allow-origin").map(String::as_str)), (204, Some(B)));
+    // a preflight from an origin that is not listed is refused and granted nothing
+    for o in [EVIL, "null", "https://posterndex.example.evil.example"] {
+        let (st, h, _) = raw_http("OPTIONS", &base, "/v1/actions", &[("Origin", o), ("Access-Control-Request-Method", "POST")], None).await;
+        assert_eq!((st, cors_headers(&h)), (403, vec![]), "{o}: {h:?}");
+    }
+
+    // 4. the WebSocket upgrade: a listed origin and a client without Origin are served; another site is refused
+    let mut ws = ws_with_origin(&base, Some(A)).await.expect("a listed origin");
+    ws_send(&mut ws, serde_json::json!({"op":"ping","id":1})).await;
+    drop(ws);
+    drop(ws_with_origin(&base, Some(B)).await.expect("the second listed origin"));
+    drop(ws_with_origin(&base, None).await.expect("not a browser: no Origin"));
+    for o in [EVIL, "null", "https://posterndex.example.evil.example", "https://posterndex.example:443"] {
+        assert_eq!(ws_with_origin(&base, Some(o)).await.err(), Some(403), "{o}");
+    }
+
+    // 5. what the flag accepts: exact origins only
+    for ok in [A, B, "https://app.posterndex.example:8443", "http://localhost:5173", "http://[::1]:49920"] {
+        assert_eq!(perps_node::api::parse_origin(ok).as_deref(), Ok(ok));
+    }
+    for bad in ["*", "null", "", "https://", "https://*.posterndex.example", "https://posterndex.example/", "https://posterndex.example/app", "posterndex.example", "ftp://posterndex.example",
+        "https://Posterndex.example", "https://a.example https://b.example", "https://user@a.example", "https://a.example:", "https://a.example:99999", "https://a.example:80/x", "https://a.example?x", "https://a..example", "http://[::1"] {
+        assert!(perps_node::api::parse_origin(bad).is_err(), "{bad:?} is not an origin");
+    }
+    n.stop.send(true).unwrap();
 }

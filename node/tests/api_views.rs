@@ -621,3 +621,52 @@ fn snapshot_recovery_restores_the_state_and_the_history() {
     assert!(s3.recovered.snapshot_height < Some(newest.0), "{:?}", s3.recovered);
     assert_eq!(s3.index.as_ref().unwrap().mismatches, 0);
 }
+
+/// F434-6 (434): what a forced close or an escape costs in a halt can be stated from the API alone. The published
+/// parameters are the engine's own (R393-N1), `OracleStatus` carries the band the engine computes now, and the
+/// parameters reproduce that band: the page's arithmetic and the engine's agree.
+#[test]
+fn f434_6_exit_band_parameters_and_the_current_band_are_the_engines() {
+    let (mut s, _a, _b) = start("exitband", DevOptions::default());
+    let table = s.seq.engine.market_table(&s.g).expect("the engine's table");
+    let p = s.e().markets[&BTC].p.clone();
+    let m = table.iter().find(|m| m["marketId"] == BTC).unwrap().clone();
+    assert_eq!((m["marketSlippageBps"].as_u64(), m["markBandBps"].as_u64()), (Some(p.market_slippage_bps as u64), Some(p.mark_band_bps as u64)));
+    let o = &m["oracle"];
+    let (base, per_min, cap, max_halt) = (o["exitHaircutBps"].as_u64().unwrap(), o["exitHaircutPerMinBps"].as_u64().unwrap(), o["exitMaxHaircutBps"].as_u64().unwrap(), o["maxHaltMs"].as_u64().unwrap());
+    assert_eq!((base, per_min, cap, max_halt), (p.oracle.exit_haircut_bps as u64, p.oracle.exit_haircut_per_min_bps as u64, p.oracle.exit_max_haircut_bps as u64, p.oracle.max_halt_ms));
+    assert!(base > 0 && per_min > 0 && cap > base);
+
+    // active: no band, no halt time
+    let j = view::oracle_json(s.e(), BTC, 5, 0).unwrap();
+    assert_eq!((j["status"].as_str(), j["haltedSince"].is_null(), j["exitBand"].is_null()), (Some("ok"), true, true), "{j}");
+
+    // no round for a little over three minutes: the engine halts the market (STALE) at the next block
+    let index_time = s.e().markets[&BTC].oracle.index_time;
+    s.t += p.oracle.max_staleness_ms.max(185_000);
+    s.deposit(2, key_address(&user(3)), 10);
+    s.produce().expect("a block");
+    let e = s.e();
+    assert_eq!(e.markets[&BTC].oracle.status, pe::oracle::Status::Halted(pe::oracle::HaltReason::Stale));
+    let j = view::oracle_json(e, BTC, 5, 0).unwrap();
+    let want = e.markets[&BTC].oracle.exit_price(&p.oracle, e.time).expect("an index is held");
+    let band = &j["exitBand"];
+    assert_eq!((j["status"].as_str(), j["haltReason"].as_str(), j["haltedSince"].as_u64()), (Some("stale"), Some("STALE"), Some(index_time)), "{j}");
+    assert_eq!(
+        (band["low"].as_str().unwrap(), band["high"].as_str().unwrap(), band["settlePrice"].as_str().unwrap(), band["settleDue"].as_bool(), band["asOf"].as_u64()),
+        (view::exact8(want.low).as_str(), view::exact8(want.high).as_str(), view::exact8(want.settle).as_str(), Some(want.settle_due), Some(e.time)),
+        "{j}"
+    );
+    assert!(want.low < P && want.high > P && !want.settle_due);
+    // the published parameters reproduce the band (no committee price arrived since the halt)
+    let minutes = (band["asOf"].as_u64().unwrap() - j["haltedSince"].as_u64().unwrap()) / 60_000;
+    assert!(minutes >= 3);
+    let h = (base + per_min * minutes).min(cap);
+    assert_eq!((want.low as u128, want.high as u128), (P as u128 * (10_000 - h as u128) / 10_000, (P as u128 * (10_000 + h as u128)).div_ceil(10_000)), "width {h} bps");
+
+    // past maxHaltMs the engine settles the market at the settle price (X3). Asked before the block that does
+    // it: the band says the settlement is due
+    let due = e.markets[&BTC].oracle.exit_price(&p.oracle, index_time + max_halt).unwrap();
+    assert!(due.settle_due, "the published maxHaltMs is the engine's threshold");
+    assert!(!e.markets[&BTC].oracle.exit_price(&p.oracle, index_time + max_halt - 1).unwrap().settle_due);
+}

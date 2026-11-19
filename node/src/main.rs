@@ -31,6 +31,14 @@ fn args() -> (String, HashMap<String, String>) {
             } else {
                 "true".into()
             };
+            // --cors-origin may be given several times (and takes a comma-separated list): the values add up
+            if k == "cors-origin" {
+                if let Some(prev) = m.get(k) {
+                    m.insert(k.to_string(), format!("{prev},{v}"));
+                    i += 1;
+                    continue;
+                }
+            }
             m.insert(k.to_string(), v);
         }
         i += 1;
@@ -348,8 +356,14 @@ async fn dev(a: HashMap<String, String>) {
         }
         *app.operator_token.lock().unwrap() = Some(t);
     }
-    if let Some(o) = a.get("cors-origin") {
-        *app.cors_origin.lock().unwrap() = o.clone();
+    // F434-2: the allowlist of browser origins; empty unless given. A value that is not an exact origin stops the
+    // node (a typing mistake must not quietly become "no page can connect" or, worse, something wider).
+    if let Some(list) = a.get("cors-origin") {
+        let origins: Vec<String> = list
+            .split(',')
+            .map(|o| perps_node::api::parse_origin(o).unwrap_or_else(|e| die(format!("--cors-origin {o:?}: {e}"))))
+            .collect();
+        *app.cors_origins.lock().unwrap() = origins;
     }
     let engines: Vec<Box<dyn Engine>> = (0..local).map(|_| mk_engine(&g)).collect();
     spawn_local_validators(&app, keys.validators.iter().take(local).cloned().collect(), engines, val_views, &stop_rx).expect("validators");

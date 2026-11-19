@@ -368,10 +368,18 @@ pub fn oracle_json(e: &pe::Engine, mid: u32, quorum: usize, held_signers: usize)
         Status::Halted(HaltReason::Jump) => "deviation",
         Status::Halted(HaltReason::Arithmetic) => "halted",
     };
+    // F434-6: the exit band of a HALTED market as the engine computes it now (`OracleState::exit_price` at the
+    // engine's time; nothing is recomputed here), and the time its age is counted from. The engine keeps no
+    // separate "halted at": the age of a halt is the age of the last index, so `haltedSince` is that time.
+    let halted = m.oracle.status != Status::Active;
+    let band = if halted { m.oracle.exit_price(&m.p.oracle, e.time) } else { None };
     Some(serde_json::json!({
         "symbol": m.p.symbol, "status": status, "price": exact8(m.oracle.index), "time": m.oracle.index_time,
         "round": e.last_oracle_round.unwrap_or(0).to_string(), "sources": [], "signers": held_signers, "threshold": quorum,
         "haltReason": halt_reason(m.oracle.status),
+        "haltedSince": if band.is_some() { serde_json::json!(m.oracle.index_time) } else { serde_json::Value::Null },
+        "exitBand": band.map(|b| serde_json::json!({"low": exact8(b.low), "high": exact8(b.high), "settlePrice": exact8(b.settle),
+            "settleDue": b.settle_due, "asOf": e.time})),
     }))
 }
 

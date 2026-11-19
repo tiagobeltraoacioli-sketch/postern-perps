@@ -66,9 +66,9 @@ pub struct App {
     pub attestations: Mutex<crate::attest::Attestations>,
     /// One state rebuild from the log at a time (`api::rebuild_frame`)
     pub rebuild_gate: tokio::sync::Mutex<()>,
-    /// `Access-Control-Allow-Origin` of every response (`--cors-origin`; dev default `*`: no cookies, no
-    /// sessions, authority comes only from signatures).
-    pub cors_origin: Mutex<String>,
+    /// F434-2: the origins a browser page may call this API from (`--cors-origin`, repeatable). EMPTY by default:
+    /// no CORS header is sent and no preflight answered. Exact match only; never `*`, never a reflected origin.
+    pub cors_origins: Mutex<Vec<String>>,
     /// The checkpoint relayer's view of the vault (`crate::relayer`). Lock order: `seq` before `relay`.
     pub relay: Mutex<crate::relayer::RelayState>,
 }
@@ -99,7 +99,7 @@ impl App {
             collateral_token,
             oracle_token,
             relay: Mutex::new(crate::relayer::RelayState::default()),
-            cors_origin: Mutex::new("*".into()),
+            cors_origins: Mutex::new(Vec::new()),
             rebuild_gate: tokio::sync::Mutex::new(()),
             attestations: Mutex::new(crate::attest::Attestations::default()),
             operator_token: Mutex::new(None),

@@ -154,33 +154,121 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
     .into_response()
 }
 
-/// CORS (API.md section 1): every response carries the configured origin; a preflight is answered here. The API
-/// has no cookies and no sessions, so the header grants nothing a non-browser client does not already have.
+/// The headers a page may send (API.md): the body type, the edge's geoblock assertion and its dev stand-in, and
+/// the signed read of an attestation record. `Authorization` is NOT here: the operator and ingest tokens are not
+/// for browsers.
+pub const CORS_ALLOW_HEADERS: &str = "content-type, x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-nonce, x-postern-read-signature";
+pub const CORS_ALLOW_METHODS: &str = "GET, POST, OPTIONS";
+
+/// F434-2: an allowlist entry is exactly what a browser sends in `Origin`: `http(s)://host[:port]`, lower case,
+/// nothing after it. `*`, `null`, a wildcard host, a path or a trailing slash are refused at start.
+pub fn parse_origin(s: &str) -> Result<String, String> {
+    let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).ok_or("an origin is http://host[:port] or https://host[:port]")?;
+    // an IPv6 literal is bracketed; otherwise the last colon, if any, starts the port
+    let (host, port) = if let Some(r) = rest.strip_prefix('[') {
+        let (inside, after) = r.split_once(']').ok_or("an IPv6 host needs its closing bracket")?;
+        if inside.is_empty() || !inside.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b':')) {
+            return Err("the IPv6 host is not lower-case hex and colons".into());
+        }
+        match after {
+            "" => (inside, None),
+            _ => (inside, Some(after.strip_prefix(':').ok_or("nothing may follow the host but :port")?)),
+        }
+    } else {
+        let (h, p) = match rest.split_once(':') {
+            Some((h, p)) => (h, Some(p)),
+            None => (rest, None),
+        };
+        let ok = !h.is_empty()
+            && h.len() <= 253
+            && h.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
+            && !h.starts_with(['.', '-'])
+            && !h.ends_with(['.', '-'])
+            && !h.contains("..");
+        if !ok {
+            return Err("the host must be a lower-case name or address: no wildcard, no path, no trailing slash, no user, no space".into());
+        }
+        (h, p)
+    };
+    let _ = host;
+    if let Some(p) = port {
+        if p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit()) || p.parse::<u16>().is_err() {
+            return Err("the port is not a number from 0 to 65535 (and nothing may follow it)".into());
+        }
+    }
+    Ok(s.to_string())
+}
+
+/// What the `Origin` request header says against the allowlist.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OriginCheck {
+    /// no allowlist configured: CORS is off (no header sent, no preflight answered)
+    Off,
+    /// the request names no origin (not a browser page on another origin)
+    Absent,
+    Allowed(HeaderValue),
+    /// an origin that is not on the list (also: several `Origin` headers, or one that is not text)
+    Refused,
+}
+
+pub fn origin_check(app: &App, headers: &HeaderMap) -> OriginCheck {
+    let list = app.cors_origins.lock().unwrap();
+    if list.is_empty() {
+        return OriginCheck::Off;
+    }
+    let mut it = headers.get_all("origin").iter();
+    let Some(v) = it.next() else { return OriginCheck::Absent };
+    if it.next().is_some() {
+        return OriginCheck::Refused;
+    }
+    match v.to_str() {
+        // byte-for-byte equality with an entry: no prefix, suffix, case or port leniency
+        Ok(o) if list.iter().any(|a| a == o) => OriginCheck::Allowed(v.clone()),
+        _ => OriginCheck::Refused,
+    }
+}
+
+/// CORS (API.md section 1, F434-2). With an EMPTY allowlist (the default) nothing is added and `OPTIONS` is not
+/// answered. With a list: a response to a request whose `Origin` is exactly on the list carries that one origin
+/// (never `*`, never an origin that is not on the list, never `Access-Control-Allow-Credentials`); a preflight
+/// from a listed origin is answered `204` here, from any other origin `403`. The API has no cookies and no
+/// sessions, so the header grants a page nothing a non-browser client does not already have.
 ///
 /// The same layer applies the per-IP READ limit of section 8 (R436-6: reads were unlimited): every GET except the
 /// WebSocket upgrade takes a token of the caller's bucket; an empty bucket is `429 RATE_LIMITED`.
 async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    let origin = app.cors_origin.lock().unwrap().clone();
-    let preflight = req.method() == axum::http::Method::OPTIONS;
+    let origin = origin_check(&app, req.headers());
+    let preflight = origin != OriginCheck::Off
+        && origin != OriginCheck::Absent
+        && req.method() == axum::http::Method::OPTIONS
+        && req.headers().contains_key("access-control-request-method");
     let limited = req.method() == axum::http::Method::GET
         && req.uri().path() != "/v1/ws"
         && req.extensions().get::<ConnectInfo<SocketAddr>>().is_some_and(|ci| !app.read_rate.lock().unwrap().allow(&ip_key(ci.0.ip()), now_ms()));
     let mut resp = if preflight {
-        StatusCode::NO_CONTENT.into_response()
+        match origin {
+            OriginCheck::Allowed(_) => StatusCode::NO_CONTENT.into_response(),
+            _ => error(403, "ORIGIN_NOT_ALLOWED", "this origin is not on the node's list", serde_json::json!({})),
+        }
     } else if limited {
         error(429, "RATE_LIMITED", "per-IP read rate", serde_json::json!({}))
     } else {
         next.run(req).await
     };
-    let h = resp.headers_mut();
-    if let Ok(v) = HeaderValue::from_str(&origin) {
-        h.insert("access-control-allow-origin", v);
+    if origin == OriginCheck::Off {
+        return resp;
     }
-    h.insert("vary", HeaderValue::from_static("origin"));
-    if preflight {
-        h.insert("access-control-allow-methods", HeaderValue::from_static("GET, POST, OPTIONS"));
-        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country, x-postern-read-time, x-postern-read-signature"));
-        h.insert("access-control-max-age", HeaderValue::from_static("600"));
+    let h = resp.headers_mut();
+    // the answer depends on the request's Origin: a shared cache must not hand one origin's answer to another
+    h.append("vary", HeaderValue::from_static("origin"));
+    if let OriginCheck::Allowed(v) = origin {
+        h.insert("access-control-allow-origin", v);
+        h.insert("access-control-expose-headers", HeaderValue::from_static("retry-after"));
+        if preflight {
+            h.insert("access-control-allow-methods", HeaderValue::from_static(CORS_ALLOW_METHODS));
+            h.insert("access-control-allow-headers", HeaderValue::from_static(CORS_ALLOW_HEADERS));
+            h.insert("access-control-max-age", HeaderValue::from_static("600"));
+        }
     }
     resp
 }
@@ -369,7 +457,7 @@ async fn oracle_status(State(app): State<Arc<App>>, Path(sym): Path<String>) -> 
     }
     Json(serde_json::json!({"symbol": m.symbol, "status": "halted", "price": "0", "time": s.engine.time(),
         "round": s.engine.last_oracle_round().to_string(), "sources": [], "signers": 0, "threshold": app.g.oracle_quorum,
-        "haltReason": "the stub engine has no oracle state"}))
+        "haltReason": "the stub engine has no oracle state", "haltedSince": null, "exitBand": null}))
     .into_response()
 }
 
@@ -1243,7 +1331,13 @@ async fn geo(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketA
 
 // ---------------- WebSocket ----------------
 
+/// F434-2: browsers do not preflight a WebSocket, so the upgrade itself checks `Origin` against the allowlist
+/// when one is configured: a page on an origin that is not listed is refused `403`. A client that sends no
+/// `Origin` (not a browser) is served as before: the check keeps other SITES out, it is not authentication.
 async fn ws(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, up: WebSocketUpgrade) -> Response {
+    if origin_check(&app, &headers) == OriginCheck::Refused {
+        return error(403, "ORIGIN_NOT_ALLOWED", "this origin is not on the node's list", serde_json::json!({}));
+    }
     up.max_message_size(16 * 1024).on_upgrade(move |s| ws_session(app, s, peer, headers))
 }
 
