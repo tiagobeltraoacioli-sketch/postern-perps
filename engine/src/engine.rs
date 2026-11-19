@@ -1140,29 +1140,108 @@ impl Engine {
         Ok(())
     }
 
-    /// Size the backstop may take from a closing account (direction `closer_buys`) at `price`: within its
-    /// position limit and only while its equity after covers its maintenance requirement (SPEC 6.3 step 3).
-    fn backstop_room(&self, mid: u32, closer_buys: bool, r: u64, mark: u64, price: u64) -> u64 {
-        if self.accounts[ACCT_BACKSTOP as usize].balance <= 0 {
-            return 0;
+    /// SPEC 6.5: the backstop's safety buffer per unit of notional in a market, ppm: what ONE block can cost a
+    /// position while the market stays active: the largest index move of an accepted round (`jumpBps`), the
+    /// distance of the mark from the index (`markBandBps`), the liquidation price bound at which it may be
+    /// deleveraged (`mmf_0 / 2`, rounded up) and one funding payment at the cap (rounded up).
+    pub fn backstop_buffer_ppm(p: &MarketParams) -> i128 {
+        (p.oracle.jump_bps as i128) * 100 + (p.mark_band_bps as i128) * 100 + (p.tiers[0].mmf_ppm as i128 + 1) / 2 + (p.max_funding_rate as i128 + 999) / 1000
+    }
+
+    /// SPEC 6.5: the backstop's equity with its positions in ACTIVE markets valued at the INDEX (the oracle's price:
+    /// no order in the book moves it), positions in halted markets at the mark as everywhere else. Notional units.
+    pub fn backstop_equity(&self) -> i128 {
+        let a = &self.accounts[ACCT_BACKSTOP as usize];
+        let mut e = a.balance * N_PER_USDC;
+        for (mid, p) in &a.positions {
+            let m = &self.markets[mid];
+            let price = if self.active(*mid) { m.oracle.index } else { m.mark };
+            e += (p.size as i128) * (price as i128) - p.open_notional;
         }
+        e
+    }
+
+    /// (max(floor, MR), buffer) of the backstop in notional units, optionally with its position in `hypo.0`
+    /// replaced by `hypo.1`. The buffer counts positions in active markets only, on their notional at the index,
+    /// rounded up per market.
+    fn backstop_levels(&self, hypo: Option<(u32, i64)>) -> (i128, i128) {
+        let (_, mr) = self.account_req(ACCT_BACKSTOP, hypo.map(|(m, s)| (m, s, None)));
+        let a = &self.accounts[ACCT_BACKSTOP as usize];
+        let mut mids: BTreeSet<u32> = a.positions.keys().copied().collect();
+        if let Some((m, _)) = hypo {
+            mids.insert(m);
+        }
+        let mut buffer = 0i128;
+        for mid in mids {
+            if !self.active(mid) {
+                continue;
+            }
+            let size = match hypo {
+                Some((m, s)) if m == mid => s,
+                _ => a.positions.get(&mid).map(|p| p.size).unwrap_or(0),
+            };
+            let m = &self.markets[&mid];
+            buffer += div_ceil((size as i128).abs() * (m.oracle.index as i128) * Self::backstop_buffer_ppm(&m.p), PPM);
+        }
+        (mr.max((self.g.backstop_floor as i128) * N_PER_USDC), buffer)
+    }
+
+    /// SPEC 6.5: the level under which the backstop is stopped: `max(floor, MR) + buffer` (notional units).
+    pub fn backstop_stop_level(&self) -> i128 {
+        let (base, buffer) = self.backstop_levels(None);
+        base + buffer
+    }
+
+    /// Size the backstop may take from a closing account (direction `closer_buys`) at `price` (SPEC 6.3 step 3 and
+    /// 6.5): within its position limit, and only as much as leaves its index-valued equity at or above
+    /// `max(floor, MR after) + 2 x buffer after`: twice the buffer, so that what it takes survives one worst block
+    /// without being stopped. The part that only REDUCES a position it already holds is always taken (it lowers
+    /// its risk). Sized, not all-or-nothing: the largest multiple of the market's step that satisfies the rule.
+    fn backstop_room(&self, mid: u32, closer_buys: bool, r: u64, _mark: u64, price: u64) -> u64 {
         let bs = self.pos_size(ACCT_BACKSTOP, mid);
         let limit = ((self.markets[&mid].p.oi_cap as u128) * (self.g.g.backstop_oi_ppm as u128) / 1_000_000) as i128;
         let dir: i128 = if closer_buys { -1 } else { 1 };
         let same = dir * bs as i128;
         let room = (limit - same.max(0)).max(0) + (-same).max(0);
-        let q = (r as i128).min(room) as u64;
-        if q == 0 {
+        let q_max = (r as i128).min(room) as u64;
+        if q_max == 0 {
             return 0;
         }
-        let d = (dir * q as i128) as i64;
-        let e_after = self.equity(ACCT_BACKSTOP) + (d as i128) * (mark as i128 - price as i128);
-        let (_, mr_after) = self.account_req(ACCT_BACKSTOP, Some((mid, bs + d, None)));
-        // SPEC 6.5 (0.2.5): and only while its equity after stays at or above its floor (loss budget not used up)
-        if e_after >= mr_after && e_after >= (self.g.backstop_floor as i128) * N_PER_USDC {
-            q
+        let reduce = (q_max as i128).min((-same).max(0)) as u64;
+        if self.accounts[ACCT_BACKSTOP as usize].balance <= 0 {
+            return reduce;
+        }
+        let index = self.markets[&mid].oracle.index as i128;
+        let e_now = self.backstop_equity();
+        let fits = |q: u64| -> bool {
+            let d = (dir * q as i128) as i64;
+            let e_after = e_now + (d as i128) * (index - price as i128);
+            let (base, buffer) = self.backstop_levels(Some((mid, bs + d)));
+            e_after >= base + 2 * buffer
+        };
+        if fits(q_max) {
+            return q_max;
+        }
+        // the largest step multiple above the reducing part that fits (the rule only tightens as q grows: each
+        // unit adds more buffer and maintenance than the price bound can give back)
+        let step = self.markets[&mid].p.step;
+        let (mut lo, mut hi) = (0u64, (q_max - reduce) / step); // lo fits (or is the reducing part alone)
+        if hi > 0 && fits(reduce + hi * step) {
+            return reduce + hi * step;
+        }
+        while hi - lo > 1 {
+            let k = lo + (hi - lo) / 2;
+            if fits(reduce + k * step) {
+                lo = k;
+            } else {
+                hi = k;
+            }
+        }
+        let q = reduce + lo * step;
+        if q > reduce && !fits(q) {
+            reduce
         } else {
-            0
+            q
         }
     }
 
@@ -1653,26 +1732,21 @@ impl Engine {
         any
     }
 
-    /// The backstop's stop level in notional units (SPEC 6.5): the larger of its equity floor and its own
-    /// maintenance requirement.
-    pub fn backstop_stop_level(&self) -> i128 {
-        let (_, mr) = self.account_req(ACCT_BACKSTOP, None);
-        mr.max((self.g.backstop_floor as i128) * N_PER_USDC)
-    }
-
-    /// SPEC 6.5 (R436-5's residue, 0.2.5): the loss cap of the backstop. `BACKSTOP` has no key and was never
-    /// liquidated, so a position it took could lose without bound (436's fuzz: -80,283 USDC with the insurance
-    /// fund empty). Now, in every pass of step 9 after the users' liquidations: if it holds a position in an ACTIVE
-    /// market and its equity at the mark is below its stop level, every such position is closed at once: through
-    /// the book at the mark or better for the backstop (orders of this block skipped, as for any liquidation), the
-    /// rest against the opposite positions in ADL order AT THE MARK (the counterparties realise their result at
-    /// the mark: nothing is taken from them but the position). Positions in halted markets wait (no price).
+    /// SPEC 6.5 (R436-5's residue; 0.2.6 replaces the rule of 0.2.5). `BACKSTOP` has no key and was never
+    /// liquidated, so a position it took could lose without bound (436's fuzz on 5106fea: -80,283 USDC with the
+    /// insurance fund empty). In every pass of step 9, after the users' liquidations: if it holds a position in an
+    /// ACTIVE market and its index-valued equity is under its stop level, every such position is closed at once AT
+    /// THE INDEX: through the book at the index or better for the backstop (orders of this block skipped, as for
+    /// any liquidation), the rest against the opposite positions in ADL order at the index. Trigger and price are
+    /// the oracle's, not the mark's: nobody moves them with an order (0.2.5 used the mark for both: two accounts
+    /// could push the mark by `markBandBps`, trip the stop and buy the inventory at the pushed price). Positions
+    /// in halted markets wait (no price the oracle rules stand behind).
     fn backstop_stop(&mut self) -> bool {
         let mids: Vec<u32> = self.accounts[ACCT_BACKSTOP as usize].positions.keys().copied().filter(|m| self.active(*m)).collect();
         if mids.is_empty() {
             return false;
         }
-        let e = self.equity(ACCT_BACKSTOP);
+        let e = self.backstop_equity();
         let stop = self.backstop_stop_level();
         if e >= stop {
             return false;
@@ -1684,13 +1758,13 @@ impl Engine {
                 continue;
             }
             let is_buy = s < 0;
-            let mark = self.markets[&mid].mark;
+            let index = self.markets[&mid].oracle.index;
             let oid = self.next_order_id;
             self.next_order_id += 1;
-            self.take(ACCT_BACKSTOP, mid, is_buy, mark, abs64(s), true, Mode::Liquidation, oid);
+            self.take(ACCT_BACKSTOP, mid, is_buy, index, abs64(s), true, Mode::Liquidation, oid);
             let r = abs64(self.pos_size(ACCT_BACKSTOP, mid));
             if r > 0 {
-                self.adl(ACCT_BACKSTOP, mid, mark, r, is_buy, 0);
+                self.adl(ACCT_BACKSTOP, mid, index, r, is_buy, 0);
             }
         }
         true

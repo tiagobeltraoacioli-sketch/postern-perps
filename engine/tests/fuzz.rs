@@ -14,9 +14,11 @@
 //!   end of the run) an engine restored from a mid-run snapshot replays the rest of the log to the same roots and
 //!   log hashes;
 //! - P-5 replay through the codec also reproduces every log hash and every per-input outcome.
-//! - P-6 (SPEC 6.5, 0.2.5) the backstop's loss cap: after a block whose step 9 ran to completion the backstop holds
-//!   no position in an active market unless its equity is at or above its stop level (its floor from the genesis
-//!   numbers and its own maintenance requirement, both recomputed here).
+//! - P-6 (SPEC 6.5) the backstop's loss cap: after a block whose step 9 ran to completion the backstop holds no
+//!   position in an active market unless its index-valued equity is at or above its stop level (floor from the
+//!   genesis numbers, its own maintenance requirement and the buffer, all recomputed here).
+//! - P-7 (SPEC 6.5, 0.2.6) the floor HOLDS on the active path: with every market active at the end of the previous
+//!   block the backstop's equity does not fall below min(its previous equity, the floor).
 use k256::ecdsa::SigningKey;
 use postern_perps_engine::codec::{decode_inputs, encode_inputs};
 use postern_perps_engine::testkit::*;
@@ -73,6 +75,9 @@ struct Sim {
     outcomes: Vec<Vec<Result<(), Error>>>,
     /// P-4: a snapshot taken in the middle of the run (height, bytes).
     mid_snapshot: Option<(u64, Vec<u8>)>,
+    /// P-7: the backstop's index-valued equity at the end of the previous block and whether the active-path
+    /// condition held there.
+    backstop_prev: Option<(i128, bool)>,
 }
 
 /// P-3: maintenance requirement of one position from the genesis tiers (SPEC 6.2), written independently of
@@ -169,19 +174,48 @@ fn round2_properties(sim: &mut Sim, b: &Block, out: &BlockOutcome) {
     if !complete {
         *sim.stats.entry("p3:pass-bound-hit".into()).or_default() += 1;
     }
-    // ---- P-6
+    // ---- P-6 and P-7 (SPEC 6.5), recomputed here from the genesis numbers and the raw state
     {
         let bs = &e.accounts[2];
         let active = |m: &u32| e.markets[m].oracle.status == postern_perps_engine::oracle::Status::Active && e.markets[m].mark > 0;
         let budget = e.g.g.backstop_loss_budget_ppm.unwrap_or(1_000_000) as i128;
         let floor = (e.g.g.launch_backstop_min as i128 * (1_000_000 - budget) + 999_999) / 1_000_000 * 10_000_000_000;
         let mr: i128 = bs.positions.iter().map(|(m, p)| mmr_independent((p.size as i128).abs() * e.markets[m].mark as i128, &e.markets[m].p.tiers)).sum();
-        if bs.positions.keys().any(active) && e.equity(2) < mr.max(floor) {
-            assert!(!complete, "P-6: BACKSTOP holds a position in an active market with equity {} below its stop level {} at the end of height {h}", e.equity(2), mr.max(floor));
+        // index-valued equity and buffer (jump + mark band + half the tier-0 maintenance + one capped funding)
+        let mut eq = bs.balance * 10_000_000_000;
+        let mut buffer: i128 = 0;
+        for (m, p) in &bs.positions {
+            let mk = &e.markets[m];
+            let price = if active(m) { mk.oracle.index } else { mk.mark } as i128;
+            eq += p.size as i128 * price - p.open_notional;
+            if active(m) {
+                let ppm = mk.p.oracle.jump_bps as i128 * 100 + mk.p.mark_band_bps as i128 * 100 + (mk.p.tiers[0].mmf_ppm as i128 + 1) / 2 + (mk.p.max_funding_rate as i128 + 999) / 1000;
+                buffer += ((p.size as i128).abs() * mk.oracle.index as i128 * ppm + 999_999) / 1_000_000;
+            }
+        }
+        let level = mr.max(floor) + buffer;
+        let holds_active = bs.positions.keys().any(active);
+        if holds_active && eq < level {
+            assert!(!complete, "P-6: BACKSTOP holds a position in an active market with equity {eq} below its stop level {level} at the end of height {h}");
             *sim.stats.entry("p6:carried-to-next-block".into()).or_default() += 1;
         }
-        if bs.positions.keys().any(|m| !active(m)) && e.equity(2) < mr.max(floor) {
-            *sim.stats.entry("p6:waiting-in-a-halted-market".into()).or_default() += 1;
+        let holds_halted = bs.positions.keys().any(|m| !active(m));
+        if holds_halted {
+            *sim.stats.entry("p6:position-in-a-halted-market".into()).or_default() += 1;
+        }
+        // P-7: on the active path the floor HOLDS. If every market was active at the end of the previous block and
+        // the backstop held and holds nothing in a halted market, and both blocks completed step 9, its equity is
+        // not below min(its equity one block earlier, the floor), up to rounding (100 USDC units).
+        let all_active_now = e.markets.keys().all(|m| active(m));
+        if let Some((prev_eq, prev_ok)) = sim.backstop_prev {
+            if prev_ok && complete && !holds_halted {
+                assert!(eq >= prev_eq.min(floor) - 100 * 10_000_000_000, "P-7: BACKSTOP equity {eq} fell below min(previous {prev_eq}, floor {floor}) on the active path at height {h}");
+                *sim.stats.entry("p7:checked".into()).or_default() += 1;
+            }
+        }
+        sim.backstop_prev = Some((eq, all_active_now && complete && !holds_halted));
+        if eq < floor {
+            *sim.stats.entry("backstop:below-floor".into()).or_default() += 1;
         }
     }
     // R430-1 / R436-5: the backstop's state is visible in the statistics
@@ -241,7 +275,7 @@ impl Sim {
         m2.max_size = 100_000_000_000;
         m2.oi_cap = 2_000_000_000_000;
         let e = Engine::new(genesis(5, vec![market(1, "BTC-USD"), m2]));
-        Sim { e, ok: oracle_keys(5), keys: (0..TRADERS as u32).map(|i| key(100 + i)).collect(), t: T0, h: 0, dep: 0, px: [0, 6_725_000_000_000, 348_000_000_000], pending: vec![], deposits: vec![], nonce: 0, log: vec![], roots: vec![], stats: Default::default(), ledger_deposits: 0, ledger_withdrawn: 0, log_hashes: vec![], outcomes: vec![], mid_snapshot: None }
+        Sim { e, ok: oracle_keys(5), keys: (0..TRADERS as u32).map(|i| key(100 + i)).collect(), t: T0, h: 0, dep: 0, px: [0, 6_725_000_000_000, 348_000_000_000], pending: vec![], deposits: vec![], nonce: 0, log: vec![], roots: vec![], stats: Default::default(), ledger_deposits: 0, ledger_withdrawn: 0, log_hashes: vec![], outcomes: vec![], mid_snapshot: None, backstop_prev: None }
     }
     fn next_nonce(&mut self) -> u64 {
         self.nonce += 1;

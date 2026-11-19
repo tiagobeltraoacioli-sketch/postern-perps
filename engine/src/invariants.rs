@@ -116,8 +116,8 @@ pub fn check(e: &Engine) -> Result<(), String> {
     if e.last_passes.1 {
         let b = &e.accounts[crate::engine::ACCT_BACKSTOP as usize];
         let in_active = b.positions.keys().any(|m| e.markets[m].oracle.status == crate::oracle::Status::Active && e.markets[m].mark > 0);
-        if in_active && e.equity(crate::engine::ACCT_BACKSTOP) < e.backstop_stop_level() {
-            return Err(format!("I-6: BACKSTOP holds a position in an active market with equity {} below its stop level {}", e.equity(crate::engine::ACCT_BACKSTOP), e.backstop_stop_level()));
+        if in_active && e.backstop_equity() < e.backstop_stop_level() {
+            return Err(format!("I-6: BACKSTOP holds a position in an active market with index-valued equity {} below its stop level {}", e.backstop_equity(), e.backstop_stop_level()));
         }
     }
     // the same for users: bad debt of a flat account is paid by the insurance fund as far as it goes

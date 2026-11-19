@@ -66,16 +66,16 @@ fn r395_22_withdraw_to_the_vault_or_a_keyless_address_is_refused() {
 }
 
 /// R430-1 (found in round 2 while specifying R395-17; the same state as 436's R436-5). The backstop takes a
-/// liquidated long and the price keeps falling: it realises a loss larger than its balance. On f0e3967
-/// `invariants::check` then failed ("system account 2 negative"): the assertion was false for a reachable state.
-/// Fixed rule (SPEC 8, 0.2): BACKSTOP's negative balance is recorded bad debt, paid by INSURANCE first;
-/// PROTOCOL_FEE and INSURANCE still never go negative.
-/// Restated at SPEC 0.2.5 (loss cap, SPEC 6.5): the backstop no longer carries the position down for ten rounds
-/// until a forced close of the short realises a 2,000 USDC loss; it is STOPPED in the first round that puts its
-/// equity below its stop level and closed against the short at the mark, so the debt is one round's move (about
-/// 110 USDC on a 100 USDC seed), not ten. Kept from the old test: the negative balance is reported as BadDebt in
-/// every block, INSURANCE never goes below zero, and it pays the debt exactly once it is funded. (On f0e3967 the
-/// rig's invariant check still panics in this test, at the forced close.)
+/// liquidated long and loses more on it than its balance. On f0e3967 `invariants::check` then failed ("system
+/// account 2 negative"): the assertion was false for a reachable state. Fixed rule (SPEC 8, 0.2): BACKSTOP's
+/// negative balance is recorded bad debt, paid by INSURANCE first; PROTOCOL_FEE and INSURANCE never go negative.
+/// Restated at SPEC 0.2.6 (loss cap, SPEC 6.5): while its market is ACTIVE the backstop can no longer lose more
+/// than it has (that is `r436_5_...` below), so the loss beyond its balance is now produced the only way left: a
+/// GAP. The oracle goes dark, the market halts, and it resumes 30% lower in one round. On f0e3967 the backstop
+/// holds the whole 0.1 BTC and the forced close of the short then makes the rig's invariant check panic, as in the
+/// original test; on the fixed engine the stop closes the backstop at the resumed index in the block of the
+/// resume. Kept: the negative balance is reported as BadDebt in every block, INSURANCE never goes below zero and
+/// pays the debt exactly once it is funded.
 #[test]
 fn r430_1_backstop_loss_beyond_its_balance_is_bad_debt_paid_by_insurance() {
     let mut r = Rig::one();
@@ -95,14 +95,14 @@ fn r430_1_backstop_loss_beyond_its_balance_is_bad_debt_paid_by_insurance() {
         }
     }
     assert!(liquidated);
-    assert_eq!(r.size(ACCT_BACKSTOP, 1), 10_000_000, "the backstop took a's long");
-    for _ in 0..10 {
-        p = tick(p * 96 / 100);
-        r.block(3000, &[(1, p)], vec![]);
-    }
-    assert!(r.e.equity(ACCT_BACKSTOP) < 0, "the backstop lost more than its seed");
-    // b exits by the forced path (on f0e3967 the backstop was its ADL counterparty here and the rig's invariant
-    // check panicked; since 0.2.5 b's short was already closed by the backstop's stop)
+    assert!(r.size(ACCT_BACKSTOP, 1) > 0, "the backstop took (part of) a's long");
+    // the oracle goes dark (stale halt), then one round 30% lower resumes the market (confirmRounds 1)
+    r.block(11_000, &[], vec![]);
+    p = tick(p * 70 / 100);
+    r.block(3000, &[(1, p)], vec![]);
+    assert!(r.e.equity(ACCT_BACKSTOP) < 0, "the gap cost the backstop more than its seed");
+    // b exits by the forced path (on f0e3967 the backstop is its ADL counterparty here and the rig's invariant
+    // check panics; on the fixed engine the stop already closed the backstop against b at the resumed index)
     let f = r.forced(b, FORCED_CLOSE, 0);
     let out = r.block(3000, &[(1, p)], vec![f]);
     assert!(out.events.iter().any(|e| matches!(e, Event::ForcedServed { index: 0 })));
@@ -120,11 +120,11 @@ fn r430_1_backstop_loss_beyond_its_balance_is_bad_debt_paid_by_insurance() {
 }
 
 /// R436-5's residue (Low, open at 5106fea; 436's fuzz: BACKSTOP at -80,283 USDC with INSURANCE empty): no cap on
-/// the loss of a position the backstop holds. The same scenario as above: after ten 4% falls the backstop, seeded
-/// with 100 USDC and long 0.1 BTC, stood at about -2,000 USDC on 5106fea and still held the position. Fixed (SPEC
-/// 6.5): it is stopped in the first block that puts its equity below its stop level, closed against the opposite
-/// position AT THE MARK (an ADL fill the counterparty sees), and what it can lose beyond the stop is one block's
-/// move on its inventory.
+/// the loss of a position the backstop holds. A backstop seeded with 100 USDC took 0.1 BTC (6,000 USD) from a
+/// liquidation and, after ten 4% falls with the market ACTIVE the whole time, stood at about -2,000 USDC on 5106fea,
+/// still holding the position. Fixed (SPEC 6.5): it takes only what its equity can carry through one worst block,
+/// it is stopped at the INDEX before its equity reaches the floor, and so, while the market is active, it never
+/// holds a position under water and its funds never go below the floor (0 here).
 #[test]
 fn r436_5_the_backstop_loss_is_capped_by_a_stop_at_the_mark() {
     let mut r = Rig::one();
@@ -141,24 +141,24 @@ fn r436_5_the_backstop_loss_is_capped_by_a_stop_at_the_mark() {
             break;
         }
     }
-    assert_eq!(r.size(ACCT_BACKSTOP, 1), 10_000_000, "the backstop took a's long");
-    let one_step = (10_000_000i128 * (p as i128) * 4 / 100) / 10_000_000_000; // 4% of its inventory at this price, USDC units
-    let mut closed_at = None;
+    assert!(r.size(ACCT_BACKSTOP, 1) > 0, "the backstop took (part of) a's long");
+    let mut closed = false;
     for _ in 0..10 {
         p = tick(p * 96 / 100);
         let out = r.block(3000, &[(1, p)], vec![]);
-        if let Some(x) = out.events.iter().find_map(|e| match e { Event::Fill { taker: ACCT_BACKSTOP, maker, price, size, .. } => Some((*maker, *price, *size)), _ => None }) {
-            assert!(closed_at.is_none());
-            assert_eq!(x, (r.ai(&b), p, 10_000_000), "closed against the short, whole size, at the mark");
-            closed_at = Some(p);
+        for e in &out.events {
+            if let Event::Fill { taker: ACCT_BACKSTOP, price, .. } = e {
+                assert_eq!(*price, p, "the backstop is closed at the index");
+                closed = true;
+            }
         }
-        // the cap, in every block: the backstop never holds a position while its equity is negative
+        // the cap, in every block: never a position under water, never funds below the floor (0)
         assert!(r.size(ACCT_BACKSTOP, 1) == 0 || r.e.equity(ACCT_BACKSTOP) >= 0, "under water with a position at {p}");
+        assert!(r.e.accounts[ACCT_BACKSTOP as usize].balance >= 0, "balance below the floor at {p}");
     }
-    assert!(closed_at.is_some(), "the backstop was stopped");
+    assert!(closed, "the backstop was stopped");
     assert_eq!(r.size(ACCT_BACKSTOP, 1), 0);
-    let bal = r.e.accounts[ACCT_BACKSTOP as usize].balance + r.e.accounts[ACCT_INSURANCE as usize].balance;
-    assert!(bal > -one_step, "the loss beyond its funds is at most one block's move on its inventory ({one_step}): {bal}");
+    assert!(r.e.equity(ACCT_BACKSTOP) >= 0, "it ends with what it did not lose: {}", r.e.equity(ACCT_BACKSTOP));
 }
 
 /// R430-2 (found in round 2 while running 394's `max-values` vector through the engine). A committee round whose

@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: engine specification (`docs/SPEC.md`)
 
-**UNAUDITED PROTOTYPE. Version 0.2.5, 2026-11-19. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
+**UNAUDITED PROTOTYPE. Version 0.2.6, 2026-11-19. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
 here is deployed.
 The perpetuals are not to be deployed before an external audit and a legal review.
 
@@ -445,57 +445,90 @@ and `INSURANCE` hold no positions and are never candidates. Within section 1's b
 fits i128. Tests `r395_17_adl_score_rule`, `r395_17_adl_ranks_non_positive_equity_last`. Not proven: that this
 ranking is fair in any stronger sense than "most profitable and most leveraged first".
 
-### 6.5 The backstop's loss cap (0.2.5; closes the residue of R436-5 and O-9)
+### 6.5 The backstop's loss cap (0.2.6; replaces the rule of 0.2.5; closes the residue of R436-5 and O-9)
 
 Until 0.2.4 a position the backstop had taken could lose without bound: `BACKSTOP` has no key, was never
 liquidated, and R395-14's rule reduced its inventory only when a liquidation happened to come from the other side
-(review 436's fuzz on `5106fea`: balance -80,283 USDC with the insurance fund empty, seed 1001078 block 451; here
-`r436_5_the_backstop_loss_is_capped_by_a_stop_at_the_mark`: about -2,000 USDC on a 100 USDC seed; fails on
-`5106fea`).
+(review 436's fuzz on `5106fea`: balance -80,283 USDC with the insurance fund empty, seed 1001078 block 451).
+0.2.5 (`2843285`, never merged) stopped it when its equity AT THE MARK fell under max(floor, own maintenance) and
+closed it AT THE MARK. Measured, that already cut the worst deficit about fortyfold (table below), but it had two
+defects, both fixed here: (a) the level was reached only AFTER the loss, so the stop could close it with a negative
+balance (4 of 29 stops in the 400-seed run); (b) trigger and price were the mark, which two accounts can push by
+`markBandBps` with a trade between themselves: they could trip the stop and buy the inventory in their own bid
+under the index (test `mark_manipulation_neither_triggers_the_stop_nor_buys_the_inventory_cheap`, fails on
+`2843285`).
 
 - Floor. `backstopFloor = ceil(launchBackstopMin * (10^6 - backstopLossBudgetPpm) / 10^6)` USDC units, from two
   genesis numbers (section 10): the backstop's seed and the part of it the owner allows it to lose. Rounded UP
-  (toward stopping earlier). `backstopLossBudgetPpm` absent = `10^6`: floor 0. Decided (technical): the floor is
-  a genesis constant and not a fraction of the deposits actually received, which the coordinator's direction
-  suggested: a running total of the backstop's deposits would be a new piece of state (a new `auxHash` input and
-  a new snapshot format version) for no gain in safety, while `launchBackstopMin` is already the amount the launch
-  gate (S-4.11) requires the backstop to hold before any order is accepted. Deposits above the seed are extra
-  margin above the same floor.
-- Stop level. `stop = max(backstopFloor * 10^10, MR_BACKSTOP)` in notional units: the floor, and never less than
-  the backstop's own maintenance requirement (so a cap exists even with floor 0).
-- Rule 1, takeover (6.3 step 3): the backstop takes a remainder only if its equity AFTER the takeover is `>=` its
-  maintenance requirement after it AND `>= backstopFloor * 10^10` (besides a positive balance and the position
-  limit). Once its equity is under the floor it takes nothing: the remainder goes to ADL (6.4) at the bound of 6.3,
-  exactly as when it has no room.
-- Rule 2, stop (3.3 step 9, in every pass, after the users' liquidations): if the backstop holds a position in an
-  ACTIVE market and `E_BACKSTOP < stop` at the mark, EVERY position it holds in an active market is closed in that
-  pass, in ascending market id: reduce-only through the book at the mark or better for the backstop (limit = the
-  mark; never an order of the same block, as for any liquidation; makers under S-4.9.1; no taker fee), the rest
-  against the opposite positions in ADL order (6.4) AT THE MARK. A position in a halted market waits (no price the
-  oracle rules stand behind) for the resume or X3.
+  (toward stopping earlier). `backstopLossBudgetPpm` absent = `10^6`: floor 0. Decided (technical): a genesis
+  constant, not a fraction of the deposits actually received (the coordinator's first direction): a running total
+  of deposits would be new state (a new `auxHash` input and a new snapshot format version) for no gain in safety,
+  and `launchBackstopMin` is already what the launch gate (S-4.11) requires the backstop to hold.
+- Index-valued equity. `E*_BACKSTOP = balance * 10^10 + sum of (size * price - openNotional)` with `price` = the
+  INDEX for a position in an active market and the mark for one in a halted market. Every rule below uses `E*`:
+  the index is the oracle's price and no order moves it.
+- Buffer. Per market, in ppm of notional: `bufferPpm = jumpBps * 100 + markBandBps * 100 + ceil(mmf_0 / 2) +
+  ceil(maxFundingRate / 1000)`: what ONE block can cost a position while its market stays active (the largest
+  index move of an accepted round, the distance of the mark from the index, the liquidation price bound at which
+  it may be deleveraged, one funding payment at the cap). `buffer = sum over the backstop's positions in active
+  markets of ceil(|size| * index * bufferPpm / 10^6)`.
+- Rule 1, sized takeover (6.3 step 3). Of a liquidation remainder the backstop takes the LARGEST multiple of the
+  market's step, within its position limit, that leaves `E* after >= max(backstopFloor * 10^10, MR after) + 2 *
+  buffer after` (twice the buffer: what it takes survives one worst block without being stopped); the part that
+  only reduces a position it already holds is always taken. What it does not take goes to ADL (6.4) at the bound
+  of 6.3, exactly as when it has no room. (Until 0.2.5: all or nothing against its maintenance requirement.)
+- Rule 2, stop (3.3 step 9, every pass, after the users' liquidations). If the backstop holds a position in an
+  ACTIVE market and `E* < max(backstopFloor * 10^10, MR) + buffer`, EVERY position it holds in an active market
+  is closed in that pass, in ascending market id, AT THE INDEX: reduce-only through the book at the index or
+  better for the backstop (never an order of the same block, as for any liquidation; makers under S-4.9.1; no
+  taker fee), the rest against the opposite positions in ADL order (6.4) at the index. A position in a halted
+  market waits for the resume or X3.
 - What users see: event `BackstopStopped { equity, stop }` (USDC units; equity rounded down, stop up), then `Fill`
   events with `taker = BACKSTOP` (index 2): kind `Liquidation` for the book part, kind `Adl` naming each
-  deleveraged account. A deleveraged counterparty is closed at the mark: it realises exactly its result at the
-  mark (rounded per S-0.3) and loses only the position; nothing is taken from it to pay for the backstop. This
-  replaces a loss that was silent (an unrealised deficit in a keyless account, visible only as a haircut of the
-  escape values) by an event at a fair price.
-- Invariant I-6 (in `invariants::check`, in the property suite as P-6, and asked of 436's fuzzer): after every
-  block whose step 9 ran to completion, the backstop holds no position in an active market unless
-  `E_BACKSTOP >= stop`.
-- Stated bound. The stop acts at the end of the block in which the level is crossed, so the backstop's equity can
-  be under the floor by at most what ONE block's mark move costs on the inventory it held: at most
-  `sum over markets of |position| * |mark change of that block|`, with `|position| <= oiCap * backstopOiPpm / 10^6`.
-  While a market is active the index moves at most `jumpBps` per accepted round; a market that resumes from a
-  halt by confirmation has no bound on that one move (the gap risk every account carries, section 12), and a
-  position in a halted market is not stopped until the market resumes or settles. Below the floor nothing more is
-  taken (rule 1), so the loss does not continue. What remains negative after the close is bad debt (section 8):
-  paid by `INSURANCE` in the same block as far as it goes, reported as `BadDebt` otherwise.
-- Escape values (section 11) need no change: the stop closes at the mark, the price the escape values already use,
-  so `sum(escapeValue)` is the same before and after a stop up to rounding, and the bound of section 11 holds
-  (checked after every block; test `budget_used_up_then_liquidations_skip_the_backstop_and_go_to_adl` checks the
-  sum against custody with the backstop at its floor).
+  deleveraged account. A deleveraged counterparty is closed at the INDEX: against the mark that is at most
+  `markBandBps` either way, and nothing is taken from it to pay for the backstop.
+- Guarantee on the active path (I-7, property P-7). If every market was active at the end of the previous block,
+  the backstop's `E*` at the end of a block is not below `min(E* one block earlier, backstopFloor)` (up to
+  rounding): the floor HOLDS, and a backstop already under it (after a gap, below) loses nothing more. Argument:
+  a backstop that was not stopped had `E* >= max(floor, MR) + buffer`; one block moves the index by at most
+  `jumpBps` on what it holds, a reduction by ADL happens within the mark band plus `mmf_0 / 2` of the index, one
+  funding payment is at most the cap, and what it takes in the block must leave twice the buffer: the sum is
+  within the buffer, and the stop then closes at the index, which costs nothing against `E*`.
+- Invariant I-6 (property P-6): after every block whose step 9 ran to completion the backstop holds no position
+  in an active market unless `E* >= max(floor, MR) + buffer`.
+- The bound that holds through a GAP, and what absorbs the rest. A market that halts and resumes (or settles by
+  X3) can move by any amount in one step; the buffer does not cover that, and a position in a halted market is
+  not stopped. What holds: (1) the backstop's inventory in a market is at most `oiCap * backstopOiPpm / 10^6`, and
+  by rule 1 at most what `2 * buffer` allows above the floor: with one market, notional `<= (E* - floor) / (2 *
+  bufferPpm / 10^6)` at takeover; (2) therefore a gap of `g` (as a fraction of the index, beyond the buffer) costs
+  it at most `g * notional`, i.e. it falls under the floor by at most `(g / (2 * bufferPpm / 10^6) - 1/2) * (E* -
+  floor)`: with the test market's buffer of 6.05%, a 20% gap costs at most about 1.15 times its budget above the
+  floor, never a multiple of the fund as before; (3) on resume the stop closes it at the new index in that block;
+  (4) the loss beyond its balance is bad debt (section 8): paid by `INSURANCE` in the same block as far as the
+  fund goes; the rest stays a recorded negative balance of `BACKSTOP` (`BadDebt` event every block), is charged
+  to `INSURANCE` in the escape values (section 11) and, beyond that, is the pro-rata haircut of the vault's escape:
+  it is borne by users only in an escape and only for the part no fund covers. Nothing else absorbs it: there is
+  no fee or levy on users for it in normal operation.
+- Escape values (section 11) need no change: the sum is the same before and after a stop up to the difference
+  between index and mark (at most `markBandBps` of the closed notional, a transfer between the backstop and the
+  counterparties) and the bound of section 11 holds (checked after every block; test `sized_takeover_stop_above_
+  the_floor_…` checks the sum against custody with the backstop at its floor).
+- Adversarial reading (R436-1 class). Triggering the stop needs the INDEX to move (the oracle committee, or the
+  sequencer's choice among honest observations, R395-9, a fraction of `agreeBps`), not the book. A triggered stop
+  sells at the index or better: a resting bid gets the inventory at the oracle's price, not below it; a
+  deleveraged account is closed at the index. What a party gains by causing a stop: nothing at the backstop's
+  expense. What it can cause: the backstop out of service earlier (more ADL for later liquidations), by trading
+  so that liquidation remainders reach it while the index moves against it; that costs the trader the
+  liquidated margin. Residual, stated: the sequencer chooses the block in which a resume after a halt lands and
+  so which resting orders exist at that moment; the price is still the committee's.
+- Measured (436's fuzzer, unchanged generator, instrumented copy in 430's scratch; testkit markets; the same
+  seeds on each engine; USDC): see the table in `agents/430-engine-r2.md` and the cross-area log. In short, worst
+  uncovered system deficit and worst backstop equity fall by one to two orders of magnitude against `5106fea`,
+  the loss socialised to deleveraged users (their ADL fills against the end-of-block mark) is not higher.
 - Not solved, stated: a backstop under its floor does nothing until it is funded again (a deposit to `0x…03`);
-  a rule that sells its inventory BEFORE the floor (392's resting unwind orders) is not built.
+  a rule that sells its inventory BEFORE the stop level (392's resting unwind orders) is not built; the buffer
+  makes the backstop carry less than before (a 25,000 USDC backstop with floor 15,000 carries about 80,000 USD of
+  notional in a market with a 6% buffer), so more of a large liquidation goes to ADL.
 
 ## 7. Funding
 
@@ -549,7 +582,7 @@ liquidated, and R395-14's rule reduced its inventory only when a liquidation hap
   and 1000 in total, at most `MAX_AGENTS` agents, and every index kept beside the primary data (address to
   account, agent to owner, account to orders, market to triggers) is exactly what the primary data implies.
 - I-4 every applied action's `(signer, nonce)` is unique over the whole history.
-- I-6 (0.2.5) the backstop's loss cap: 6.5.
+- I-6, I-7 (0.2.6) the backstop's loss cap and its floor on the active path: 6.5.
 - I-5 determinism: the state root is a function of the log only (replay on two machines; `engine replay`).
 
 ## 9. Deposits, withdrawals, fees
@@ -746,8 +779,8 @@ of each side's position it closed, before the S-0.3 conversion; 0 for a side tha
 the `mark` its payments used and the interval's median `premium`. Read-only and public: `account_req(account,
 None) -> (IR, MR)`, `market_req`, `leverage_of`, `bankruptcy_price`, `fill_keeps_maintenance`, `free_collateral`,
 `equity`, and the formulas of `calc`. A node view MUST use these, not a copy of the arithmetic. 0.2.5: event
-`BackstopStopped { equity, stop }` and query `backstop_stop_level()` (6.5); a `Fill` whose taker is account index
-2 is the backstop's stop.
+`BackstopStopped { equity, stop }` and queries `backstop_stop_level()`, `backstop_equity()` (index-valued),
+`backstop_buffer_ppm(market)` (6.5); a `Fill` whose taker is account index 2 is the backstop's stop.
 
 ## 14. Forced requests (from the vault)
 
@@ -956,9 +989,10 @@ deterministic crash sequence and a path-coverage run) checks after EVERY block, 
 - P-5 Replay determinism through the codec: the whole log re-encoded to canonical bytes, decoded (decode then
   encode is the identity) and replayed on a fresh engine gives the same state root, log hash and per-input
   outcomes at every height, and a byte-equal final snapshot.
-- P-6 (0.2.5) The backstop's loss cap, I-6 of 6.5, with the floor and the backstop's maintenance requirement
+- P-6 The backstop's loss cap, I-6 of 6.5, with the floor, the buffer and the backstop's maintenance requirement
   recomputed in the test; the suite reaches a stopped backstop on purpose (a deterministic sequence and a random
   run with a small backstop) and asserts that it never ends a block under water with a position.
+- P-7 (0.2.6) The floor holds on the active path, I-7 of 6.5.
 
 The independent review's fuzzer (436, written from this document only) is a separate check and not a substitute.
 What these properties do not show: anything about states the generator does not reach (the coverage test names
@@ -978,7 +1012,7 @@ the paths it does reach: book fills, liquidations, ADL or backstop, funding, tri
   700770 + vault); 394's README v0.1 says 7007701 without `verifyingContract`: one of the two must change (asked
   in the cross-area log; the engine follows 2.1 until agreed).
 - O-8 `snapshot()/restore()` of section 13: CLOSED in 0.2.1 (section 16).
-- O-9 Backstop loss cap: CLOSED in 0.2.5 (6.5: floor, stop at the mark). Still open under this number: 392's
+- O-9 Backstop loss cap: CLOSED in 0.2.6 (6.5: floor, buffer, sized takeover, stop at the index). Still open under this number: 392's
   proposal of resting unwind orders (reduce-only at mark +/- markBandBps), which would shrink the inventory before
   the stop level is reached.
 - O-10 R395-16 (premium samples from a book the sequencer can quote into): open; the funding cap stays 0.05%/h.
@@ -1004,6 +1038,7 @@ the paths it does reach: book fills, liquidations, ADL or backstop, funding, tri
 | 0.1.4 | 2026-11-17 | 394's exit band (README 6a) used for free collateral during a halt (replaces 0.1.3's x2 rule) and for forced closes in a halt (served at `settle`, never pending); X3 market settlement after `maxHaltMs`; genesis oracle exit fields; `Attestation` and other reserved type names (S-2.3.1) |
 | 0.1.5 | 2026-11-17 | systemHash adds withdrawalCount/withdrawalsTotal, nextForcedIndex = processed (VAULT 5.2; 390's vectors reproduced, new vector in tests/r395b.rs); R395-13 liquidation bound `lp` + no same-block makers; R395-14 backstop rules; R395-16 post-action samples + median; R395-23 insurance-first escape values |
 | 0.1.6 | 2026-11-17 | forced-request input and forcedHead = VAULT.md 0.2 fields (index, account, kind 0/1/2, deadline, arg), close = every market (390's report on 64072cb) |
+| 0.2.6 | 2026-11-19 | 6.5 redesigned after measurement and an adversarial reading of 0.2.5 (`2843285`, not merged): index-valued equity, a per-market buffer, takeover SIZED to leave twice the buffer above max(floor, MR), stop at max(floor, MR) + buffer, executed at the INDEX (0.2.5: trigger and price at the mark, which two accounts could push; test fails on `2843285`); I-7 / P-7: the floor holds on the active path; the bound through a gap and what absorbs the rest stated. No encoding, leaf or snapshot change |
 | 0.2.5 | 2026-11-19 | the backstop's loss cap (new 6.5; closes R436-5's residue and O-9): optional genesis `backstopLossBudgetPpm`, floor = ceil(seed x (1 - budget)); takeover only while equity after stays at or above the floor; stop in step 9 when equity is under max(floor, own maintenance): positions in active markets closed through the book at the mark or better, the rest by ADL at the mark; event `BackstopStopped`; invariant I-6 / property P-6. No encoding, leaf or snapshot change; a log in which the backstop never falls under its stop level keeps its roots |
 | 0.2.4 | 2026-11-19 | R436-12 aligned with the oracle owner's exact rule C2d (only observations outside the block-time window are ignored; a bad signature, a time outside the round or a malformed price list still refuse the whole input; below the quorum `ORACLE_TIME`, round not consumed); 432's `c2d.json` run through `apply_block`. R436-13: limit trigger types 3 and 5 must be GTC. Section 12: gap risk of paired accounts against the insurance fund's size |
 | 0.2.3 | 2026-11-19 | review 436's findings, each with a test that fails on `f0e3967`: R436-1 High (S-4.9.1 maintenance at every fill for makers and reducing takers; S-4.9 backing at placement; S-4.12 price band, error `PRICE_BAND`; forced close never past the bankruptcy price, section 14); R436-10 High (forced close in a halt at the band side worse for the closer; X3 only with a committee price since the halt); R436-4 High, engine half (S-3.2.0: a long agent name fails its input, never the block); R436-12 (S-5.1.2: an observation that fails its own rule is dropped); R436-2 (liquidations skip same-block orders instead of stopping); R436-8 (`impactNotional >= 1`, strict integers in the converter); R436-5 (BACKSTOP's realised loss settled and reported every block). R395-39 restated (orders in halted markets are cancelled before a forced withdrawal is judged). Section 12 states the residuals, 432's R395-9 bound and the escape's data-availability assumption (R436-11). 431's requests: events `Accepted`, `Fill` realised results, `Funding` mark and premium; public requirement queries. BEHAVIOUR CHANGES for clients: `PRICE_BAND`; under-backed orders refused at placement or cancelled when reached; forced-close prices |
@@ -1023,10 +1058,12 @@ in 0.2 were demonstrated by tests that fail on `f0e3967` where the defect was in
 R430-2) and by pins where the code already behaved as now specified (R395-15, R395-17, R395-20, R395-21): a pin
 shows the behaviour, not its failing-first history. 0.2.3: S-4.9.1 is argued (no fill creates a deficit) and tested
 on the paths 436 and this round found, not proven for every path; the exit band's width is not calibrated (432);
-the residuals of section 12 stand. 0.2.5: the cap of 6.5 bounds the backstop's loss to one block's mark move
-past its stop level, which is unbounded for a market that resumes from a halt with a gap and does not act on a
-position in a halted market; I-6 is tested (every fuzz block, and 436's fuzzer seed that reached -80,283 USDC),
-not proven; the loss budget itself is an owner input with no calibration behind it.
+the residuals of section 12 stand. 0.2.6: the cap of 6.5 holds the backstop's floor only while its markets stay
+active; through a halt-and-resume gap its loss is bounded by its (sized) inventory times the gap, not by the
+floor, and a position in a halted market is not stopped; I-6 and I-7 are argued and tested (every fuzz block,
+436's generator on thousands of seeds), not proven; the loss budget and the buffer's ingredients are parameters
+with no calibration behind them; the measurement behind "not worse for deleveraged users" is against the
+end-of-block mark on one generator.
 Snapshots (section 16): the round-trip property is tested, not
 proven; the format has had no external review; a snapshot loaded with no expected root (library only) is bound by
 nothing but its own consistency; `logHash` is outside the state root (S-16.4). UNAUDITED.
