@@ -166,6 +166,22 @@ fn round2_properties(sim: &mut Sim, b: &Block, out: &BlockOutcome) {
     if !complete {
         *sim.stats.entry("p3:pass-bound-hit".into()).or_default() += 1;
     }
+    // R430-1 / R436-5: the backstop's state is visible in the statistics
+    let bs = &e.accounts[2];
+    if !bs.positions.is_empty() {
+        *sim.stats.entry("backstop:holds-position".into()).or_default() += 1;
+        if e.equity(2) < 0 {
+            *sim.stats.entry("backstop:under-water".into()).or_default() += 1;
+        }
+    }
+    if bs.balance < 0 {
+        *sim.stats.entry("backstop:negative-balance".into()).or_default() += 1;
+    }
+    for ev in &out.events {
+        if matches!(ev, Event::BadDebt { account: 2, .. }) {
+            *sim.stats.entry("backstop:bad-debt-event".into()).or_default() += 1;
+        }
+    }
     // ---- P-4
     let snap = e.snapshot();
     let back = Engine::restore(e.g.clone(), &snap, Some(&out.state_root)).unwrap_or_else(|er| panic!("P-4: restore failed at height {h}: {er}"));
@@ -185,6 +201,21 @@ fn round_tick(p: u64, tick: u64) -> u64 {
 
 impl Sim {
     fn new() -> Sim {
+        Sim::seeded(0, 0)
+    }
+    /// As `new`, with INSURANCE and BACKSTOP funded through deposits in the first block (review 436's request with
+    /// R436-5: the generator must reach a backstop that holds positions, loses on them and goes negative).
+    fn seeded(insurance_usdc: u64, backstop_usdc: u64) -> Sim {
+        let mut sim = Sim::unseeded();
+        for (i, usdc) in [(1u32, insurance_usdc), (2, backstop_usdc)] {
+            if usdc > 0 {
+                sim.deposits.push(Input::Deposit { index: sim.dep, account: postern_perps_engine::engine::system_address(i), amount: usdc * 1_000_000 });
+                sim.dep += 1;
+            }
+        }
+        sim
+    }
+    fn unseeded() -> Sim {
         let mut m2 = market(2, "ETH-USD");
         m2.tick = 1_000_000;
         m2.step = 1_000_000;
@@ -387,5 +418,70 @@ fn random_runs_reach_every_path() {
     eprintln!("random coverage: {total:?}");
     for k in ["fill:Book", "Rested", "Triggered", "TriggerStored", "Cancelled", "Withdrawal", "Halt", "Resume", "Funding", "Liquidated", "err:INSUFFICIENT_MARGIN", "err:REDUCE_ONLY", "err:WOULD_CROSS", "err:MARKET_HALTED"] {
         assert!(total.get(k).copied().unwrap_or(0) > 0, "random fuzzer never reached {k}: {total:?}");
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: std::env::var("FUZZ_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(32), max_shrink_iters: 2000, .. ProptestConfig::default() })]
+    /// The same properties with a funded insurance fund and a SMALL backstop, so that liquidation remainders go to
+    /// the backstop and its losses can exceed its balance (R430-1 / R436-5).
+    #[test]
+    fn invariants_and_replay_with_a_small_backstop(ops in prop::collection::vec(op(), 1..250)) {
+        let mut sim = Sim::seeded(300, 400);
+        sim.run(&ops);
+        replay_matches(&sim);
+    }
+}
+
+/// Review 436's request with R436-5 (the state R430-1 fixed): the suite must REACH a backstop that takes positions,
+/// goes under water and ends with a negative balance that is reported and settled. Deterministic: thin books (IOC
+/// only after the positions are open), a fall that liquidates the longs into the backstop, a further fall that
+/// puts the backstop under water, then a rise that liquidates the shorts against it (ADL: the backstop first).
+/// Every block runs every property of this file, `invariants::check` included.
+#[test]
+fn backstop_takes_positions_goes_under_water_and_its_debt_is_reported() {
+    let mut ops = vec![];
+    // open: traders 2..5 (3,000 USDC each) long against traders 0, 1 (50,000 each), then cancel everything resting
+    for i in 0..40u64 {
+        let long = 2 + (i % 4) as usize;
+        let short = (i % 2) as usize;
+        ops.push(Op::Place { who: short, mkt: 1, buy: false, ty: 0, tif: 0, off: 0, steps: 60, ro: false, trig_off: 0 });
+        ops.push(Op::Place { who: long, mkt: 1, buy: true, ty: 1, tif: 1, off: 30, steps: 60, ro: false, trig_off: 0 });
+        if i % 8 == 7 {
+            ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 0 });
+        }
+    }
+    for who in 0..TRADERS {
+        ops.push(Op::CancelAll { who });
+    }
+    ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 0 });
+    // fall, first in 0.5% steps: the longs (about ten times leveraged on 3,000 USDC each) cross their maintenance
+    // requirement with equity still positive, the book is empty, so the backstop takes what its own margin allows
+    // (the rest: ADL); then in 4% steps, which put the backstop far under water
+    for i in 0..34 {
+        ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: if i < 24 { -50 } else { -400 } });
+    }
+    // rise: new shorts are opened low with little margin (800 USDC more on about 0.15 BTC) and the index rises in
+    // 4.2% steps until they are liquidated: the book is empty and the backstop cannot take (under water), so they
+    // are deleveraged, and the backstop, long from the fall, is the first counterparty (R395-14): it realises its
+    // loss, far beyond its 400 USDC
+    for i in 0..24u64 {
+        let short = 2 + (i % 4) as usize;
+        ops.push(Op::Deposit { who: short, amount: 800_000_000 });
+        ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 0 });
+        ops.push(Op::Place { who: (i % 2) as usize, mkt: 1, buy: true, ty: 0, tif: 0, off: 0, steps: 150, ro: false, trig_off: 0 });
+        ops.push(Op::Place { who: short, mkt: 1, buy: false, ty: 1, tif: 1, off: -30, steps: 150, ro: false, trig_off: 0 });
+        ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 0 });
+        ops.push(Op::CancelAll { who: (i % 2) as usize });
+        ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 420 });
+        ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 420 });
+        ops.push(Op::Block { dt: 3000, oracle: true, mv_bps: 420 });
+    }
+    let mut sim = Sim::seeded(50, 400);
+    sim.run(&ops);
+    replay_matches(&sim);
+    eprintln!("backstop sequence stats: {:?}", sim.stats);
+    for k in ["fill:Backstop", "backstop:holds-position", "backstop:under-water", "backstop:negative-balance", "backstop:bad-debt-event", "Liquidated"] {
+        assert!(sim.stats.get(k).copied().unwrap_or(0) > 0, "the sequence never reached {k}: {:?}", sim.stats);
     }
 }

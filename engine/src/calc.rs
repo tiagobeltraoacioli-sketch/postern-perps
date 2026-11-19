@@ -85,15 +85,20 @@ pub fn premium(impact_bid: Option<u64>, impact_ask: Option<u64>, index: u64) -> 
     num * RATE_SCALE / index
 }
 
-/// S-7.2: the interval's funding rate (RATE_SCALE) from its premium samples: the MEDIAN (lower middle), then
-/// `clamp(P + clamp(interest - P, -c, +c), -max, +max)`. `None` when there is no sample (no funding).
-pub fn funding_rate(samples: &[i128], interest: i64, funding_clamp: i64, max_funding_rate: i64) -> Option<i128> {
+/// The lower-middle median of the samples (`None` when empty).
+pub fn median_lower(samples: &[i128]) -> Option<i128> {
     if samples.is_empty() {
         return None;
     }
     let mut s = samples.to_vec();
     s.sort_unstable();
-    let p = s[(s.len() - 1) / 2];
+    Some(s[(s.len() - 1) / 2])
+}
+
+/// S-7.2: the interval's funding rate (RATE_SCALE) from its premium samples: the MEDIAN (lower middle), then
+/// `clamp(P + clamp(interest - P, -c, +c), -max, +max)`. `None` when there is no sample (no funding).
+pub fn funding_rate(samples: &[i128], interest: i64, funding_clamp: i64, max_funding_rate: i64) -> Option<i128> {
+    let p = median_lower(samples)?;
     let (interest, c, maxr) = (interest as i128, funding_clamp as i128, max_funding_rate as i128);
     Some((p + (interest - p).clamp(-c, c)).clamp(-maxr, maxr))
 }

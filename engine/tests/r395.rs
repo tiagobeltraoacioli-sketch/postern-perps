@@ -126,8 +126,14 @@ fn r395_5_halt_never_blocks_free_collateral_withdrawal() {
 }
 
 /// Restated at SPEC 0.1.4 (394's exit band, coordinator 2026-11-17): a forced close during a halt is SERVED at
-/// once, the book inside the exit band, the rest at the settle price; it is no longer left pending. The property
-/// of 0.1.3 (a halt never consumes a forced request without serving it) is kept: it is served, not rejected.
+/// once, the book inside the exit band, the rest against the opposite positions; it is no longer left pending. The
+/// property of 0.1.3 (a halt never consumes a forced request without serving it) is kept: it is served, not
+/// rejected.
+/// Restated again at SPEC 0.2.3 (review 436, R436-10 High; 432's corrected README 6a): the price of that close is
+/// no longer `settle` (the frozen index: a free exit at the pre-halt price for whoever controls the halt) but the
+/// side of the exit band WORSE for the closer (a long at `low`). Kept from the old test: both requests are served
+/// and processed, the position is closed against the opposite position, nothing is rejected. The function keeps
+/// its round-1 name so that the test count and history stay comparable.
 #[test]
 fn r395_5_forced_close_in_a_halt_is_served_at_the_settle_price() {
     let mut r = Rig::new();
@@ -143,18 +149,30 @@ fn r395_5_forced_close_in_a_halt_is_served_at_the_settle_price() {
     assert!(out.events.iter().any(|e| matches!(e, Event::ForcedServed { index: 1 })));
     assert_eq!(r.e.forced_processed, 2);
     let fill = out.events.iter().find_map(|e| match e { Event::Fill { price, kind: engine::FillKind::Adl, .. } => Some(*price), _ => None });
-    assert_eq!(fill, Some(P), "closed against the opposite position at the settle price");
+    let low = r.e.exit_price(1).unwrap().low;
+    assert_eq!(fill, Some(low), "a long closes against the opposite position at the LOW side of the exit band (0.2.3), not at settle");
+    assert!(low < P);
     assert!(r.e.accounts[r.e.by_addr[&a] as usize].positions.is_empty());
 }
 
+/// Restated at SPEC 0.2.3 (R436-10, 432's rule): X3 settles a market halted for `maxHaltMs` only at a price the
+/// committee signed SINCE the halt. Here the halt is a jump (the committee signs 6% higher, which is that price);
+/// after an hour of silence every position settles there. The round-1 form of this test halted by silence alone
+/// and expected a settlement at the frozen pre-halt index: that is exactly the free exit R436-10 describes, and
+/// `r436_10_silence_alone_never_settles_a_market` (tests/r2_r436_failing_first.rs) now pins the opposite. Kept
+/// from the old test: after `maxHaltMs` the market is settled, every position is closed, open interest is zero and
+/// the whole balance is free collateral.
 #[test]
 fn r395_5_a_halt_longer_than_max_halt_settles_the_market() {
     let mut r = Rig::new();
     let (ka, kb) = r.open(10_000);
     let (a, b) = (addr(&ka), addr(&kb));
-    r.block(11_000, None, vec![]);
+    let jump = P * 106 / 100 / 10_000_000 * 10_000_000;
+    r.block(3000, Some(jump), vec![]);
+    assert_eq!(r.e.markets[&1].oracle.status, postern_perps_engine::oracle::Status::Halted(postern_perps_engine::oracle::HaltReason::Jump));
+    assert_eq!(r.e.markets[&1].oracle.index, P, "the index did not move");
     let out = r.block(3_600_000, None, vec![]);
-    assert!(out.events.iter().any(|e| matches!(e, Event::MarketSettled { market: 1, price: P })));
+    assert!(out.events.iter().any(|e| matches!(e, Event::MarketSettled { market: 1, price } if *price == jump)), "{:?}", out.events);
     for x in [a, b] {
         assert!(r.e.accounts[r.e.by_addr[&x] as usize].positions.is_empty());
     }

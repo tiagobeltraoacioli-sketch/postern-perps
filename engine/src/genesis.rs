@@ -293,6 +293,10 @@ impl Genesis {
             if m.mark_band_bps == 0 || m.mark_band_bps > 1000 || m.market_slippage_bps == 0 || m.market_slippage_bps > 5000 {
                 return Err(format!("{}: band/slippage bounds", m.symbol));
             }
+            if m.impact_notional == 0 {
+                // R436-8: the premium sample divides by the size an impactNotional order buys
+                return Err(format!("{}: impactNotional must be at least 1", m.symbol));
+            }
             if m.funding_interval_ms == 0 || m.max_funding_rate <= 0 || m.max_funding_rate > 10_000_000 || m.interest.abs() > m.max_funding_rate || m.funding_clamp < 0 {
                 return Err(format!("{}: funding bounds (S-1.3)", m.symbol));
             }
@@ -342,6 +346,20 @@ fn jint(v: &serde_json::Value, k: &str) -> Result<i64, String> {
     }
 }
 
+/// R436-8: a JSON integer that does not fit the field's type is REFUSED (S-0.4), never narrowed.
+fn jnum<T: TryFrom<i64>>(v: &serde_json::Value, k: &str) -> Result<T, String> {
+    T::try_from(jint(v, k)?).map_err(|_| format!("{k}: out of range"))
+}
+
+/// An OPTIONAL integer: the default only when the key is absent; a present value that does not fit is refused.
+fn jopt<T: TryFrom<i64>>(v: &serde_json::Value, k: &str, default: T) -> Result<T, String> {
+    if v.get(k).is_none_or(|x| x.is_null()) {
+        Ok(default)
+    } else {
+        jnum(v, k)
+    }
+}
+
 fn jstr<'a>(v: &'a serde_json::Value, k: &str) -> Result<&'a str, String> {
     v[k].as_str().ok_or(format!("{k}: string expected"))
 }
@@ -367,21 +385,21 @@ pub fn from_compliance(
     let mut ms = Vec::new();
     for m in markets["markets"].as_array().ok_or("markets[] missing")? {
         let tiers = m["tiers"].as_array().ok_or("tiers missing")?.iter().map(|t| {
-            Ok(Tier { floor: dec_units(jstr(t, "floor")?, UD)?, imf_ppm: jint(t, "imfPpm")? as u32, mmf_ppm: jint(t, "mmfPpm")? as u32 })
+            Ok(Tier { floor: dec_units(jstr(t, "floor")?, UD)?, imf_ppm: jnum::<u32>(t, "imfPpm")?, mmf_ppm: jnum::<u32>(t, "mmfPpm")? })
         }).collect::<Result<Vec<_>, String>>()?;
-        let max_lev = jint(m, "maxLeverage")? as u32;
+        let max_lev = jnum::<u32>(m, "maxLeverage")?;
         let o = &m["oracle"];
         let tick = dec_units(jstr(m, "tick")?, PD)?;
         let step = dec_units(jstr(m, "step")?, SD)?;
         // display decimals must match tick/step precision (SPEC section 1)
         for (k, unit, d) in [("priceDecimals", tick, PD), ("sizeDecimals", step, SD)] {
-            let want = jint(m, k)? as u32;
+            let want = jnum::<u32>(m, k)?;
             if unit % 10u64.pow(d - want.min(d)) != 0 {
                 return Err(format!("{}: {k} {want} finer than the tick/step", jstr(m, "symbol")?));
             }
         }
         ms.push(MarketParams {
-            market_id: jint(m, "marketId")? as u32,
+            market_id: jnum::<u32>(m, "marketId")?,
             symbol: jstr(m, "symbol")?.to_string(),
             tick,
             step,
@@ -390,45 +408,45 @@ pub fn from_compliance(
             oi_cap: dec_units(jstr(m, "oiCap")?, SD)?,
             max_leverage: max_lev,
             // Decided (technical): default leverage = min(10, maxLeverage) unless the file names one.
-            default_leverage: jint(m, "defaultLeverage").map(|x| x as u32).unwrap_or(max_lev.min(10)),
+            default_leverage: jopt::<u32>(m, "defaultLeverage", max_lev.min(10))?,
             tiers,
-            taker_fee_ppm: jint(m, "takerFeePpm")? as u32,
-            maker_fee_ppm: jint(m, "makerFeePpm")? as u32,
-            liquidation_fee_ppm: jint(m, "liquidationFeePpm")? as u32,
-            mark_band_bps: jint(m, "markBandBps")? as u32,
-            market_slippage_bps: jint(m, "marketSlippageBps")? as u32,
+            taker_fee_ppm: jnum::<u32>(m, "takerFeePpm")?,
+            maker_fee_ppm: jnum::<u32>(m, "makerFeePpm")?,
+            liquidation_fee_ppm: jnum::<u32>(m, "liquidationFeePpm")?,
+            mark_band_bps: jnum::<u32>(m, "markBandBps")?,
+            market_slippage_bps: jnum::<u32>(m, "marketSlippageBps")?,
             impact_notional: dec_units(jstr(m, "impactNotional")?, UD)?,
-            funding_interval_ms: jint(m, "fundingIntervalMs")? as u64,
+            funding_interval_ms: jnum::<u64>(m, "fundingIntervalMs")?,
             interest: jint(m, "interest")?,
             funding_clamp: jint(m, "fundingClamp")?,
             max_funding_rate: jint(m, "maxFundingRate")?,
             oracle: OracleParams {
-                min_sources: jint(o, "minSources")? as u8,
-                agree_bps: jint(o, "agreeBps")? as u32,
-                jump_bps: jint(o, "jumpBps")? as u32,
-                max_staleness_ms: jint(o, "maxStalenessMs")? as u64,
-                confirm_rounds: jint(o, "confirmRounds")? as u32,
+                min_sources: jnum::<u8>(o, "minSources")?,
+                agree_bps: jnum::<u32>(o, "agreeBps")?,
+                jump_bps: jnum::<u32>(o, "jumpBps")?,
+                max_staleness_ms: jnum::<u64>(o, "maxStalenessMs")?,
+                confirm_rounds: jnum::<u32>(o, "confirmRounds")?,
                 // 394's README section 8 defaults when the file does not name them
-                exit_haircut_bps: jint(o, "exitHaircutBps").map(|x| x as u32).unwrap_or(jint(o, "jumpBps")? as u32),
-                exit_haircut_per_min_bps: jint(o, "exitHaircutPerMinBps").map(|x| x as u32).unwrap_or(100),
-                exit_max_haircut_bps: jint(o, "exitMaxHaircutBps").map(|x| x as u32).unwrap_or(5000),
-                max_halt_ms: jint(o, "maxHaltMs").map(|x| x as u64).unwrap_or(3_600_000),
+                exit_haircut_bps: jopt::<u32>(o, "exitHaircutBps", jnum::<u32>(o, "jumpBps")?)?,
+                exit_haircut_per_min_bps: jopt::<u32>(o, "exitHaircutPerMinBps", 100)?,
+                exit_max_haircut_bps: jopt::<u32>(o, "exitMaxHaircutBps", 5000)?,
+                max_halt_ms: jopt::<u64>(o, "maxHaltMs", 3_600_000)?,
             },
         });
     }
     let fee_tiers = risk["feeTiers"]["tiers"].as_array().ok_or("feeTiers.tiers missing")?.iter().map(|t| {
-        Ok(FeeTier { min_volume_14d: dec_units(jstr(t, "minVolume14d")?, UD)?, taker_fee_ppm: jint(t, "takerFeePpm")? as u32, maker_fee_ppm: jint(t, "makerFeePpm")? as u32 })
+        Ok(FeeTier { min_volume_14d: dec_units(jstr(t, "minVolume14d")?, UD)?, taker_fee_ppm: jnum::<u32>(t, "takerFeePpm")?, maker_fee_ppm: jnum::<u32>(t, "makerFeePpm")? })
     }).collect::<Result<Vec<_>, String>>()?;
     let ins = jstr(&risk["insuranceFund"], "seedRequired")?;
     Genesis {
         spec_version: "0.1".into(),
-        chain_id: jint(g, "feeRecipientChainId")? as u64,
+        chain_id: jnum::<u64>(g, "feeRecipientChainId")?,
         verifying_contract: verifying_contract.into(),
         fee_recipient: jstr(g, "feeRecipient")?.into(),
         oracle_signers,
         oracle_quorum,
-        oracle_max_future_ms: jint(g, "maxFutureMs")? as u64,
-        oracle_max_age_ms: jint(g, "maxAgeMs")? as u64,
+        oracle_max_future_ms: jnum::<u64>(g, "maxFutureMs")?,
+        oracle_max_age_ms: jnum::<u64>(g, "maxAgeMs")?,
         withdrawal_fee: dec_units(jstr(g, "withdrawalFee")?, UD)?,
         min_fee_sweep: dec_units(jstr(g, "minFeeSweep")?, UD)?,
         fee_tiers,

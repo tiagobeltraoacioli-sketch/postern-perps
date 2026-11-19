@@ -89,7 +89,8 @@ pub fn check(e: &Engine) -> Result<(), String> {
     // 0..3 never negative" was false for a reachable state (test `r430_1_...`): the backstop holds positions, is
     // never liquidated, and realises a loss larger than its balance when ADL / a forced close / X3 closes them.
     // What holds instead, and is checked: a negative backstop balance takes no new position (`backstop_room`), is
-    // counted in the escape deficit (below), and is paid by INSURANCE as bad debt once the backstop is flat.
+    // counted in the escape deficit (below), and is paid by INSURANCE as bad debt in the same block as far as the
+    // fund goes (0.2.3: whether or not the backstop still holds positions; the rest is a BadDebt event every block).
     for i in [crate::engine::ACCT_PROTOCOL_FEE, crate::engine::ACCT_INSURANCE] {
         if e.accounts[i as usize].balance < 0 {
             return Err(format!("system account {i} negative"));
@@ -106,8 +107,8 @@ pub fn check(e: &Engine) -> Result<(), String> {
             return Err("BACKSTOP holds an order".into());
         }
         let ins = e.accounts[crate::engine::ACCT_INSURANCE as usize].balance;
-        if b.balance < 0 && b.positions.is_empty() && ins > 0 {
-            return Err("BACKSTOP flat with a negative balance while INSURANCE holds funds (bad debt not settled)".into());
+        if b.balance < 0 && ins > 0 {
+            return Err("BACKSTOP with a negative balance while INSURANCE holds funds (realised loss not settled)".into());
         }
     }
     // the same for users: bad debt of a flat account is paid by the insurance fund as far as it goes

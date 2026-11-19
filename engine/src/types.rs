@@ -190,6 +190,8 @@ pub enum Error {
     NotLaunched,
     /// S-9.2.1 (R395-22): the vault, the collateral token or a keyless low address as withdrawal recipient.
     BadRecipient,
+    /// S-4.12 (R436-1): a limit price through the mark by more than `marketSlippageBps`.
+    PriceBand,
 }
 
 impl Error {
@@ -231,6 +233,7 @@ impl Error {
             Cancelled => "CANCELLED",
             NotLaunched => "NOT_LAUNCHED",
             BadRecipient => "BAD_RECIPIENT",
+            PriceBand => "PRICE_BAND",
         }
     }
 }

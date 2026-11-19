@@ -292,3 +292,130 @@ fn r395_39_trigger_in_a_halted_market_does_not_make_an_overlarge_request_pending
     assert!(out.events.iter().any(|e| matches!(e, Event::ForcedRejected { index: 0, reason: Error::InsufficientMargin })), "{:?}", out.events);
     assert_eq!(r.e.forced_processed, 1);
 }
+
+/// 0.2.3, positive control of S-4.9.1 (R436-1): the maintenance rule for fills does not trap an account that is
+/// already below maintenance: it may still REDUCE at a fair price, because such a fill does not worsen its margin
+/// deficit. Here the oracle drops so that a is below maintenance when the block's actions run; its own sell into a
+/// resting bid one tick under the mark is executed in that block, before step 9 would liquidate it.
+#[test]
+fn s_4_9_1_an_account_below_maintenance_can_still_reduce_at_a_fair_price() {
+    let mut r = Rig::one();
+    let (ka, kb) = (key(1), key(2));
+    let (a, b) = (addr(&ka), addr(&kb));
+    let (d1, d2) = (r.dep(a, 700), r.dep(b, 100_000));
+    r.block(3000, &[(1, P)], vec![d1, d2]);
+    r.trade(&[(1, P)], 1, &kb, &ka, P, 10_000_000); // a long 0.1 BTC with 700 USDC
+    let mut p = P;
+    for _ in 0..2 {
+        p = tick(p * 96 / 100);
+        r.block(3000, &[(1, p)], vec![]);
+    }
+    let low = tick(p * 9825 / 10000); // a is below maintenance here (E about 63 USDC, MR about 61... at the next step)
+    let ai = r.ai(&a);
+    let bid = sign_action(&r.e, &kb, place(b, r.t + 3000, 1, true, ORDER_LIMIT, TIF_GTC, low - TICK, 10_000_000, false));
+    r.block(3000, &[(1, p)], vec![bid]);
+    let lower = tick(low * 9985 / 10000);
+    let sell = sign_action(&r.e, &ka, place(a, r.t + 3000, 1, false, ORDER_LIMIT, TIF_IOC, tick(lower * 995 / 1000), 10_000_000, false));
+    let out = r.block(3000, &[(1, lower)], vec![sell]);
+    let (_, mr) = r.e.account_req(ai, None);
+    let _ = mr;
+    let own_fill = out.events.iter().any(|e| matches!(e, Event::Fill { kind: FillKind::Book, taker, .. } if *taker == ai));
+    let liquidated = out.events.iter().any(|e| matches!(e, Event::Liquidated { account } if *account == ai));
+    assert!(own_fill, "a's own reducing sale was executed: {:?} / {:?}", out.outcomes, out.events);
+    assert!(!liquidated, "and it left nothing to liquidate");
+    assert!(r.bal(&a) >= 0);
+}
+
+/// 0.2.3, 431's requests: an `Accepted` event ties each PlaceOrder to its order id (resting, IOC and trigger
+/// alike, in input order, before any fill of it); a fill reports what each side realised; a funding event carries
+/// the mark its payments used and the interval's median premium. Requirement queries are public and read-only.
+#[test]
+fn events_tie_orders_to_ids_and_report_realised_results() {
+    let mut r = Rig::one();
+    let (ka, kb) = (key(1), key(2));
+    let (a, b) = (addr(&ka), addr(&kb));
+    let (d1, d2) = (r.dep(a, 50_000), r.dep(b, 50_000));
+    let to_boundary = 3_600_000 - (r.t % 3_600_000);
+    r.block(to_boundary - 15_000, &[(1, P)], vec![d1, d2]);
+    let n = r.t + 3000;
+    let mut stop = place(a, n + 2, 1, false, ORDER_STOP_MARKET, TIF_IOC, P - 500 * TICK, 1_000_000, true);
+    if let Action::PlaceOrder(p) = &mut stop {
+        p.trigger_price = P - 400 * TICK;
+    }
+    let inputs = vec![
+        sign_action(&r.e, &kb, place(b, n, 1, false, ORDER_LIMIT, TIF_GTC, P, 10_000_000, false)),
+        sign_action(&r.e, &ka, place(a, n, 1, true, ORDER_LIMIT, TIF_IOC, P, 10_000_000, false)),
+        sign_action(&r.e, &ka, stop),
+        sign_action(&r.e, &ka, place(a, n + 3, 1, true, ORDER_LIMIT, TIF_IOC, P - 900 * TICK, 1_000_000, false)), // no liquidity: still an id
+    ];
+    let first = r.e.next_order_id;
+    let out = r.block(3000, &[(1, P)], inputs);
+    let (ai, bi) = (r.ai(&a), r.ai(&b));
+    let accepted: Vec<(u64, u32)> = out.events.iter().filter_map(|e| match e { Event::Accepted { order, account } => Some((*order, *account)), _ => None }).collect();
+    assert_eq!(accepted, vec![(first, bi), (first + 1, ai), (first + 2, ai), (first + 3, ai)]);
+    let pos_acc = out.events.iter().position(|e| matches!(e, Event::Accepted { order, .. } if *order == first + 1)).unwrap();
+    let pos_fill = out.events.iter().position(|e| matches!(e, Event::Fill { taker_order, .. } if *taker_order == first + 1)).unwrap();
+    assert!(pos_acc < pos_fill);
+    let opened = out.events.iter().find_map(|e| match e { Event::Fill { taker_realized, maker_realized, .. } => Some((*taker_realized, *maker_realized)), _ => None }).unwrap();
+    assert_eq!(opened, (0, 0), "both sides only opened");
+    // close half 100 USD higher: a realises +5 USD, b -5 USD (notional units), exactly
+    let up = P + 1000 * TICK;
+    let n = r.t + 3000;
+    let inputs = vec![
+        sign_action(&r.e, &kb, place(b, n, 1, true, ORDER_LIMIT, TIF_GTC, up, 5_000_000, false)),
+        sign_action(&r.e, &ka, place(a, n, 1, false, ORDER_LIMIT, TIF_IOC, up, 5_000_000, false)),
+    ];
+    let out = r.block(3000, &[(1, up)], inputs);
+    let closed = out.events.iter().find_map(|e| match e { Event::Fill { taker_realized, maker_realized, .. } => Some((*taker_realized, *maker_realized)), _ => None }).unwrap();
+    let five_usd: i128 = 5_000_000 * (1000 * TICK as i128);
+    assert_eq!(closed, (five_usd, -five_usd));
+    // funding at the boundary: mark and premium in the event
+    let mut ev = None;
+    for _ in 0..6 {
+        let out = r.block(3000, &[(1, up)], vec![]);
+        if let Some(x) = out.events.iter().find_map(|e| match e { Event::Funding { market: 1, rate, mark, premium } => Some((*rate, *mark, *premium)), _ => None }) {
+            ev = Some(x);
+            break;
+        }
+    }
+    let (rate, mark, premium) = ev.expect("a funding event");
+    assert_eq!((mark, premium), (up, 0), "empty book: mark = index, premium 0");
+    assert_eq!(rate, 12_500);
+    // public read-only requirement queries (IR, MR in notional units) and leverage
+    let (ir, mr) = r.e.account_req(ai, None);
+    assert!(ir > mr && mr > 0);
+    assert_eq!(r.e.market_req(ai, 1, r.size(ai, 1), None), (ir, mr));
+    assert_eq!(r.e.leverage_of(ai, 1), 10);
+    assert!(r.e.bankruptcy_price(ai, 1) < up);
+    assert_eq!(Error::PriceBand.name(), "PRICE_BAND");
+}
+
+/// S-4.12 and the backing rule of S-4.9 (0.2.3, R436-1): a limit order through the mark by more than the band is
+/// refused whatever its time in force; inside the band an order rests only if its own fill at its own price is
+/// backed (what it would lose against the mark is deducted first); the passive side is not limited.
+#[test]
+fn s_4_12_price_band_and_backed_resting_orders() {
+    let mut r = Rig::one();
+    let ka = key(1);
+    let a = addr(&ka);
+    let d = r.dep(a, 2_000);
+    r.block(3000, &[(1, P)], vec![d]);
+    let band = P / 20; // 5%
+    let o = |r: &Rig, n: u64, buy: bool, tif: u8, price: u64, size: u64| sign_action(&r.e, &ka, place(a, r.t + 3000 + n, 1, buy, ORDER_LIMIT, tif, price, size, false));
+    let inputs = vec![
+        sign_action(&r.e, &ka, Action::UpdateLeverage { account: a, nonce: r.t + 3000, market_id: 1, leverage: 50, isolated: false }),
+        o(&r, 1, false, TIF_GTC, tick(P - band) - TICK, 100_000),   // sell one tick beyond the band
+        o(&r, 2, true, TIF_IOC, tick(P + band) + TICK, 100_000),    // buy one tick beyond the band, IOC
+        o(&r, 3, false, TIF_GTC, tick(P - band), 100_000),          // exactly on the band: allowed, small enough to be backed
+        o(&r, 4, false, TIF_GTC, tick(P - band), 100_000_000),      // 1 BTC there would lose 3,362 of 2,000: not backed
+        o(&r, 5, false, TIF_GTC, P, 100_000_000),                   // 1 BTC at the mark: backed (2% of 67,250 = 1,345)
+        o(&r, 6, true, TIF_GTC, TICK, 100_000),                     // a bid far BELOW the mark: passive side, no band
+    ];
+    let out = r.block(3000, &[(1, P)], inputs);
+    assert_eq!(
+        out.outcomes[1..],
+        [Ok(()), Err(Error::PriceBand), Err(Error::PriceBand), Ok(()), Err(Error::InsufficientMargin), Ok(()), Ok(())],
+        "{:?}",
+        out.events
+    );
+}

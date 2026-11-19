@@ -155,6 +155,7 @@ pub fn committee_prices(
             return Err(Error::OracleRoundNotNew);
         }
     }
+    // Update-level form (what the SEQUENCER assembles): count and signer order. A defect here refuses the update.
     let n = signers.len();
     let c = u.observations.len();
     if c < quorum || c > n {
@@ -166,6 +167,14 @@ pub fn committee_prices(
             return Err(Error::OracleMalformed);
         }
         prev_signer = Some(o.signer);
+    }
+    let round_start = u.round.checked_mul(ROUND_MS).ok_or(Error::OracleMalformed)?;
+    // Observation-level rules (what ONE SIGNER authors: its price list, its signature, its time). R436-12 (0.2.3):
+    // an observation that fails its own rule is DROPPED and the update is judged on the rest; the update is
+    // refused only when fewer than the quorum remain (with the first drop's reason). At f0e3967 one observation
+    // refused the whole update, so one signer of n (or one clock a second fast) vetoed every round and every
+    // market went stale, although the quorum is sized to tolerate (n - q) faulty signers.
+    let own_rule = |o: &crate::types::SignedObservation| -> Result<(), Error> {
         if o.prices.is_empty() || o.prices.len() > 256 {
             return Err(Error::OracleMalformed);
         }
@@ -176,24 +185,34 @@ pub fn committee_prices(
             }
             pm = Some(p.market_id);
         }
-    }
-    let round_start = u.round.checked_mul(ROUND_MS).ok_or(Error::OracleMalformed)?;
-    for o in &u.observations {
         let d = digest(domain_sep, &oracle_struct_hash(u.round, o.time_ms, &o.prices));
         if recover(&d, &o.signature) != Some(signers[o.signer as usize]) {
             return Err(Error::OracleBadSignature);
         }
-        if o.time_ms < round_start || o.time_ms >= round_start + ROUND_MS {
+        if o.time_ms < round_start || o.time_ms >= round_start.saturating_add(ROUND_MS) {
             return Err(Error::OracleTime);
         }
         if o.time_ms > t.saturating_add(max_future_ms) || (o.time_ms <= t && t - o.time_ms > max_age_ms) {
             return Err(Error::OracleTime);
         }
+        Ok(())
+    };
+    let mut valid: Vec<&crate::types::SignedObservation> = Vec::with_capacity(c);
+    let mut first_drop: Option<Error> = None;
+    for o in &u.observations {
+        match own_rule(o) {
+            Ok(()) => valid.push(o),
+            Err(e) => {
+                first_drop.get_or_insert(e);
+            }
+        }
+    }
+    if valid.len() < quorum {
+        return Err(first_drop.unwrap_or(Error::OracleMalformed));
     }
     let mut out = Vec::new();
     for (mid, p) in markets {
-        let mut v: Vec<u64> = u
-            .observations
+        let mut v: Vec<u64> = valid
             .iter()
             .filter_map(|o| o.prices.iter().find(|x| x.market_id == *mid))
             .filter(|x| x.sources >= p.min_sources)

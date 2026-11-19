@@ -213,13 +213,19 @@ pub enum FillKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     Deposit { index: u64, account: Addr, amount: u64 },
-    Fill { market: u32, kind: FillKind, taker: u32, maker: u32, taker_order: u64, maker_order: u64, taker_is_buy: bool, price: u64, size: u64, taker_fee: i128, maker_fee: i128 },
+    /// `taker_realized` / `maker_realized`: the result each side realised by this fill on the part of its position
+    /// the fill closed (notional units, signed, before the S-0.3 conversion to USDC; 0 for a side that only opened).
+    Fill { market: u32, kind: FillKind, taker: u32, maker: u32, taker_order: u64, maker_order: u64, taker_is_buy: bool, price: u64, size: u64, taker_fee: i128, maker_fee: i128, taker_realized: i128, maker_realized: i128 },
+    /// A PlaceOrder input was given this order id (pushed where the id is allocated, before any fill of it; the
+    /// ids of liquidation and forced takes are not announced: they belong to no input).
+    Accepted { order: u64, account: u32 },
     Rested { order: u64 },
     TriggerStored { order: u64 },
     Triggered { order: u64 },
     Cancelled { order: u64, reason: Error },
     RemainderCancelled { order: u64, size: u64, reason: Error },
-    Funding { market: u32, rate: i128 },
+    /// `mark`: the mark every payment of this settlement used; `premium`: the interval's median sample.
+    Funding { market: u32, rate: i128, mark: u64, premium: i128 },
     Liquidated { account: u32 },
     InsuranceCover { account: u32, amount: i128 },
     LiquidationFee { account: u32, amount: i128 },
@@ -255,6 +261,9 @@ enum Mode {
     Normal,
     Liquidation,
     Forced,
+    /// A forced close whose price bound is the account's bankruptcy price: no taker fee (as a liquidation), so the
+    /// close cannot leave a deficit.
+    ForcedAtBankruptcy,
 }
 
 #[derive(Clone, Debug)]
@@ -614,7 +623,7 @@ impl Engine {
         self.dust += -credited_total * N_PER_USDC;
         let m = self.markets.get_mut(&mid).unwrap();
         m.cum_funding += rate;
-        self.events.push(Event::Funding { market: mid, rate });
+        self.events.push(Event::Funding { market: mid, rate, mark, premium: calc::median_lower(&samples).unwrap_or(0) });
     }
 
     fn halt_arith(&mut self, mid: u32) {
@@ -635,12 +644,12 @@ impl Engine {
         self.accounts[ai as usize].balance * N_PER_USDC + self.upnl(ai)
     }
 
-    fn leverage_of(&self, ai: u32, mid: u32) -> u32 {
+    pub fn leverage_of(&self, ai: u32, mid: u32) -> u32 {
         self.accounts[ai as usize].leverage.get(&mid).copied().unwrap_or(self.markets[&mid].p.default_leverage)
     }
 
     /// (IR, MR) of one market for account `ai` with position size `size` and, optionally, an extra resting order.
-    fn market_req(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>) -> (i128, i128) {
+    pub fn market_req(&self, ai: u32, mid: u32, size: i64, extra: Option<(bool, u64, u64)>) -> (i128, i128) {
         self.market_req_at(ai, mid, size, extra, self.markets[&mid].mark)
     }
 
@@ -683,7 +692,7 @@ impl Engine {
     }
 
     /// (IR, MR) over all markets; `hypo` replaces one market's position size and adds an optional order.
-    fn account_req(&self, ai: u32, hypo: Option<(u32, i64, Option<(bool, u64, u64)>)>) -> (i128, i128) {
+    pub fn account_req(&self, ai: u32, hypo: Option<(u32, i64, Option<(bool, u64, u64)>)>) -> (i128, i128) {
         let a = &self.accounts[ai as usize];
         let mut mids: BTreeSet<u32> = a.positions.keys().copied().collect();
         for oid in &a.orders {
@@ -804,7 +813,7 @@ impl Engine {
         if kind == FillKind::Book || kind == FillKind::Liquidation {
             m.last_trade = Some((p, t));
         }
-        self.events.push(Event::Fill { market: mid, kind, taker: a, maker: b, taker_order: a_order, maker_order: b_order, taker_is_buy: a_buy, price: p, size: q, taker_fee: fa, maker_fee: fb });
+        self.events.push(Event::Fill { market: mid, kind, taker: a, maker: b, taker_order: a_order, maker_order: b_order, taker_is_buy: a_buy, price: p, size: q, taker_fee: fa, maker_fee: fb, taker_realized: ra, maker_realized: rb });
     }
 
     fn remove_order(&mut self, oid: u64, reason: Option<Error>) {
@@ -822,19 +831,72 @@ impl Engine {
         }
     }
 
+    /// S-4.9.1 (R436-1): would a fill of signed size `d` at price `p` leave account `x` holding its maintenance
+    /// requirement at the mark? True when `E_after >= MR_after`; also true for a fill that only reduces the
+    /// position and does not worsen the account's margin deficit (`E - MR` does not fall), so an account below
+    /// maintenance can still reduce at a fair price. `E_after` counts the result of the fill against the mark,
+    /// the fee and one unit of rounding.
+    pub fn fill_keeps_maintenance(&self, x: u32, mid: u32, d: i64, p: u64, fee_ppm: u32) -> bool {
+        let mark = self.markets[&mid].mark as i128;
+        let s = self.pos_size(x, mid);
+        let ns = s + d;
+        let fee = calc::trade_fee(calc::notional(p, d.unsigned_abs()), fee_ppm);
+        let e_before = self.equity(x);
+        let e_after = e_before + (d as i128) * (mark - p as i128) - fee * N_PER_USDC - N_PER_USDC;
+        let (_, mr_after) = self.account_req(x, Some((mid, ns, None)));
+        if e_after >= mr_after {
+            return true;
+        }
+        let only_reduces = (s > 0 && ns >= 0 && ns < s) || (s < 0 && ns <= 0 && ns > s);
+        if !only_reduces {
+            return false;
+        }
+        let (_, mr_before) = self.account_req(x, None);
+        e_after - mr_after >= e_before - mr_before
+    }
+
+    /// R436-2: the resting orders a liquidation may fill, in price-time order inside `limit`: every order placed
+    /// BEFORE this block. Orders of this block are skipped (R395-13), not a reason to stop.
+    fn makers_before_this_block(&self, mid: u32, taker_is_buy: bool, limit: u64) -> Vec<(u64, u64)> {
+        let m = &self.markets[&mid];
+        let mut v = Vec::new();
+        let levels: Box<dyn Iterator<Item = (&u64, &VecDeque<u64>)>> =
+            if taker_is_buy { Box::new(m.book.asks.range(..=limit)) } else { Box::new(m.book.bids.range(limit..).rev()) };
+        for (p, q) in levels {
+            for id in q {
+                if self.orders[id].height != self.height {
+                    v.push((*p, *id));
+                }
+            }
+        }
+        v
+    }
+
     /// Match a taker against the book. Returns (filled, stop reason).
     #[allow(clippy::too_many_arguments)]
     fn take(&mut self, ai: u32, mid: u32, is_buy: bool, limit: u64, size: u64, reduce_only: bool, mode: Mode, taker_order: u64) -> (u64, Option<Error>) {
         let mut remaining = size;
         let mut stop = None;
+        // R395-13 + R436-2: the sequencer knows which accounts step 9 liquidates; an order placed in this very block
+        // is not liquidity for them. Such orders are SKIPPED and older liquidity behind them is still used (at
+        // f0e3967 matching stopped at the first one, so one fresh minimum-size order hid the whole book).
+        let mut older = if mode == Mode::Liquidation { Some(self.makers_before_this_block(mid, is_buy, limit).into_iter()) } else { None };
         while remaining > 0 {
-            let Some((price, maker_id)) = self.markets[&mid].book.best_maker(is_buy, limit) else { break };
+            let next = match older.as_mut() {
+                Some(it) => {
+                    let mut found = None;
+                    for (p, id) in it.by_ref() {
+                        if self.orders.contains_key(&id) {
+                            found = Some((p, id));
+                            break;
+                        }
+                    }
+                    found
+                }
+                None => self.markets[&mid].book.best_maker(is_buy, limit),
+            };
+            let Some((price, maker_id)) = next else { break };
             let maker = self.orders[&maker_id].clone();
-            if mode == Mode::Liquidation && maker.height == self.height {
-                // R395-13: the sequencer knows which accounts step 9 liquidates; an order it placed in this very
-                // block is not liquidity for them. The remainder goes to the backstop / ADL at the bound price.
-                break;
-            }
             if maker.account == ai {
                 self.remove_order(maker_id, Some(Error::SelfTrade));
                 continue;
@@ -865,7 +927,7 @@ impl Engine {
                 stop = Some(Error::OiCap);
                 break;
             }
-            let taker_fee = if mode == Mode::Liquidation { 0 } else { self.fee_ppm(ai, true) };
+            let taker_fee = if mode == Mode::Liquidation || mode == Mode::ForcedAtBankruptcy { 0 } else { self.fee_ppm(ai, true) };
             let maker_fee = self.fee_ppm(maker.account, false);
             let m = &self.markets[&mid];
             let only_reduces = (ts > 0 && nts >= 0 && nts < ts) || (ts < 0 && nts <= 0 && nts > ts);
@@ -880,6 +942,18 @@ impl Engine {
                     stop = Some(Error::InsufficientMargin);
                     break;
                 }
+            }
+            // S-4.9.1 (R436-1): a fill never leaves either side below its maintenance requirement at the mark. A
+            // taker that only reduces (no initial-margin check above) stops; a maker order that fails is cancelled
+            // and matching continues behind it. Liquidations and forced closes are bounded by their own price rules
+            // (never past the bankruptcy price) and are not checked as takers.
+            if mode == Mode::Normal && only_reduces && !self.fill_keeps_maintenance(ai, mid, d, price, taker_fee) {
+                stop = Some(Error::InsufficientMargin);
+                break;
+            }
+            if !self.fill_keeps_maintenance(maker.account, mid, -d, price, maker_fee) {
+                self.remove_order(maker_id, Some(Error::InsufficientMargin));
+                continue;
             }
             self.exec_fill(mid, if mode == Mode::Liquidation { FillKind::Liquidation } else { FillKind::Book }, ai, maker.account, is_buy, price, q, taker_fee, maker_fee, taker_order, maker_id);
             let mo = self.orders.get_mut(&maker_id).unwrap();
@@ -980,10 +1054,26 @@ impl Engine {
                 }
             }
             FORCED_WITHDRAW => {
-                let free = self.free_collateral(ai);
-                let halted = self.halted_involved(ai);
+                let mut free = self.free_collateral(ai);
                 let fee = self.g.g.withdrawal_fee as i128;
-                let want = if r.arg == 0 { free } else { r.arg as i128 };
+                let mut want = if r.arg == 0 { free } else { r.arg as i128 };
+                if want <= fee || want > free {
+                    // R395-39 (0.2.3): orders resting in a HALTED market cannot fill and only hold margin through a
+                    // price the oracle rules do not stand behind: they are cancelled before the request is judged,
+                    // so they can neither turn it into a consumed rejection (f0e3967) nor park the queue (0.2.0).
+                    let ids: Vec<u64> = self.accounts[ai as usize].orders.iter().copied().filter(|id| {
+                        let o = &self.orders[id];
+                        o.trigger.is_none() && !o.reduce_only && !self.active(o.market)
+                    }).collect();
+                    if !ids.is_empty() {
+                        for id in ids {
+                            self.remove_order(id, Some(Error::MarketHalted));
+                        }
+                        free = self.free_collateral(ai);
+                        want = if r.arg == 0 { free } else { r.arg as i128 };
+                    }
+                }
+                let halted = self.halted_involved(ai);
                 if want <= fee || want > free {
                     let e = if want <= fee { Error::WithdrawTooSmall } else { Error::InsufficientMargin };
                     // only the halt can make a request that is servable on live prices unservable now
@@ -998,46 +1088,46 @@ impl Engine {
         }
     }
 
-    /// Close one position for a forced request. Active market: reduce-only through the book within the slippage
-    /// bound, then the backstop (within its limit), then ADL, both at the bound price with the taker fee, so a
-    /// forced close is always served and never cheaper than the book. Halted market: book only; the rest waits.
+    /// Close one position for a forced request (SPEC 14). The price bound is the side worse for the closer of the
+    /// band the protocol stands behind (active market: mark -/+ marketSlippageBps; halted market, R436-10: the exit
+    /// band, a long at `low`, a short at `high`) and NEVER past the account's bankruptcy price (R436-1: a forced
+    /// close cannot leave a deficit for the insurance fund). The book is used only inside the bound (makers fill at
+    /// their own, better, prices); the rest goes to the backstop (active market only, within its limit) and then
+    /// to the opposite positions in ADL order, at the bound. Always served.
     fn forced_close(&mut self, ai: u32, mid: u32) -> Result<(), Error> {
         let s = self.pos_size(ai, mid);
         if s == 0 {
             return Ok(());
         }
         let is_buy = s < 0;
-        if !self.active(mid) {
-            // 394 README 6a: in a halt the book is used only inside the exit band, the rest is closed against the
-            // opposite positions (ADL ranking) at the settle price with the taker fee: never refused for a halt.
+        let active = self.active(mid);
+        let band_price = if active {
+            let m = &self.markets[&mid];
+            let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
+            if is_buy { m.mark.saturating_add(band).min(MAX_PRICE) } else { m.mark.saturating_sub(band).max(1) }
+        } else {
+            // 394/432 README 6a (corrected in round 2): every exit of ONE account during a halt is priced at the
+            // side of the exit band worse for that account; `settle` is for X3 only.
             let Some(x) = self.exit_price(mid) else { return Err(Error::MarketHalted) };
-            let limit = if is_buy { x.high.min(MAX_PRICE) } else { x.low };
-            let oid = self.next_order_id;
-            self.next_order_id += 1;
-            self.take(ai, mid, is_buy, limit, abs64(s), true, Mode::Forced, oid);
-            let r = abs64(self.pos_size(ai, mid));
-            if r > 0 {
-                let fee = self.fee_ppm(ai, true);
-                self.adl(ai, mid, x.settle.clamp(x.low, x.high), r, is_buy, fee);
-            }
-            return Ok(());
-        }
-        let m = &self.markets[&mid];
-        let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
-        let limit = if is_buy { (m.mark + band).min(MAX_PRICE) } else { m.mark.saturating_sub(band).max(1) };
-        if m.mark > 0 {
-            let oid = self.next_order_id;
-            self.next_order_id += 1;
-            self.take(ai, mid, is_buy, limit, abs64(s), true, Mode::Forced, oid);
-        }
+            if is_buy { x.high.min(MAX_PRICE) } else { x.low.max(1) }
+        };
+        let bp = self.bankruptcy_price(ai, mid);
+        let at_bankruptcy = if is_buy { bp < band_price } else { bp > band_price };
+        let limit = if at_bankruptcy { bp } else { band_price };
+        let mode = if at_bankruptcy { Mode::ForcedAtBankruptcy } else { Mode::Forced };
+        let fee = if at_bankruptcy { 0 } else { self.fee_ppm(ai, true) };
+        let oid = self.next_order_id;
+        self.next_order_id += 1;
+        self.take(ai, mid, is_buy, limit, abs64(s), true, mode, oid);
         let r = abs64(self.pos_size(ai, mid));
         if r == 0 {
             return Ok(());
         }
-        let fee = self.fee_ppm(ai, true);
-        let q = self.backstop_room(mid, is_buy, r, self.markets[&mid].mark, limit);
-        if q > 0 {
-            self.exec_fill(mid, FillKind::Backstop, ai, ACCT_BACKSTOP, is_buy, limit, q, fee, 0, 0, 0);
+        if active {
+            let q = self.backstop_room(mid, is_buy, r, self.markets[&mid].mark, limit);
+            if q > 0 {
+                self.exec_fill(mid, FillKind::Backstop, ai, ACCT_BACKSTOP, is_buy, limit, q, fee, 0, 0, 0);
+            }
         }
         let r = abs64(self.pos_size(ai, mid));
         if r > 0 {
@@ -1280,7 +1370,11 @@ impl Engine {
                 continue;
             }
             let Some(x) = self.exit_price(mid) else { continue };
-            if !x.settle_due {
+            // R436-10 (432's corrected rule): X3 settles only at a price the committee signed SINCE the halt
+            // (`halt_low != 0`). With none, `settle` would be the frozen pre-halt index, which whoever withholds
+            // the oracle input chooses: the market then stays halted, single accounts exit at the band (forced
+            // close, S-9.2) and a lasting silence ends in the vault's escape.
+            if !x.settle_due || self.markets[&mid].oracle.halt_low == 0 {
                 continue;
             }
             let has = self.accounts.iter().any(|a| a.positions.contains_key(&mid));
@@ -1420,6 +1514,7 @@ impl Engine {
             self.orders.insert(id, Order { id, account: ai, market: p.market_id, is_buy: p.is_buy, price: p.price, remaining: p.size, reduce_only: p.reduce_only, client_order_id: p.client_order_id, trigger: Some((p.order_type, p.trigger_price)), height: self.height });
             self.markets.get_mut(&p.market_id).unwrap().triggers.insert(id);
             self.accounts[ai as usize].orders.insert(id);
+            self.events.push(Event::Accepted { order: id, account: ai });
             self.events.push(Event::TriggerStored { order: id });
             return Ok(());
         }
@@ -1439,21 +1534,43 @@ impl Engine {
             let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
             limit = if is_buy { price.min(m.mark.saturating_add(band)) } else { price.max(m.mark.saturating_sub(band)) };
         }
+        let band = (m.mark as u128 * m.p.market_slippage_bps as u128 / 10000) as u64;
+        if !is_market && ((is_buy && price > m.mark.saturating_add(band)) || (!is_buy && price < m.mark.saturating_sub(band))) {
+            // S-4.12 (R436-1): no limit order through the mark by more than the band a market order is held to
+            return Err(Error::PriceBand);
+        }
         if tif == TIF_POST_ONLY && m.book.best_maker(is_buy, price).is_some() {
             return Err(Error::WouldCross);
         }
-        if tif != TIF_IOC && !reduce_only {
-            let size_now = self.pos_size(ai, mid);
-            let (ir, _) = self.account_req(ai, Some((mid, size_now, Some((is_buy, price, size)))));
-            if self.equity(ai) < ir {
-                return Err(Error::InsufficientMargin);
+        if tif != TIF_IOC {
+            // S-4.9 (0.2.3, R436-1): an order may rest only if its own fill at its own price is backed now: what a
+            // fill at `price` would lose against the mark is deducted from the equity the requirement is checked
+            // against (an order priced through the mark was reserved at the mark's notional only).
+            let mark = m.mark as i128;
+            let through = if is_buy { (price as i128 - mark).max(0) } else { (mark - price as i128).max(0) };
+            if reduce_only {
+                let q = size.min(self.reducible(ai, mid, is_buy));
+                let d: i64 = if is_buy { q as i64 } else { -(q as i64) };
+                if !self.fill_keeps_maintenance(ai, mid, d, price, self.fee_ppm(ai, false)) {
+                    return Err(Error::InsufficientMargin);
+                }
+            } else {
+                let size_now = self.pos_size(ai, mid);
+                let (ir, _) = self.account_req(ai, Some((mid, size_now, Some((is_buy, price, size)))));
+                if self.equity(ai) - through * (size as i128) < ir {
+                    return Err(Error::InsufficientMargin);
+                }
             }
         }
-        let id = reuse_id.unwrap_or_else(|| {
-            let i = self.next_order_id;
-            self.next_order_id += 1;
-            i
-        });
+        let id = match reuse_id {
+            Some(i) => i,
+            None => {
+                let i = self.next_order_id;
+                self.next_order_id += 1;
+                self.events.push(Event::Accepted { order: i, account: ai });
+                i
+            }
+        };
         let (filled, stop) = if tif == TIF_POST_ONLY { (0, None) } else { self.take(ai, mid, is_buy, limit, size, reduce_only, Mode::Normal, id) };
         let rem = size - filled;
         if rem > 0 {
@@ -1524,7 +1641,7 @@ impl Engine {
     }
 
     /// Price at which E would be 0 for position `mid`, the others held at mark (SPEC 6.3 step 2).
-    fn bankruptcy_price(&self, ai: u32, mid: u32) -> u64 {
+    pub fn bankruptcy_price(&self, ai: u32, mid: u32) -> u64 {
         let a = &self.accounts[ai as usize];
         let pos = &a.positions[&mid];
         let rest: i128 = a.balance * N_PER_USDC
@@ -1628,7 +1745,10 @@ impl Engine {
     fn settle_bad_debt(&mut self) {
         for ai in ACCT_BACKSTOP..self.accounts.len() as u32 {
             let a = &self.accounts[ai as usize];
-            if a.balance < 0 && a.positions.is_empty() {
+            // a user's negative balance is bad debt once the account is flat (until then liquidation deals with
+            // it); BACKSTOP is never liquidated, so a loss it has REALISED is final at once: its negative balance is
+            // settled and reported every block, whether or not it still holds positions (0.2.3, R436-5)
+            if a.balance < 0 && (a.positions.is_empty() || ai == ACCT_BACKSTOP) {
                 let need = -a.balance;
                 let ins = self.accounts[ACCT_INSURANCE as usize].balance.max(0);
                 let pay = need.min(ins);

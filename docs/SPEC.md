@@ -1,6 +1,6 @@
 # PosternDEX Perpetuals: engine specification (`docs/SPEC.md`)
 
-**UNAUDITED PROTOTYPE. Version 0.2.2, 2026-11-18. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
+**UNAUDITED PROTOTYPE. Version 0.2.3, 2026-11-19. Owner: agent 430 (round 2; continues 350 and 388).** Nothing
 here is deployed.
 The perpetuals are not to be deployed before an external audit and a legal review.
 
@@ -193,6 +193,16 @@ tag order: all `0x01` (at most one), then `0x02`, then `0x03`, then `0x04`; viol
 (`BLOCK_ORDER`). An invalid individual input (bad signature, bad nonce, insufficient margin…) does NOT reject the
 block: it is recorded as a failed outcome with its error and has no other effect.
 
+- S-3.2.0 (R436-4, 0.2.3) Two kinds of defect, and only two. (1) Bytes that are not a canonical encoding at all
+  (short input, trailing bytes, a length that runs past the payload, a boolean that is not 0 or 1, an unknown tag
+  or action type, a string that is not UTF-8, a re-encoding that differs): the input LIST does not decode and such
+  a block cannot exist; a sequencer must never produce one, so the node MUST run the engine's own decoder
+  (`codec::decode_payload`) on every action BEFORE it admits it and drop what it refuses. (2) Everything else is a
+  rule on a decoded input and fails THAT input only: in particular an `ApproveAgent.name` longer than 32 bytes
+  decodes (the wire carries any `be16` length) and fails `MALFORMED`. At `f0e3967` the decoder refused the whole
+  list for a 33-byte name: one signed request from any key halted the sequencer (test
+  `r436_4_a_33_byte_agent_name_fails_alone_and_never_rejects_the_block` fails there).
+
 | Tag | Kind | Payload |
 |---|---|---|
 | `0x01` | oracle | `OracleUpdate` exactly as 394's `node/oracle/README.md` section 4 (canonical bytes) |
@@ -262,11 +272,35 @@ block: it is recorded as a failed outcome with its error and has no other effect
   (`TOO_MANY_ORDERS`).
 - S-4.8 Open interest cap: `OI(m) = sum of long sizes`. A fill that would increase `OI(m)` above `oiCap(m)` is not
   executed; the taker's remainder is cancelled (`OI_CAP`).
-- S-4.9 Margin at placement (cross): the order is accepted only if, counting it as resting, the account's initial
-  requirement including open orders (section 6.2) is covered; else `INSUFFICIENT_MARGIN`. A fill as maker is never
-  refused for margin (its margin was reserved; an account that becomes undercollateralised is handled by
-  liquidation). A fill as taker re-checks per fill: the taker stops (remainder cancelled, `INSUFFICIENT_MARGIN`)
-  before a fill that would leave its equity below its initial requirement, except for a fill that only reduces.
+- S-4.9 Margin at placement (cross): an order that can rest (GTC, POST_ONLY) is accepted only if, counting it as
+  resting, the account's initial requirement including open orders (section 6.2) is covered by its equity MINUS
+  what a fill of the whole order at its own price would lose against the mark (`max(0, price - mark) * size` for
+  a buy, `max(0, mark - price) * size` for a sell; 0.2.3: an order priced through the mark was reserved on the
+  mark's notional only, with nothing for the loss its fill realises); a reduce-only order that can rest is accepted
+  only if a fill of its reducible size at its price passes S-4.9.1; else `INSUFFICIENT_MARGIN`. A fill as taker
+  re-checks per fill: the taker stops (remainder cancelled, `INSUFFICIENT_MARGIN`) before a fill that would leave
+  its equity below its initial requirement; a fill that only reduces is checked by S-4.9.1 instead.
+- S-4.9.1 Maintenance at every fill (R436-1 High, 0.2.3; replaces "a fill as maker is never refused for margin").
+  A book fill is executed only if EACH side, after it, holds its maintenance requirement at the mark:
+  `E_after >= MR_after`, with `E_after = E + d * (mark - price) - fee - 1 unit` for the side's signed size change
+  `d`. Exception, so that an account below maintenance can still get out: a fill that only REDUCES the side's
+  position is also allowed when it does not worsen the margin deficit (`E_after - MR_after >= E - MR`). A taker
+  that fails stops (`INSUFFICIENT_MARGIN`); a MAKER order that fails is cancelled (`INSUFFICIENT_MARGIN`) and
+  matching continues with the next order. Applies to makers in every mode (ordinary orders, liquidations, forced
+  closes) and to takers of ordinary orders; liquidation and forced-close takers are bounded by their own price
+  rules, which never pass the bankruptcy price (6.3, section 14). Consequence: no fill can by itself create a
+  deficit, so the insurance fund pays only for moves of the MARK (bounded by the oracle rules and the mark band),
+  never for a price two accounts agree on. At `f0e3967` one maker fill at half the mark moved 31,630 USDC of the
+  fund to a colluding taker, a reducing taker fill did the same through bad debt, and so did a forced close into a
+  colluder's bid (tests `r436_1_*`, four, all fail there). Residual, stated: an order that was backed when placed
+  can lose its backing when the mark moves; it then sits in the book until a taker reaches it and is cancelled at
+  that moment, never filled (it can be counted by one premium sample or one mark before that: section 12).
+- S-4.12 Price band for limit orders (R436-1, 0.2.3). A limit order (types 0, 3, 5; whatever its time in force;
+  type 3 and 5 when they fire) whose price is through the mark by more than `marketSlippageBps` (a buy above
+  `mark + band`, a sell below `mark - band`, `band = floor(mark * marketSlippageBps / 10^4)`) is refused
+  `PRICE_BAND`: the bound a market order is clamped to (S-4.3) holds for every order. The passive side is not
+  limited (a bid far below or an ask far above the mark may rest). A client that wants to cross sends a market
+  order or a limit inside the band. Test `s_4_12_price_band_and_backed_resting_orders`.
 - S-4.10 A halted market accepts only CancelOrder, CancelAll and nothing else (`MARKET_HALTED`); no liquidation,
   no triggers, no funding sample, and no matching EXCEPT a forced close's reduce-only take inside the exit band
   (section 14; makers fill at their own prices). Withdrawals during a halt: S-9.2. Genesis per market `oracle`
@@ -295,6 +329,17 @@ block: it is recorded as a failed outcome with its error and has no other effect
   price were not. The update itself is still accepted (its form and signatures are valid; 394's `max-values`
   vector decodes and is accepted). Test `r430_2_committee_price_above_max_price_never_becomes_the_index` (fails on
   `f0e3967`).
+- S-5.1.2 (R436-12, 0.2.3; a change to 394's README rule that one invalid observation refuses the update; 432
+  notified). An `OracleUpdate` has two kinds of rule. UPDATE rules, on what the sequencer assembles: the round is
+  new, the observation count is between the quorum and `n`, signer indexes are valid and strictly ascending; a
+  defect refuses the update (`ORACLE_ROUND_NOT_NEW`, `ORACLE_MALFORMED`). OBSERVATION rules, on what ONE signer
+  authors: its price list (1 to 256 entries, market ids strictly ascending, no zero price), its signature, its
+  `timeMs` inside the round and inside the block-time window; an observation that fails its own rule is DROPPED and
+  the update is judged on the rest. The update is refused only when fewer than the quorum remain, with the first
+  dropped observation's error. Reason: the quorum is sized to tolerate `n - q` faulty signers; at `f0e3967` one
+  signer (or one feeder clock a second fast) refused every round and every market went stale (test
+  `r436_12_one_bad_observation_does_not_veto_the_round` fails there). A dropped observation leaves no trace in the
+  state; the round counts as consumed only when the update is accepted.
 - S-5.2 Mark (bounded book component):
   `bookRef = median(bestBid, bestAsk, lastTradePrice)` using, for a missing value, the index (and for
   `lastTradePrice` older than `markTradeMaxAgeMs = 60000`, the index);
@@ -356,7 +401,9 @@ fills pay no taker fee (step 4's fee replaces it); makers pay their normal fee.
    mmf_0 / 2)` for a long, `min(bp, mark + mark * mmf_0 / 2)` for a short (`mmf_0` = tier-0 maintenance fraction).
    Send a reduce-only IOC to the book for the whole position with limit `lp`, which never fills against an order
    placed in the SAME block (the sequencer knows which accounts step 9 liquidates; its own last-moment order is
-   not liquidity): matching stops at the first such order. Stated bound: a liquidated account loses at most
+   not liquidity): such orders are SKIPPED and the older orders behind them, inside `lp`, are still used in
+   price-time order (R436-2, 0.2.3; at `f0e3967` matching stopped at the first one, so one fresh minimum-size order
+   at the top of the book hid all older liquidity from the block's liquidations; test `r436_2_*`). Stated bound: a liquidated account loses at most
    `mmf_0 / 2` of the notional beyond mark plus the liquidation fee; the rest of its equity stays its own.
 3. The remainder is taken by the backstop vault (system account `BACKSTOP`) at `bp` if the backstop has a positive
    balance and its equity after it covers its own maintenance requirement, and only up to its position limit
@@ -423,9 +470,13 @@ ranking is fair in any stronger sense than "most profitable and most leveraged f
   stays exact because it counts signed balances), and is paid in a later block as soon as the fund holds anything.
 - `BACKSTOP` and bad debt (R430-1, 0.2). `BACKSTOP` has no key and is never liquidated (6.3), so a position it took
   can lose more than its balance; when ADL, a forced close or X3 then closes that position, its balance goes
-  NEGATIVE. This is bad debt like a user's: the rule above applies to `BACKSTOP` too (paid by `INSURANCE` first once
-  it is flat, `BadDebt` event for the rest), it takes no new position while its balance is not positive (6.3 step
-  3), and its negative equity is charged to `INSURANCE` in the escape values (section 11). At `f0e3967` this
+  NEGATIVE. This is bad debt, and because `BACKSTOP` is never liquidated a loss it has realised is final at once:
+  its negative balance is paid by `INSURANCE` in the same block as far as the fund goes, WHETHER OR NOT it still
+  holds positions (0.2.3; 0.2.0 waited until it was flat, which could leave the debt unreported for as long as a
+  position remained), with a `BadDebt` event for the rest in every block it remains; it takes no new position
+  while its balance is not positive (6.3 step 3), and its negative equity is charged to `INSURANCE` in the escape
+  values (section 11). The fuzz suite reaches this state on purpose (review 436's request with R436-5): test
+  `backstop_takes_positions_goes_under_water_and_its_debt_is_reported` and a random run with a small backstop. At `f0e3967` this
   reachable state broke the engine's own assertion "system accounts are never negative" (test
   `r430_1_backstop_loss_beyond_its_balance_is_bad_debt_paid_by_insurance` fails there). Not solved: an unwind rule
   that would cut the backstop's loss earlier (O-9).
@@ -502,6 +553,11 @@ interest, fundingClamp, maxFundingRate, oracle{minSources, agreeBps, jumpBps, ma
 The checkpoint committee is NOT engine state (vault and node). `genesisEncoding` = the engine's serialization of
 this object (fields in the order above, no whitespace, integers as decimal strings). The engine reads 392's `markets.json`/`risk.json` through a converter that applies S-1.2
 and refuses any inconsistency (display decimals vs tick, MMF `<=` markBand, tiers not ascending, IMF `<` MMF).
+0.2.3 (R436-8): `impactNotional` MUST be at least 1 (the premium sample divides by the size it buys; `f0e3967`
+accepted 0 and divided by zero at the first sample), and the converter REFUSES a JSON integer that does not fit
+its field (`imfPpm`, `minSources`, `maxLeverage`, every bps and ms value, optional ones included) instead of
+narrowing it (`f0e3967` read 4295017296 as 50000). Not done (436's Info): a per-market reference range for the
+FIRST index a market accepts.
 
 ## 11. State root and proofs (what the vault verifies)
 
@@ -555,6 +611,36 @@ Withdraw or the fixed fee sweep; payout needs the committee's checkpoint), inven
 see finalized on the L2, or move the index outside the honest oracle range (394). Can: reorder actions inside a
 block and choose which arrive (front-running within the 2-minute nonce window and the mark band), delay or censor
 (bounded by forced requests and escape mode in the vault), withhold oracle updates (markets halt, fail closed).
+
+What a halt it causes gives the sequencer, after 0.2.3 (R436-10 High): NOT a free exit. A single account that
+leaves during a halt (forced close, withdrawal) is priced at the side of the exit band worse for it (section 14,
+S-9.2), and X3 settles a market only at a price the committee signed since the halt, never at the frozen
+pre-halt index. Residual, stated: (a) among the committee rounds of the halt it may include, the sequencer chooses
+which one is the `settle` price of X3 (a real committee price of that hour, not one it invents); (b) the band is a
+parameter: an exit priced at the band is a loss for the leaver only if the real move stays inside it (432's
+calibration: the default band is too narrow for SOL's and marginal for ETH's worst recorded minutes; wider values
+are 432's proposal and an owner input); (c) with no committee price since the halt nothing settles, so a silent
+sequencer ends in the vault's escape after `forcedDelay`, as designed.
+
+Oracle selection (R395-9, 432's bound, stated here at its request): by choosing which `>= q` valid observations of
+a round to include, the sequencer moves the committee median between the order statistics `x[q/2]` and
+`x[n - q + q/2]` of ALL valid observations of the round (n = 7, q = 5: between the third and the fifth lowest; the
+honest full median is the fourth), every round and to the same side if it wants; with up to `n - q` colluding
+signers, over the whole range of the included honest values; never outside the honest range. S-5.1.2 does not
+widen this: a dropped observation is one the sequencer could have left out anyway.
+
+Fills (R436-1, S-4.9.1): two accounts can still trade with each other at any price inside the band and move their
+OWN equity between them down to the loser's maintenance requirement; they cannot move the insurance fund's, the
+backstop's or a third account's. An order whose backing was lost to a mark move rests until a taker reaches it;
+the sequencer, which orders the takers, can keep such an order of its own in the book for one sample or one mark
+(bounded by `markBandBps` and the funding cap, as R395-16 below).
+
+Data availability of the exit (R436-11, stated; the rule belongs to VAULT.md and the node): an escape claim needs
+the account's leaf and its 32 siblings against the vault's last accepted `accountsRoot`, and the siblings depend
+on every account's state at that height. The engine produces them for anyone who holds the input log up to that
+height (`engine prove`, section 15) or a snapshot of it (section 16); it cannot produce them from the vault's
+data alone. The escape hatch therefore assumes that at least one party other than a silent operator publishes
+the log, a snapshot, or the proofs themselves.
 Residual (R395-16, stated): a sequencer that places a quote as the LAST action of EVERY block and cancels it as the
 first action of the next is never hit (it orders every other action) and is sampled every time; post-action
 sampling and the median then do not help, and it can set the premium up to `maxFundingRate` (0.05% per hour in
@@ -576,9 +662,18 @@ Error names (the API passes them through): `BAD_SIGNATURE`, `AGENT_NOT_ALLOWED`,
 deposit), `SELF_TRADE`, `CANCELLED`, `ISOLATED_UNSUPPORTED`, `MALFORMED`, `UNKNOWN_MARKET`, `MARKET_HALTED`, `TICK`, `STEP`, `SIZE_BOUNDS`,
 `WOULD_CROSS`, `REDUCE_ONLY`, `INSUFFICIENT_MARGIN`, `TOO_MANY_ORDERS`, `OI_CAP`, `NO_LIQUIDITY`, `SELF_TRADE`,
 `ORDER_NOT_FOUND`, `LEVERAGE`, `NOT_ISOLATED`, `WITHDRAW_TOO_SMALL`, `BAD_RECIPIENT` (0.2, S-9.2.1),
-`NOT_LAUNCHED` (S-4.11), `POSITION_IN_HALTED_MARKET`, `OVERFLOW`,
+`NOT_LAUNCHED` (S-4.11), `PRICE_BAND` (0.2.3, S-4.12), `POSITION_IN_HALTED_MARKET`, `OVERFLOW`,
 `DEPOSIT_ORDER`, `FORCED_ORDER`, oracle errors of 394 (`ORACLE_ROUND_NOT_NEW`, `ORACLE_MALFORMED`,
 `ORACLE_BAD_SIGNATURE`, `ORACLE_TIME`).
+
+Events and queries added for the node's views (0.2.3, 431's requests; none is state): `Accepted { order, account }`
+is pushed where a PlaceOrder input gets its order id (resting, IOC and trigger alike), in input order and before
+any fill of that order; the ids of liquidation and forced takes are not announced (they belong to no input).
+`Fill` carries `taker_realized` and `maker_realized` (notional units, signed: what the fill realised on the part
+of each side's position it closed, before the S-0.3 conversion; 0 for a side that only opened). `Funding` carries
+the `mark` its payments used and the interval's median `premium`. Read-only and public: `account_req(account,
+None) -> (IR, MR)`, `market_req`, `leverage_of`, `bankruptcy_price`, `fill_keeps_maintenance`, `free_collateral`,
+`equity`, and the formulas of `calc`. A node view MUST use these, not a copy of the arithmetic.
 
 ## 14. Forced requests (from the vault)
 
@@ -591,34 +686,56 @@ independent abi encoding): requests `(account = key(1)'s address, 0, deadline 17
 Received requests form a queue in index order. Every block (step 7, after deposits and forced inputs, before
 actions) the engine serves the queue FROM ITS HEAD with the current state; each request ends in one of:
 
-- served (event `ForcedServed`): cancel all always; close: on an ACTIVE market reduce-only through the book within
-  `mark +/- marketSlippageBps`, then the backstop (within its limit and margin), then ADL, the last two at that bound
-  price with the account's taker fee, so a forced close on an active market is always served and is never cheaper
-  than the book; withdraw: when `amount` (or all) is within free collateral;
+- served (event `ForcedServed`): cancel all always; close: each position, in ascending market id, has a PRICE
+  BOUND = the side worse for the closer of the band the protocol stands behind, and NEVER past the account's
+  bankruptcy price (6.3 step 2, recomputed per position): on an ACTIVE market `mark - band` for a long and
+  `mark + band` for a short (`band` from `marketSlippageBps`); on a HALTED market the exit band, `low` for a long
+  and `high` for a short (below). The position is closed reduce-only through the book inside the bound (makers
+  fill at their own, better, prices, each under S-4.9.1), then on an active market by the backstop (within its
+  limit and margin), then by the opposite positions in ADL order, the last two AT the bound, with the account's
+  taker fee, or with no fee when the bound is the bankruptcy price (as a liquidation). A forced close is therefore
+  always served, never cheaper for the closer than the book, and (0.2.3, R436-1) can never leave a deficit: at
+  `f0e3967` it sold down to `mark - 5%` whatever the account's equity (test
+  `r436_1_a_forced_close_never_goes_past_the_bankruptcy_price`); withdraw: when `amount` (or all) is within free
+  collateral;
 - rejected and CONSUMED (event `ForcedRejected`) only for a reason the user caused and that is provable from
   finalized state on live prices: an unknown market id, a withdrawal above free collateral or not above the fee
-  while the HALT IS NOT INVOLVED in the account's free collateral, an unknown kind. The halt is involved
-  (`Engine::halted_involved`) when the account has a position in a halted market or (R395-39, 0.2) a resting
-  order there that reserves margin: both lower free collateral through a price the oracle rules do not stand
-  behind. Trigger orders and reduce-only orders reserve nothing (6.2) and do not count, so a user cannot park the
-  queue with a free order (test `r395_39_trigger_in_a_halted_market_does_not_make_an_overlarge_request_pending`);
-- a close of a position in a HALTED market is also SERVED, never refused for a halt (0.1.4, 394's README 6a):
-  reduce-only through the book only inside the exit band (`low` for a sell, `high` for a buy), the rest against
-  the opposite positions in ADL order at the settle price `settle` (the latest committee price since the halt,
-  else the last good index; always inside the band) with the account's taker fee;
+  while the account has NO POSITION in a halted market, an unknown kind. Before a withdrawal that cannot be served
+  is judged, the engine cancels the account's resting orders that reserve margin in HALTED markets (R395-39,
+  restated in 0.2.3; event `Cancelled` with `MARKET_HALTED`) and computes free collateral again: such orders
+  cannot fill and hold margin only through a price the oracle rules do not stand behind, so they may neither turn
+  the request into a consumed rejection (`f0e3967`) nor keep it waiting (0.2.0 left it pending until the user
+  cancelled, which with X3 now conditional could last until the vault's deadline). Trigger and reduce-only orders
+  reserve nothing (6.2) and are left alone (test
+  `r395_39_trigger_in_a_halted_market_does_not_make_an_overlarge_request_pending`);
+- a close of a position in a HALTED market is also SERVED, never refused for a halt (0.1.4, README 6a of the
+  oracle): reduce-only through the book only inside the exit band (`low` for a sell, `high` for a buy), the rest
+  against the opposite positions in ADL order AT THAT SAME SIDE OF THE BAND (0.2.3, R436-10 High; 432's corrected
+  6a: every exit of ONE account during a halt is priced at the side of the band worse for that account, and the
+  difference to `settle` belongs to the deleveraged counterparties; never past the bankruptcy price). Until 0.2.2
+  the rest closed at `settle`, which with no committee price since the halt is the FROZEN index: whoever decides
+  when the index freezes held a free stop at the last price, paid by the counterparty (436's demonstration: the
+  short avoided 2,660 USDC of a 4% move on 1 BTC). Tests `r436_10_a_forced_close_in_a_halt_is_priced_at_the_band_
+  side_worse_for_the_closer` (fails on `f0e3967`) and the restated `r395_5_forced_close_in_a_halt_…`;
 - PENDING, NOT consumed (event `ForcedPending`): a withdrawal that cannot be served (above free collateral, or
-  not above the fee) while the halt is involved as defined above, or a request from an address whose deposit is
-  not yet credited (the sequencer's delay). A pending head blocks everything behind it (strict index order). At
-  `f0e3967` a request that failed only because an order in a halted market held margin was rejected and consumed
-  (R395-39; test `r395_39_order_in_a_halted_market_makes_a_forced_withdraw_pending_not_rejected` fails there). It
-  is served as soon as the order is gone (the user's signed cancel is accepted in a halt, S-4.10) or the market
-  resumes, and at the latest after X3 (`maxHaltMs`), which cancels the market's orders. `amount = 0` (all free
-  collateral) is the recommended form of a forced withdrawal: it is never rejected for an amount.
+  not above the fee, after the cancellation above) while the account has a position in a halted market, or a
+  request from an address whose deposit is not yet credited (the sequencer's delay). A pending head blocks
+  everything behind it (strict index order). At `f0e3967` a request that failed only because an order in a halted
+  market held margin was rejected and consumed (R395-39; test
+  `r395_39_order_in_a_halted_market_makes_a_forced_withdraw_pending_not_rejected` fails there; since 0.2.3 it is
+  served in the block that processes it). `amount = 0` (all free collateral) is the recommended form of a forced
+  withdrawal: it is never rejected for an amount.
 - X3 settlement: when a market has been halted for `maxHaltMs` (default one hour, inside the vault's one-day
-  `forcedDelay`), step 5b of 3.3 cancels its orders and triggers and settles EVERY position of the market at
-  `settle` (event `MarketSettled`; exact: the sizes sum to zero, I-1, so I-2 holds); its collateral is then free
-  under S-9.2 and a pending withdrawal is served. Trade-off (stated): a genuine outage of an hour closes the
-  market's positions at the last price the committee signed.
+  `forcedDelay`) AND the committee has signed at least one price for it since the halt (0.2.3, R436-10, 432's rule:
+  `settle` is then that latest committee price), step 5b of 3.3 cancels its orders and triggers and settles EVERY
+  position of the market at `settle` (event `MarketSettled`; exact: the sizes sum to zero, I-1, so I-2 holds); its
+  collateral is then free under S-9.2 and a pending withdrawal is served. With NO committee price since the halt
+  nothing settles, however long it lasts: `settle` would be the frozen pre-halt index, a price chosen by whoever
+  withholds the oracle input (at `f0e3967` an hour of silence closed the whole market there; test
+  `r436_10_silence_alone_never_settles_a_market`). The market stays halted, single accounts still exit at the
+  band (forced close, S-9.2), and a silence that outlasts a pending request's deadline ends in the vault's escape.
+  Trade-offs (stated): a genuine outage of an hour with a committee price closes the market's positions at the
+  last price the committee signed; a genuine TOTAL oracle outage no longer settles by itself.
 
 `forcedProcessed` counts served plus rejected only. The vault (VAULT.md 5.3 rule 4) refuses a checkpoint that leaves
 a request unprocessed past its deadline and enters escape; the deadline counts from the request in L2
@@ -809,6 +926,7 @@ the paths it does reach: book fills, liquidations, ADL or backstop, funding, tri
 | 0.1.4 | 2026-11-17 | 394's exit band (README 6a) used for free collateral during a halt (replaces 0.1.3's x2 rule) and for forced closes in a halt (served at `settle`, never pending); X3 market settlement after `maxHaltMs`; genesis oracle exit fields; `Attestation` and other reserved type names (S-2.3.1) |
 | 0.1.5 | 2026-11-17 | systemHash adds withdrawalCount/withdrawalsTotal, nextForcedIndex = processed (VAULT 5.2; 390's vectors reproduced, new vector in tests/r395b.rs); R395-13 liquidation bound `lp` + no same-block makers; R395-14 backstop rules; R395-16 post-action samples + median; R395-23 insurance-first escape values |
 | 0.1.6 | 2026-11-17 | forced-request input and forcedHead = VAULT.md 0.2 fields (index, account, kind 0/1/2, deadline, arg), close = every market (390's report on 64072cb) |
+| 0.2.3 | 2026-11-19 | review 436's findings, each with a test that fails on `f0e3967`: R436-1 High (S-4.9.1 maintenance at every fill for makers and reducing takers; S-4.9 backing at placement; S-4.12 price band, error `PRICE_BAND`; forced close never past the bankruptcy price, section 14); R436-10 High (forced close in a halt at the band side worse for the closer; X3 only with a committee price since the halt); R436-4 High, engine half (S-3.2.0: a long agent name fails its input, never the block); R436-12 (S-5.1.2: an observation that fails its own rule is dropped); R436-2 (liquidations skip same-block orders instead of stopping); R436-8 (`impactNotional >= 1`, strict integers in the converter); R436-5 (BACKSTOP's realised loss settled and reported every block). R395-39 restated (orders in halted markets are cancelled before a forced withdrawal is judged). Section 12 states the residuals, 432's R395-9 bound and the escape's data-availability assumption (R436-11). 431's requests: events `Accepted`, `Fill` realised results, `Funding` mark and premium; public requirement queries. BEHAVIOUR CHANGES for clients: `PRICE_BAND`; under-backed orders refused at placement or cancelled when reached; forced-close prices |
 | 0.2.2 | 2026-11-18 | worked-example vectors (section 15: `engine/vectors/worked-examples.json`, 175 cases, independent Python checker, S-15.1 displayed liquidation price), proof vectors (`proofs-example.json`, CLI `prove`), formulas in one module (`calc.rs`) called by the state machine, properties P-1 to P-5 (section 17), 394's oracle vectors and 392's compliance files read at their source by tests. No state, root or encoding change |
 | 0.2.1 | 2026-11-18 | snapshots (section 16, format version 1; closes O-8): canonical state serialization, strict loader with magnitude bounds, mandatory expected root in the CLI, `logHash` stated as not covered by the root; `Engine::snapshot` / `Engine::restore`, CLI `snapshot` and `resume`; shared vector `engine/vectors/snapshot-v1.json`. No state, root or input encoding changes |
 | 0.2.0 | 2026-11-18 | round 2 (430): R395-39 (orders in a halted market make a forced withdrawal pending, section 14); R395-22 (S-9.2.1 recipients, error `BAD_RECIPIENT`, optional genesis `collateralToken`); R395-17 (ADL rank for `E <= 0`, bankruptcy price recomputed per position, INSURANCE never below zero; I-3 restated); R395-20 (S-2.4.2 nonce sets outlive agent removal); R395-21 (S-2.4.1 rule); R395-15 pinned; NEW R430-1 (BACKSTOP bad debt paid by INSURANCE; dust sweep before bad-debt settlement, 3.3 step 9b) and R430-2 (S-5.1.1 committee price above MAX_PRICE never becomes the index); unconditional escape bound (section 11); `NOT_LAUNCHED` listed in section 13. No change to any encoding, hash or root of a pre-0.2 log that does not exercise these rules |
@@ -823,6 +941,9 @@ backstop before its loss exceeds its balance (O-9; R430-1 only settles the debt 
 (O-11); a mandatory `collateralToken` (O-12); a freeze input (O-1); partial liquidation (O-2). The findings closed
 in 0.2 were demonstrated by tests that fail on `f0e3967` where the defect was in code (R395-39, R395-22, R430-1,
 R430-2) and by pins where the code already behaved as now specified (R395-15, R395-17, R395-20, R395-21): a pin
-shows the behaviour, not its failing-first history. Snapshots (section 16): the round-trip property is tested, not
+shows the behaviour, not its failing-first history. 0.2.3: S-4.9.1 is argued (no fill creates a deficit) and tested
+on the paths 436 and this round found, not proven for every path; the exit band's width is not calibrated (432);
+the residuals of section 12 stand; a rule that caps the backstop's loss before it is realised is not built (O-9).
+Snapshots (section 16): the round-trip property is tested, not
 proven; the format has had no external review; a snapshot loaded with no expected root (library only) is bound by
 nothing but its own consistency; `logHash` is outside the state root (S-16.4). UNAUDITED.

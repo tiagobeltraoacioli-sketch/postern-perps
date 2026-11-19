@@ -11,8 +11,11 @@ use postern_perps_engine::*;
 
 /// R395-39. A resting bid of 1 BTC reserves 6,725 of a's 10,000 USDC (leverage 10 on max(mark, bid) = 67,250); the
 /// market halts; a forced withdrawal of 5,000 USDC cannot be served only because the halted market's order holds
-/// margin. On f0e3967 it was REJECTED and consumed ("user-caused"); it must stay PENDING (the halt's doing) and be
-/// served as soon as the order is gone.
+/// margin. On f0e3967 it was REJECTED and consumed ("user-caused").
+/// Restated at SPEC 0.2.3 (same failing-first property: NOT rejected, the user is paid): 0.2.0 left the request
+/// PENDING until the user cancelled the order; that let a request wait on an order nobody could fill, and with
+/// X3 now gated on a committee price (R436-10) it could wait until the vault's deadline. Now the engine cancels
+/// the account's margin-reserving orders in HALTED markets before it judges the request, and serves it at once.
 #[test]
 fn r395_39_order_in_a_halted_market_makes_a_forced_withdraw_pending_not_rejected() {
     let mut r = Rig::one();
@@ -29,20 +32,9 @@ fn r395_39_order_in_a_halted_market_makes_a_forced_withdraw_pending_not_rejected
     assert!(r.e.accounts[r.ai(&a) as usize].positions.is_empty(), "no position: only the order is in the halted market");
     let f = r.forced(a, FORCED_WITHDRAW, 5_000_000_000);
     let out = r.block(1000, &[], vec![f]);
-    assert!(
-        out.events.iter().any(|e| matches!(e, Event::ForcedPending { index: 0, reason: Error::PositionInHaltedMarket })),
-        "must be pending, got {:?}",
-        out.events
-    );
-    assert_eq!(r.e.forced_processed, 0, "not consumed");
-    assert!(r.e.withdrawals.is_empty());
-    // the user cancels (allowed in a halt, S-4.10); forced requests are served BEFORE a block's actions (3.3 step
-    // 7), so the head is still pending in the block of the cancel and served in the next one
-    let c = sign_action(&r.e, &ka, Action::CancelAll { account: a, nonce: r.t + 1000, market_id: 0 });
-    let out = r.block(1000, &[], vec![c]);
-    assert_eq!(out.outcomes[0], Ok(()));
-    let out = r.block(1000, &[], vec![]);
+    assert!(!out.events.iter().any(|e| matches!(e, Event::ForcedRejected { .. })), "must not be rejected as user-caused: {:?}", out.events);
     assert!(out.events.iter().any(|e| matches!(e, Event::ForcedServed { index: 0 })), "{:?}", out.events);
+    assert!(r.e.accounts[r.ai(&a) as usize].orders.is_empty(), "the order in the halted market was cancelled");
     let w = r.e.withdrawals.last().unwrap();
     assert_eq!((w.recipient, w.amount), (a, 4_999_000_000), "5,000 gross minus the 1 USDC fee, to the account itself");
     assert_eq!(r.e.forced_processed, 1);
