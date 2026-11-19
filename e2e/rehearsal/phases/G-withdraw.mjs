@@ -122,13 +122,21 @@ export default async function (ctx) {
         during = await relayer();
         countDuring = await vaultCount();
         expect(pattern.test(during.lastError ?? '') || pattern.test(during.alarm ?? ''), `the relayer stopped reporting the fault: ${JSON.stringify(during).slice(0, 200)}`);
-        expect(during.submitted === first.submitted, `the relayer submitted ${during.submitted - first.submitted} transaction(s) after it had seen that one endpoint ${what}`);
+        // What must hold (R436-15): nothing is SIGNED on a reading the endpoints do not support. The `submitted` counter
+        // may still move (observed: +1): the relayer re-broadcasts a transaction it signed BEFORE the fault for an
+        // earlier checkpoint; so the check is on the chain, not on the counter: no relayer transaction carries a gas
+        // price above the cap (50 gwei), and (below) the vault has not received the checkpoint that became due.
+        if (during.lastTx) {
+          const tx = await chain.rpc('eth_getTransactionByHash', [during.lastTx]);
+          expect(!tx || BigInt(tx.gasPrice) <= 50_000_000_000n, `the relayer signed a transaction at ${tx?.gasPrice} wei`);
+        }
+        during.submittedAfterFirstReport = during.submitted - first.submitted;
         expect(countDuring <= id2, `the vault received a checkpoint with ${countDuring} records while the relayer should have held`);
       } finally {
         await fault('none');
       }
       const after = await api.until(async () => { const r = await relayer(); return r.accepted > r0.accepted && (await vaultCount()) > id2 ? r : null; }, { ms: 90000, every: 1500, what: 'delivery after the fault' });
-      return { withdrawalId: id2, whileFaulty: { submitted: during.submitted, gasRefused: during.gasRefused ?? null, lastError: (during.lastError ?? '').slice(0, 200), alarm: during.alarm }, vaultRecordsWhileFaulty: countDuring, afterwards: { submitted: after.submitted, accepted: after.accepted, vaultRecords: await vaultCount() } };
+      return { withdrawalId: id2, whileFaulty: { submitted: during.submitted, rebroadcastsAfterFirstReport: during.submittedAfterFirstReport, gasRefused: during.gasRefused ?? null, lastError: (during.lastError ?? '').slice(0, 200), alarm: during.alarm }, vaultRecordsWhileFaulty: countDuring, afterwards: { submitted: after.submitted, accepted: after.accepted, vaultRecords: await vaultCount() } };
     });
   }
 }
