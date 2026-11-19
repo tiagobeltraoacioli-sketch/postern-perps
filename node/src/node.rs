@@ -48,10 +48,25 @@ pub struct App {
     pub new_block: Notify,
     pub blocks_tx: broadcast::Sender<Arc<BlockInfo>>,
     pub ip_rate: Mutex<RateLimit>,
+    /// Per-IP limit of REST reads (API.md section 8: 100 per second, burst 200; `--read-rate`, 0 = off)
+    pub read_rate: Mutex<RateLimit>,
     pub validators: Mutex<BTreeMap<String, ValidatorStatus>>,
     pub block_interval_ms: u64,
     pub started_ms: u64,
     pub l2_configured: bool,
+    /// The collateral token (bUSDC) address of the deployment (display only; zero when not configured).
+    pub collateral_token: crate::util::Address,
+    /// Bearer token of the oracle ingest paths (`--oracle-token-file`); `None` = ingest disabled.
+    pub oracle_token: Option<Vec<u8>>,
+    /// Attestation records (`crate::attest`)
+    pub attestations: Mutex<crate::attest::Attestations>,
+    /// One state rebuild from the log at a time (`api::rebuild_frame`)
+    pub rebuild_gate: tokio::sync::Mutex<()>,
+    /// `Access-Control-Allow-Origin` of every response (`--cors-origin`; dev default `*`: no cookies, no
+    /// sessions, authority comes only from signatures).
+    pub cors_origin: Mutex<String>,
+    /// The checkpoint relayer's view of the vault (`crate::relayer`). Lock order: `seq` before `relay`.
+    pub relay: Mutex<crate::relayer::RelayState>,
 }
 
 pub fn now_ms() -> u64 {
@@ -70,8 +85,19 @@ pub fn ip_key(ip: IpAddr) -> [u8; 20] {
 
 impl App {
     pub fn new(g: Arc<Genesis>, seq: Sequencer, geo: GeoPolicy, mode: Mode, view: SharedView, block_interval_ms: u64, l2_configured: bool) -> Arc<App> {
+        Self::with(g, seq, geo, mode, view, block_interval_ms, l2_configured, [0u8; 20], None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with(g: Arc<Genesis>, seq: Sequencer, geo: GeoPolicy, mode: Mode, view: SharedView, block_interval_ms: u64, l2_configured: bool, collateral_token: crate::util::Address, oracle_token: Option<Vec<u8>>) -> Arc<App> {
         let (tx, _) = broadcast::channel(4096);
         Arc::new(App {
+            collateral_token,
+            oracle_token,
+            relay: Mutex::new(crate::relayer::RelayState::default()),
+            cors_origin: Mutex::new("*".into()),
+            rebuild_gate: tokio::sync::Mutex::new(()),
+            attestations: Mutex::new(crate::attest::Attestations::default()),
             g,
             seq: Mutex::new(seq),
             geo,
@@ -80,6 +106,7 @@ impl App {
             new_block: Notify::new(),
             blocks_tx: tx,
             ip_rate: Mutex::new(RateLimit::new(50.0, 100.0)),
+            read_rate: Mutex::new(RateLimit::new(100.0, 200.0)),
             validators: Mutex::new(BTreeMap::new()),
             block_interval_ms,
             started_ms: now_ms(),
@@ -184,8 +211,35 @@ pub fn spawn_local_validators(
 /// replays them with its own engine and its own L2 view, and posts its checkpoint signatures to
 /// `POST /v1/finality/signatures`. It trusts the sequencer's API for nothing but bytes: every block is verified
 /// exactly as the in-process validators do (`Validator::process`).
-pub async fn run_remote_validator(base: String, mut v: Validator, mut stop: tokio::sync::watch::Receiver<bool>) -> Result<(), String> {
+pub async fn run_remote_validator(base: String, v: Validator, stop: tokio::sync::watch::Receiver<bool>) -> Result<(), String> {
+    run_remote_validator_with(base, v, stop, None).await
+}
+
+/// As `run_remote_validator`, with the validator's own store (`crate::vserve`): at start the blocks of its own log
+/// are re-applied without the sequencer (`Validator::replay_own`), and every block it applies afterwards is
+/// appended to that log, so its read service can serve blocks and account proofs from its own replay (R436-11).
+pub async fn run_remote_validator_with(base: String, mut v: Validator, mut stop: tokio::sync::watch::Receiver<bool>, store: Option<crate::vserve::SharedStore>) -> Result<(), String> {
     use crate::watcher::http_call;
+    if let Some(st) = &store {
+        let last = st.lock().unwrap().log.last_height;
+        for h in 1..=last {
+            let b = st.lock().unwrap().log.read(h)?.ok_or("own log read")?;
+            v.replay_own(&b)?;
+        }
+        let mut s = st.lock().unwrap();
+        s.replayed_own = last;
+        s.height = v.height;
+        s.last = format!("replayed {last} blocks from the own log");
+    }
+    let note = |v: &Validator, last: String| {
+        if let Some(st) = &store {
+            let mut s = st.lock().unwrap();
+            s.height = v.height;
+            s.signed = v.signed_count;
+            s.latched = v.latched.clone();
+            s.last = last;
+        }
+    };
     loop {
         if *stop.borrow() {
             return Ok(());
@@ -210,17 +264,30 @@ pub async fn run_remote_validator(base: String, mut v: Validator, mut stop: toki
             continue;
         }
         for b in blocks {
-            match v.process(&b, now_ms()) {
+            let r = v.process(&b, now_ms());
+            // a block this validator applied goes into its own log (with the checkpoint it signed, if any)
+            if let (Some(st), VResult::Applied { .. } | VResult::AppliedNotSigned(_)) = (&store, &r) {
+                let cp = match &r {
+                    VResult::Applied { checkpoint: Some(c) } => Some(c),
+                    _ => None,
+                };
+                st.lock().unwrap().applied(&b, cp, v.engine.real())?;
+            }
+            match r {
                 VResult::Applied { checkpoint: Some((body, sig)) } => {
                     let req = serde_json::json!({"height": body.height, "signature": crate::util::to_hex(&sig)}).to_string();
                     let _ = http_call("POST", &format!("{base}/v1/finality/signatures"), Some(&req), &[]).await;
+                    note(&v, format!("signed {}", body.height));
                 }
-                VResult::Applied { checkpoint: None } | VResult::AppliedNotSigned(_) => {}
-                VResult::Wait(_) => {
+                VResult::Applied { checkpoint: None } => note(&v, format!("applied {}", b.header.height)),
+                VResult::AppliedNotSigned(s) => note(&v, s),
+                VResult::Wait(s) => {
+                    note(&v, s);
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     break;
                 }
                 VResult::Refused { reason, latched } => {
+                    note(&v, reason.clone());
                     if latched {
                         return Err(format!("validator latched: {reason}"));
                     }

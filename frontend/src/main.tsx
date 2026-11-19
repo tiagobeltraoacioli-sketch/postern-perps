@@ -6,9 +6,10 @@ import { App } from './App';
 import { LOCAL_RENDER } from './lib/config';
 import { feed } from './state/session';
 import { feedStats } from './lib/feed';
+import { chartStats } from './chart';
 
 // Local render builds only (loopback mock): the harness reads the feed and its frame statistics.
-if (LOCAL_RENDER) (window as unknown as Record<string, unknown>).__perps = { feed, feedStats };
+if (LOCAL_RENDER) (window as unknown as Record<string, unknown>).__perps = { feed, feedStats, chartStats };
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

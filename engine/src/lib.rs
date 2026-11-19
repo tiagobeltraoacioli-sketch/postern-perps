@@ -7,6 +7,7 @@
 pub mod num;
 pub mod hash;
 pub mod eip712;
+pub mod calc;
 pub mod types;
 pub mod codec;
 pub mod genesis;
@@ -15,7 +16,9 @@ pub mod oracle;
 pub mod merkle;
 pub mod engine;
 pub mod invariants;
+pub mod snapshot;
 pub mod testkit;
+pub mod vectors;
 
 pub use engine::{BlockError, BlockOutcome, Engine, Event};
 pub use types::*;

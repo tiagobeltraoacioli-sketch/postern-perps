@@ -1,0 +1,3 @@
+c2d.json copied from branch codex/perps-oracle-r2-20261118 at 2c9b0f6 (agent 432, node/oracle/vectors/c2d.json), 2026-11-19.
+Shared vectors of rule C2d (README section 5, R436-12). UNAUDITED prototype, throwaway keys.
+The test also reads node/oracle/vectors/c2d.json when it exists (after 435 merges the oracle branch) and requires it to be byte-identical.

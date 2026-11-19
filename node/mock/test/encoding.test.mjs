@@ -47,3 +47,14 @@ test('strict decoder refuses trailing bytes, truncation, tag disorder, bool > 1 
   assert.throws(() => encodeInputs([{ ...inputs[1], payload: { ...inputs[1].payload, amount: String(1n << 64n) } }], FX), /range/);
   void unhex;
 });
+
+// The conformance suite checks the fees a real node charges against the rates it publishes: the formula it uses is
+// pinned to SPEC section 15's worked example (a wrong divisor here made the check fail on a correct node once).
+test('conformance fee formula: SPEC 15 worked example and the rounding direction', async () => {
+  const { publishedFee } = await import('../conformance/run.mjs');
+  assert.equal(publishedFee(6725000000000n, 50000000n, '4.5'), 15131250n);   // 0.5 BTC at 67,250: 15.131250 USDC
+  assert.equal(publishedFee(6725000000000n, 50000000n, '1.5'), 5043750n);
+  assert.equal(publishedFee(5964050000000n, 20000n, '4.5'), 5368n);          // 11.9281 USD x 0.00045 = 0.00536764... -> up
+  assert.equal(publishedFee(1n, 1n, '4.5'), 1n);                             // any positive fee is at least one unit
+  assert.throws(() => publishedFee(1n, 1n, '4.55555'));
+});

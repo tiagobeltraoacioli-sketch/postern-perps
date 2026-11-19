@@ -11,7 +11,7 @@ export function LeverageDialog({ market, current, isolated, onClose }: { market:
   const { request } = useActions();
   const [lev, setLev] = useState(current);
   const [iso, setIso] = useState(isolated);
-  const tierCaps = market.tiers.map((t) => `${t.maxLeverage}x up to ${t.upTo === null ? 'any size' : `${formatUsd(t.upTo, { dp: 0 })} USDC`}`);
+  const tierCaps = market.tiers.map((t, i) => `${t.maxLeverage}x up to ${i + 1 < market.tiers.length ? `${formatUsd(market.tiers[i + 1].floor, { dp: 0 })} USDC` : 'any size'}`);
   return (
     <Modal title={`${market.symbol} leverage`} onClose={onClose} eyebrow="Margin settings">
       <div className="dialog-body">

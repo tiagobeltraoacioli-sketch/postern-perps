@@ -7,6 +7,8 @@ declare const __POSTERN_CONFIG__: {
   vault: string | null;
   collateral: string | null;
   explorerTx: string | null;
+  /** L2 block the vault was deployed at (where the page starts reading the vault's own logs); absent: block 0. */
+  vaultDeployBlock?: number;
 };
 declare const __POSTERN_LOCAL_RENDER__: boolean;
 

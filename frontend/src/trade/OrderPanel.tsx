@@ -12,17 +12,18 @@ import { BASE_FEES, orderPreview, sizeForBudget, accountSummary, health } from '
 import { formatPpm, formatPx, formatSize, formatUsd, DASH } from '../lib/format';
 import { SZ_DECIMALS, toDecimalString } from '../lib/fixed';
 import { buildOrder, DEFAULT_SLIPPAGE_PPM, isMarketKind, isTriggerKind, newClientOrderId, parseAt, priceText, type OrderForm } from './order-builder';
-import { positionInputs, pricePick, useAccountState } from './hooks';
+import { orderSide, positionInputs, pricePick, useAccountState } from './hooks';
 import type { Market, OrderType, Ticker, TimeInForce } from '../lib/types';
 import { storedAttestation } from '../compliance/eligibility';
 import { Attestation } from '../compliance/Attestation';
+import { X } from 'lucide-react';
 import { LeverageDialog } from './LeverageDialog';
 import { orderTypeWords } from '../lib/eip712';
 
 type Mode = 'limit' | 'market' | 'trigger';
 const slippage = persisted<string>('postern.perps.slippage.v1', '1', (v): v is string => typeof v === 'string' && /^\d{1,2}(\.\d{1,2})?$/.test(v));
 
-export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker | undefined }) {
+export function OrderPanel({ market, ticker, onClose }: { market: Market; ticker: Ticker | undefined; onClose?: () => void }) {
   const { account, request, pending } = useActions();
   const state = useAccountState();
   const book = useStore(feed.book);
@@ -31,7 +32,8 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
   const geo = useStore(geoStore);
   const picked = useStore(pricePick);
   const slip = useStore(slippage);
-  const [side, setSide] = useState<'buy' | 'sell'>('buy');
+  const side = useStore(orderSide);
+  const setSide = (s: 'buy' | 'sell') => orderSide.set(s);
   const [mode, setMode] = useState<Mode>('limit');
   const [triggerKind, setTriggerKind] = useState<OrderType>('stopMarket');
   const [size, setSize] = useState('');
@@ -101,7 +103,7 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
       return;
     }
     const px = built.price ?? ticker.mark;
-    const s = sizeForBudget({ budget: (summary.available * pct) / 100n, px, leverage, feePpm: fees.takerPpm, step: market.step });
+    const s = sizeForBudget({ budget: (summary.available * pct) / 100n, px, leverage, feePpm: fees.takerPpm, step: market.step, tiers: market.tiers });
     setSize(toDecimalString(s / 10n ** BigInt(SZ_DECIMALS - market.sizeDecimals), market.sizeDecimals));
   };
 
@@ -138,6 +140,12 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
       <div className="gate-head" aria-hidden="true">
         <span className="gate-lamp" />
       </div>
+      {onClose && (
+        <button type="button" className="icon-button sheet-close" aria-label="Close the order form" onClick={onClose}>
+          <X size={20} aria-hidden="true" />
+        </button>
+      )}
+      <div className="gate-top">
       <div className="side-switch" role="radiogroup" aria-label="Side">
         <button type="button" role="radio" aria-checked={side === 'buy'} className="side-long" onClick={() => setSide('buy')}>
           Long
@@ -146,16 +154,22 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
           Short
         </button>
       </div>
-      <div className="mode-tabs" role="tablist" aria-label="Order type">
-        {(['limit', 'market', 'trigger'] as Mode[]).map((m) => (
-          <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>
-            {m === 'trigger' ? 'Stop / TP' : m === 'limit' ? 'Limit' : 'Market'}
-          </button>
-        ))}
+      <div className="mode-tabs">
+        {/* The tab list holds only tabs; the leverage button stands beside it. */}
+        <div className="mode-tablist" role="tablist" aria-label="Order type">
+          {(['limit', 'market', 'trigger'] as Mode[]).map((m) => (
+            <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>
+              {m === 'trigger' ? 'Stop / TP' : m === 'limit' ? 'Limit' : 'Market'}
+            </button>
+          ))}
+        </div>
         <button type="button" className="lev-chip" onClick={() => setLeverageOpen(true)} disabled={!account} title="Leverage and margin mode for this market">
           <span className="num">{leverage}x</span> {isolated ? 'Isolated' : 'Cross'}
         </button>
       </div>
+      </div>
+      {/* The body scrolls when the panel is shorter than its content; the action below never leaves the screen. */}
+      <div className="gate-body">
 
       {mode === 'trigger' && (
         <label className="field">
@@ -275,13 +289,7 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
         </ul>
       ) : null}
 
-      {account && !acknowledged ? (
-        <Attestation account={account} onDone={() => setAckTick((t) => t + 1)} />
-      ) : (
-        <button type="button" className={`button button-block button-trade ${side === 'buy' ? 'tone-long' : 'tone-short'}`} disabled={!built.message || busy || problems.includes('reduce-only-increases')} onClick={submit}>
-          {!account ? 'Connect a wallet to trade' : built.message ? `Review ${verb.toLowerCase()} ${size} ${market.base}` : `${verb} ${market.base}`}
-        </button>
-      )}
+      {account && !acknowledged && <Attestation account={account} onDone={() => setAckTick((t) => t + 1)} />}
       <p className="fine">Estimates from integer arithmetic on the exchange's published values; the engine's result is final. Leveraged positions can be liquidated.</p>
 
       {summary && (
@@ -303,6 +311,16 @@ export function OrderPanel({ market, ticker }: { market: Market; ticker: Ticker 
           </div>
         </dl>
       )}
+      </div>
+      <div className="gate-foot">
+        {account && !acknowledged ? (
+          <p className="gate-foot-note">Read and sign the statement above to place your first order.</p>
+        ) : (
+          <button type="button" className={`button button-block button-trade ${side === 'buy' ? 'tone-long' : 'tone-short'}`} disabled={!built.message || busy || problems.includes('reduce-only-increases')} onClick={submit}>
+            {!account ? 'Connect a wallet to trade' : built.message ? `Review ${verb.toLowerCase()} ${size} ${market.base}` : `${verb} ${market.base}`}
+          </button>
+        )}
+      </div>
       {leverageOpen && <LeverageDialog market={market} current={leverage} isolated={isolated} onClose={() => setLeverageOpen(false)} />}
     </section>
   );

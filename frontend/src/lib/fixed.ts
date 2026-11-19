@@ -5,12 +5,12 @@
  *   price  : 1e8  (a price of 1 USD is 100_000_000)
  *   size   : 1e8  (one contract of the base asset is 100_000_000)
  *   USDC   : 1e6  (the collateral token bUSDC has 6 decimals)
- *   rate   : 1e8  (a funding rate of 0.01% is 10_000)
+ *   rate   : 1e9  (SPEC 1 RATE_SCALE: a funding rate of 0.01% is 100_000; round 1 used 1e8 before SPEC existed)
  */
 export const PX_DECIMALS = 8;
 export const SZ_DECIMALS = 8;
 export const USDC_DECIMALS = 6;
-export const RATE_DECIMALS = 8;
+export const RATE_DECIMALS = 9;
 export const PX = 10n ** BigInt(PX_DECIMALS);
 export const SZ = 10n ** BigInt(SZ_DECIMALS);
 export const USDC = 10n ** BigInt(USDC_DECIMALS);

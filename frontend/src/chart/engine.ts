@@ -26,7 +26,7 @@ import {
   type View,
 } from './scale';
 import { layoutTags, type TagInput } from './levels';
-import { drawBase, drawOverlay, font, pickBox, placeFills, type Crosshair, type Ctx, type Scene } from './render';
+import { drawBase, drawOverlay, font, pickBox, placeFills, VOLUME_SHARE, type Crosshair, type Ctx, type Scene } from './render';
 import { readPalette, type Palette, type Theme } from './palette';
 import { formatCandleTime, formatNumber } from './format';
 import { tabularWidth } from './text';
@@ -554,8 +554,11 @@ export class ChartEngine {
       const raw = autoRange(ext.lo, ext.hi, [d.mark?.price, d.index?.price], 0);
       if (raw) {
         const span = raw.max - raw.min;
-        // Room under the lows for the volume band, a little above the highs.
-        range = { min: raw.min - span * 0.3, max: raw.max + span * 0.08 };
+        // A little air above the highs; under the lows the volume lane (render.ts VOLUME_SHARE of the plot) plus a
+        // gap: the lowest low sits at 1 - VOLUME_SHARE - 0.03 of the height, so candles and volume never overlap.
+        const above = 0.08;
+        const total = (span * (1 + above)) / (1 - VOLUME_SHARE - 0.03);
+        range = { min: raw.max + span * above - total, max: raw.max + span * above };
       } else if (d.mark || d.index) {
         const p = (d.mark ?? d.index)!.price;
         range = autoRange(p, p, [], 0.08);
@@ -592,6 +595,7 @@ export class ChartEngine {
       i0,
       i1,
       volMax: ext.vMax,
+      laneClear: this.manualRange === null,
       palette: this.palette,
       candleStyle: d.candleStyle,
       priceDecimals: d.priceDecimals,

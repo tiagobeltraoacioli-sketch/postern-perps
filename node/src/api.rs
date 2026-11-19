@@ -12,7 +12,7 @@
 use crate::actions::{field_bool, parse_request, verify_signed_action};
 use crate::geo::GeoDecision;
 use crate::node::{ip_key, now_ms, App};
-use crate::types::{deposit_json, forced_json, input_json, decode_inputs};
+use crate::types::{decode_inputs, input_json};
 use crate::util::{parse_address, parse_hex_fixed, to_hex, Address};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
@@ -25,7 +25,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const API_VERSION: &str = "0.2";
+pub const API_VERSION: &str = "0.3";
 
 type Q = Query<HashMap<String, String>>;
 
@@ -51,14 +51,15 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/status", get(status))
         .route("/v1/node", get(node_info))
         .route("/v1/eip712", get(eip712))
+        .route("/v1/genesis", get(genesis_doc))
         .route("/v1/markets", get(markets))
         .route("/v1/markets/{symbol}", get(market))
         .route("/v1/tickers", get(tickers))
         .route("/v1/markets/{symbol}/ticker", get(ticker))
         .route("/v1/markets/{symbol}/book", get(book))
-        .route("/v1/markets/{symbol}/trades", get(empty_list_trades))
-        .route("/v1/markets/{symbol}/candles", get(empty_list_candles))
-        .route("/v1/markets/{symbol}/funding", get(empty_list_funding))
+        .route("/v1/markets/{symbol}/trades", get(market_trades))
+        .route("/v1/markets/{symbol}/candles", get(market_candles))
+        .route("/v1/markets/{symbol}/funding", get(market_funding))
         .route("/v1/committee", get(committee))
         .route("/v1/finality/latest", get(finality_latest))
         .route("/v1/finality/signatures", post(finality_signature))
@@ -76,14 +77,23 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/accounts/{address}/deposits", get(account_deposits))
         .route("/v1/accounts/{address}/fills", get(account_fills))
         .route("/v1/accounts/{address}/funding", get(account_funding))
+        .route("/v1/accounts/{address}/proof", get(account_proof))
         .route("/v1/withdrawals/{id}", get(withdrawal))
+        .route("/v1/withdrawals/{id}/proof", get(withdrawal_proof))
+        .route("/v1/orders/{id}", get(order_by_id))
+        .route("/v1/oracle/observations", post(oracle_observation))
+        .route("/v1/oracle/updates", post(oracle_update))
+        .route("/v1/oracle/rounds/latest", get(oracle_rounds))
         .route("/v1/deposits/{tx}", get(deposits_by_tx))
         .route("/v1/forced", get(forced))
         .route("/v1/geo", get(geo))
+        .route("/v1/attestations", post(post_attestation))
+        .route("/v1/attestations/{address}", get(get_attestation))
         .route("/v1/ws", get(ws))
         .route("/v1/oracle/{symbol}", get(oracle_status))
         .fallback(|| async { not_found("unknown endpoint") })
         .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(axum::middleware::from_fn_with_state(app.clone(), cors))
         .with_state(app)
 }
 
@@ -105,14 +115,14 @@ async fn status(State(app): State<Arc<App>>) -> Response {
         "name": "postern-perps-node", "version": env!("CARGO_PKG_VERSION"), "apiVersion": API_VERSION,
         "mode": app.mode.name(), "unaudited": true,
         "network": {"eip712": app.g.engine_domain.to_json(), "collateralChainId": 700770, "vault": to_hex(&app.g.vault),
-            "collateralToken": to_hex(&[0u8; 20]), "collateralSymbol": "bUSDC", "collateralDecimals": 6},
+            "collateralToken": to_hex(&app.collateral_token), "collateralSymbol": "bUSDC", "collateralDecimals": 6},
         "time": now_ms(),
         "latestBlock": latest.as_ref().map(block_summary).unwrap_or(genesis_ref),
         "latestFinalized": fin.as_ref().map(block_summary),
         "sequencer": {"state": if s.halted.is_some() {"halted"} else {"running"}, "blockIntervalMs": app.block_interval_ms,
             "pendingActions": s.mempool_len()},
         "committee": {"n": app.g.committee.len(), "threshold": app.g.threshold, "online": online},
-        "vaultMode": "unknown",
+        "vaultMode": app.relay.lock().unwrap().vault_mode,
         "l2": {"finalizedBlock": v.finalized_block, "lastDepositBlock": v.deposits.values().next_back().map(|d| d.l2_block).unwrap_or(0),
             "endpointsAgree": v.endpoints_agree},
     }))
@@ -125,16 +135,65 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
     let v = app.view.lock().unwrap();
     let vals = app.validators.lock().unwrap();
     Json(serde_json::json!({
-        "engine": s.engine.name(), "haltReason": s.halted, "collateralToken": "TBD-deploy (zero address in /v1/status)",
+        "engine": s.engine.name(), "haltReason": s.halted,
+        "index": s.index.as_ref().map(|ix| serde_json::json!({"fromHeight": ix.from_height, "height": ix.height, "mismatches": ix.mismatches,
+            "lastMismatch": ix.last_mismatch, "nextTradeId": ix.next_trade_id.to_string(), "nextFillId": ix.next_fill_id.to_string()})),
+        "oracleIngest": {"enabled": app.oracle_token.is_some(), "pool": s.oracle_pool.to_json(&app.g)},
+        "proofFrames": {"held": s.frames.keys().collect::<Vec<_>>(), "pinned": s.pinned_frames.iter().collect::<Vec<_>>()},
+        "relayer": app.relay.lock().unwrap().to_json(),
+        "attestations": {"required": app.attestations.lock().unwrap().required, "held": app.attestations.lock().unwrap().len(),
+            "statements": app.attestations.lock().unwrap().statements},
         "validators": vals.values().map(|x| serde_json::json!({"address": x.address, "height": x.height, "signed": x.signed, "last": x.last, "latched": x.latched})).collect::<Vec<_>>(),
         "l2": {"configured": app.l2_configured, "finalizedBlock": v.finalized_block, "scannedTo": v.scanned_to, "l2TimeS": v.l2_time_s,
             "lastDepositIndex": v.deposits.keys().next_back(), "endpointsAgree": v.endpoints_agree, "lastError": v.last_error, "polls": v.polls, "disagreements": v.disagreements},
-        "recovery": {"snapshotHeight": s.recovered.snapshot_height, "replayedBlocks": s.recovered.replayed_blocks,
+        "recovery": {"snapshotHeight": s.recovered.snapshot_height, "indexRestored": s.recovered.index_restored, "replayedBlocks": s.recovered.replayed_blocks,
             "tornTailBytes": s.recovered.torn_tail_bytes, "checkpointsLoaded": s.recovered.checkpoints_loaded},
         "genesisLogHash": to_hex(&app.g.genesis_log_hash()), "typedDataHash": to_hex(&app.g.typed_data_hash),
         "committeeSetHash": to_hex(&app.g.committee_set_hash()),
     }))
     .into_response()
+}
+
+/// CORS (API.md section 1): every response carries the configured origin; a preflight is answered here. The API
+/// has no cookies and no sessions, so the header grants nothing a non-browser client does not already have.
+///
+/// The same layer applies the per-IP READ limit of section 8 (R436-6: reads were unlimited): every GET except the
+/// WebSocket upgrade takes a token of the caller's bucket; an empty bucket is `429 RATE_LIMITED`.
+async fn cors(State(app): State<Arc<App>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let origin = app.cors_origin.lock().unwrap().clone();
+    let preflight = req.method() == axum::http::Method::OPTIONS;
+    let limited = req.method() == axum::http::Method::GET
+        && req.uri().path() != "/v1/ws"
+        && req.extensions().get::<ConnectInfo<SocketAddr>>().is_some_and(|ci| !app.read_rate.lock().unwrap().allow(&ip_key(ci.0.ip()), now_ms()));
+    let mut resp = if preflight {
+        StatusCode::NO_CONTENT.into_response()
+    } else if limited {
+        error(429, "RATE_LIMITED", "per-IP read rate", serde_json::json!({}))
+    } else {
+        next.run(req).await
+    };
+    let h = resp.headers_mut();
+    if let Ok(v) = HeaderValue::from_str(&origin) {
+        h.insert("access-control-allow-origin", v);
+    }
+    h.insert("vary", HeaderValue::from_static("origin"));
+    if preflight {
+        h.insert("access-control-allow-methods", HeaderValue::from_static("GET, POST, OPTIONS"));
+        h.insert("access-control-allow-headers", HeaderValue::from_static("content-type, x-postern-geo, x-postern-geo-mac, x-mock-country"));
+        h.insert("access-control-max-age", HeaderValue::from_static("600"));
+    }
+    resp
+}
+
+/// R435-1: the engine's genesis document, byte for byte what `logHash(0)` commits to
+/// (`keccak256("PosternPerps/genesis/v1" || document)`), so anyone can replay `/v1/blocks/stream` with the engine
+/// CLI from published data only.
+async fn genesis_doc(State(app): State<Arc<App>>) -> Response {
+    let doc = app.seq.lock().unwrap().engine.genesis_document();
+    match doc {
+        Some(d) => ([("content-type", "application/json")], d).into_response(),
+        None => not_found("the stub engine has no genesis document"),
+    }
 }
 
 async fn eip712(State(app): State<Arc<App>>) -> Response {
@@ -186,8 +245,11 @@ async fn market(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Respons
 
 fn ticker_json(app: &App, m: &crate::genesis::Market) -> serde_json::Value {
     let s = app.seq.lock().unwrap();
+    if let Some(j) = s.ticker_json(m.market_id) {
+        return j;
+    }
     let t = s.engine.time();
-    // the dev node has no oracle feeder and the stats indexer is not built: zero values, stated in /v1/node
+    // the stub engine has no markets: zero values
     serde_json::json!({"symbol": m.symbol, "markPrice": "0", "indexPrice": "0", "lastPrice": "0", "fundingRate": "0",
         "nextFundingTime": (t / 3_600_000 + 1) * 3_600_000, "openInterest": "0", "volume24h": "0", "high24h": "0", "low24h": "0",
         "price24hAgo": "0", "change24h": "0", "height": s.engine.height(), "time": t})
@@ -219,35 +281,234 @@ async fn book(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Res
     Json(s.book_json(&sym, depth).unwrap_or(serde_json::Value::Null)).into_response()
 }
 
-async fn empty_list_trades(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
-    if app.g.market_by_symbol(&sym).is_none() {
-        return not_found("unknown market");
-    }
-    Json(serde_json::json!({"trades": []})).into_response()
+/// `limit` (default 100, 1 to 1000) and `before` (exclusive cursor: a decimal id from `nextCursor`).
+fn page(q: &HashMap<String, String>) -> Result<(usize, Option<u64>), Response> {
+    let limit = match q.get("limit") {
+        None => 100,
+        Some(l) => match l.parse::<usize>() {
+            Ok(n) if (1..=1000).contains(&n) => n,
+            _ => return Err(error(400, "MALFORMED", "limit must be 1 to 1000", serde_json::json!({"path": "limit"}))),
+        },
+    };
+    let before = match q.get("before") {
+        None => None,
+        Some(b) => match b.parse::<u64>() {
+            Ok(n) => Some(n),
+            Err(_) => return Err(error(400, "MALFORMED", "before must be a cursor taken from nextCursor", serde_json::json!({"path": "before"}))),
+        },
+    };
+    Ok((limit, before))
 }
-async fn empty_list_candles(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Response {
-    if app.g.market_by_symbol(&sym).is_none() {
-        return not_found("unknown market");
+
+fn with_cursor(key: &str, items: Vec<serde_json::Value>, cursor: Option<String>) -> Response {
+    let mut j = serde_json::json!({ key: items });
+    if let Some(c) = cursor {
+        j["nextCursor"] = c.into();
     }
-    if !matches!(q.get("interval").map(|s| s.as_str()).unwrap_or("1m"), "1m" | "5m" | "15m" | "1h" | "4h" | "1d") {
-        return error(400, "MALFORMED", "unknown interval", serde_json::json!({"path": "interval"}));
-    }
-    Json(serde_json::json!({"candles": []})).into_response()
+    Json(j).into_response()
 }
-async fn empty_list_funding(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
-    if app.g.market_by_symbol(&sym).is_none() {
-        return not_found("unknown market");
+
+/// `symbol` query filter -> market id; an unknown symbol is 404.
+fn symbol_filter(app: &App, q: &HashMap<String, String>) -> Result<Option<u32>, Response> {
+    match q.get("symbol") {
+        None => Ok(None),
+        Some(sym) => app.g.market_by_symbol(sym).map(|m| Some(m.market_id)).ok_or_else(|| not_found("unknown market")),
     }
-    Json(serde_json::json!({"funding": []})).into_response()
+}
+
+async fn market_trades(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Response {
+    let Some(m) = app.g.market_by_symbol(&sym) else { return not_found("unknown market") };
+    let (limit, before) = match page(&q) {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let s = app.seq.lock().unwrap();
+    let (items, cursor) = s.index.as_ref().map(|ix| ix.trades(m.market_id, limit, before)).unwrap_or_default();
+    with_cursor("trades", items, cursor)
+}
+
+async fn market_candles(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Response {
+    let Some(m) = app.g.market_by_symbol(&sym) else { return not_found("unknown market") };
+    let Some(iv) = crate::index::interval_index(q.get("interval").map(|s| s.as_str()).unwrap_or("1m")) else {
+        return error(400, "MALFORMED", "unknown interval (1m 5m 15m 1h 4h 1d)", serde_json::json!({"path": "interval"}));
+    };
+    let num = |k: &str| -> Result<Option<u64>, Response> {
+        match q.get(k) {
+            None => Ok(None),
+            Some(v) => v.parse::<u64>().map(Some).map_err(|_| error(400, "MALFORMED", "from / to / limit are unsigned integers", serde_json::json!({"path": k}))),
+        }
+    };
+    let (from, to, limit) = match (num("from"), num("to"), num("limit")) {
+        (Ok(f), Ok(t), Ok(l)) => (f, t, l.unwrap_or(300)),
+        (Err(r), _, _) | (_, Err(r), _) | (_, _, Err(r)) => return r,
+    };
+    if !(1..=1500).contains(&limit) {
+        return error(400, "MALFORMED", "limit must be 1 to 1500", serde_json::json!({"path": "limit"}));
+    }
+    let s = app.seq.lock().unwrap();
+    let items = s.index.as_ref().map(|ix| ix.candles(m.market_id, iv, from, to, limit as usize)).unwrap_or_default();
+    Json(serde_json::json!({"candles": items})).into_response()
+}
+
+async fn market_funding(State(app): State<Arc<App>>, Path(sym): Path<String>, q: Q) -> Response {
+    let Some(m) = app.g.market_by_symbol(&sym) else { return not_found("unknown market") };
+    let (limit, before) = match page(&q) {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let s = app.seq.lock().unwrap();
+    let (items, cursor) = s.index.as_ref().map(|ix| ix.funding_history(m.market_id, limit, before)).unwrap_or_default();
+    with_cursor("funding", items, cursor)
 }
 
 async fn oracle_status(State(app): State<Arc<App>>, Path(sym): Path<String>) -> Response {
     let Some(m) = app.g.market_by_symbol(&sym) else { return not_found("unknown market") };
     let s = app.seq.lock().unwrap();
+    if let Some(j) = s.engine.real().and_then(|e| crate::engine::view::oracle_json(e, m.market_id, app.g.oracle_quorum, s.oracle_pool.newest_held())) {
+        return Json(j).into_response();
+    }
     Json(serde_json::json!({"symbol": m.symbol, "status": "halted", "price": "0", "time": s.engine.time(),
         "round": s.engine.last_oracle_round().to_string(), "sources": [], "signers": 0, "threshold": app.g.oracle_quorum,
-        "haltReason": "no oracle feeder wired to this dev node (agent 394's feeder submits OracleUpdate inputs)"}))
+        "haltReason": "the stub engine has no oracle state"}))
     .into_response()
+}
+
+/// Operator channel (agent 432's feeder): the bearer token of `--oracle-token-file`. Without a configured token
+/// the ingest paths do not exist for anyone (503); a wrong or missing token is 401. Never behind the geoblock.
+fn oracle_auth(app: &App, headers: &HeaderMap) -> Result<(), Response> {
+    let Some(tok) = &app.oracle_token else {
+        return Err(error(503, "ORACLE_INGEST_DISABLED", "this node has no oracle ingest token configured (--oracle-token-file)", serde_json::json!({})));
+    };
+    let presented = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
+    match presented {
+        Some(p) if crate::oracle_pool::token_ok(tok, p.as_bytes()) => Ok(()),
+        _ => Err(error(401, "UNAUTHORIZED", "Authorization: Bearer <oracle ingest token>", serde_json::json!({}))),
+    }
+}
+
+fn round_of(v: &serde_json::Value) -> Result<u64, Response> {
+    match v {
+        serde_json::Value::Number(n) => n.as_u64(),
+        serde_json::Value::String(x) if x.bytes().all(|c| c.is_ascii_digit()) && !x.is_empty() => x.parse().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| error(400, "ORACLE_MALFORMED", "round: an unsigned integer", serde_json::json!({})))
+}
+
+fn offer_json(app: &App, round: u64, signer: u8, r: Result<crate::oracle_pool::Held, crate::oracle_pool::Refusal>) -> Result<serde_json::Value, Response> {
+    use crate::oracle_pool::Held;
+    match r {
+        Ok(h) => {
+            let (held, status) = match h {
+                Held::Held(k) => (k, "held"),
+                Held::Ready(k) => (k, "ready"),
+            };
+            Ok(serde_json::json!({"round": round.to_string(), "signer": signer, "held": held, "quorum": app.g.oracle_quorum, "status": status}))
+        }
+        Err(e) => Err(error(e.http, e.code, &e.message, serde_json::json!({"round": round.to_string(), "signer": signer}))),
+    }
+}
+
+/// `{"round": R, "observation": {signer, timeMs, prices, signature}}`: ONE signer's observation.
+async fn oracle_observation(State(app): State<Arc<App>>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if let Err(r) = oracle_auth(&app, &headers) {
+        return r;
+    }
+    let j: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(j) => j,
+        Err(e) => return error(400, "ORACLE_MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
+    };
+    if j.as_object().is_none_or(|o| o.len() != 2 || !o.contains_key("round") || !o.contains_key("observation")) {
+        return error(400, "ORACLE_MALFORMED", "body: exactly {round, observation}", serde_json::json!({}));
+    }
+    let round = match round_of(&j["round"]) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let o = match crate::oracle_pool::parse_observation(&j["observation"]) {
+        Ok(o) => o,
+        Err(e) => return error(e.http, e.code, &e.message, serde_json::json!({})),
+    };
+    let signer = o.signer;
+    let mut s = app.seq.lock().unwrap();
+    let last = s.engine.last_oracle_round();
+    let r = s.oracle_pool.offer(&app.g, round, o, last, now_ms());
+    drop(s);
+    match offer_json(&app, round, signer, r) {
+        Ok(j) => Json(j).into_response(),
+        Err(r) => r,
+    }
+}
+
+/// `{"round": R, "observations": [...]}`: a whole update (a feeder that runs several signers, a replay source).
+/// Each observation is offered exactly as through the single path; the answer lists each outcome, and the HTTP
+/// status is 200 when at least one was held, else the first refusal's.
+async fn oracle_update(State(app): State<Arc<App>>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if let Err(r) = oracle_auth(&app, &headers) {
+        return r;
+    }
+    let j: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(j) => j,
+        Err(e) => return error(400, "ORACLE_MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
+    };
+    if j.as_object().is_none_or(|o| o.len() != 2 || !o.contains_key("round") || !o.contains_key("observations")) {
+        return error(400, "ORACLE_MALFORMED", "body: exactly {round, observations}", serde_json::json!({}));
+    }
+    let round = match round_of(&j["round"]) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let Some(arr) = j["observations"].as_array().filter(|a| !a.is_empty() && a.len() <= 255) else {
+        return error(400, "ORACLE_MALFORMED", "observations: 1 to 255 entries", serde_json::json!({}));
+    };
+    let mut parsed = Vec::new();
+    for v in arr {
+        match crate::oracle_pool::parse_observation(v) {
+            Ok(o) => parsed.push(o),
+            Err(e) => return error(e.http, e.code, &e.message, serde_json::json!({})),
+        }
+    }
+    let mut results = Vec::new();
+    let mut first_refusal: Option<crate::oracle_pool::Refusal> = None;
+    let mut any = false;
+    let mut last_status = "held";
+    let mut held = 0;
+    {
+        let mut s = app.seq.lock().unwrap();
+        let last = s.engine.last_oracle_round();
+        for o in parsed {
+            let signer = o.signer;
+            match s.oracle_pool.offer(&app.g, round, o, last, now_ms()) {
+                Ok(h) => {
+                    any = true;
+                    let (k, st) = match h {
+                        crate::oracle_pool::Held::Held(k) => (k, "held"),
+                        crate::oracle_pool::Held::Ready(k) => (k, "ready"),
+                    };
+                    held = k;
+                    last_status = st;
+                    results.push(serde_json::json!({"signer": signer, "status": st}));
+                }
+                Err(e) => {
+                    results.push(serde_json::json!({"signer": signer, "status": "refused", "code": e.code, "message": e.message}));
+                    first_refusal.get_or_insert(e);
+                }
+            }
+        }
+    }
+    if !any {
+        let e = first_refusal.expect("at least one observation");
+        return error(e.http, e.code, &e.message, serde_json::json!({"round": round.to_string(), "observations": results}));
+    }
+    Json(serde_json::json!({"round": round.to_string(), "held": held, "quorum": app.g.oracle_quorum, "status": last_status, "observations": results})).into_response()
+}
+
+async fn oracle_rounds(State(app): State<Arc<App>>) -> Response {
+    let s = app.seq.lock().unwrap();
+    let mut j = s.oracle_pool.to_json(&app.g);
+    j["enabled"] = app.oracle_token.is_some().into();
+    j["lastAcceptedRound"] = s.engine.last_oracle_round().to_string().into();
+    Json(j).into_response()
 }
 
 async fn committee(State(app): State<Arc<App>>) -> Response {
@@ -298,14 +559,19 @@ async fn finality_signature(State(app): State<Arc<App>>, Json(body): Json<serde_
 }
 
 fn block_json(app: &App, b: &crate::types::Block, raw: bool) -> serde_json::Value {
-    let inputs = decode_inputs(&app.g.types, &b.inputs_encoded).unwrap_or_default();
+    block_json_g(&app.g, b, raw)
+}
+
+/// API.md `Block` (also served by a validator's own read service, `crate::vserve`).
+pub fn block_json_g(g: &crate::genesis::Genesis, b: &crate::types::Block, raw: bool) -> serde_json::Value {
+    let inputs = decode_inputs(&g.types, &b.inputs_encoded).unwrap_or_default();
     let mut j = serde_json::json!({
         "height": b.header.height, "time": b.header.time, "prevLogHash": to_hex(&b.header.prev_log_hash),
         "logHash": to_hex(&b.header.log_hash), "stateRoot": to_hex(&b.header.state_root),
         "inputs": inputs.iter().map(|i| {
-            let mut j = input_json(&app.g.types, i);
+            let mut j = input_json(&g.types, i);
             if let crate::types::Input::Action(a) = i {
-                if let Ok(v) = verify_signed_action(&app.g, a) {
+                if let Ok(v) = verify_signed_action(g, a) {
                     j["account"] = to_hex(&v.account).into();
                     j["signer"] = to_hex(&v.signer).into();
                 }
@@ -328,31 +594,48 @@ async fn block_at(State(app): State<Arc<App>>, Path(h): Path<u64>, q: Q) -> Resp
     }
 }
 
-async fn blocks_range(State(app): State<Arc<App>>, q: Q) -> Response {
-    let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
-    let limit: u64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).clamp(1, 500);
-    let raw = q.get("raw").is_some();
+/// Blocks `from..from + limit` as stored (cloned under the sequencer lock; nothing else is done under it).
+fn take_blocks(app: &App, from: u64, limit: u64) -> Vec<crate::types::Block> {
     let s = app.seq.lock().unwrap();
     let mut out = Vec::new();
     for h in from..from.saturating_add(limit) {
         match s.block(h) {
-            Ok(Some(b)) => out.push(block_json(&app, &b, raw)),
+            Ok(Some(b)) => out.push(b),
             _ => break,
         }
     }
+    out
+}
+
+/// R436-6: decoding the inputs and recovering every action's signer is done OUTSIDE the sequencer lock.
+async fn blocks_range(State(app): State<Arc<App>>, q: Q) -> Response {
+    let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
+    let limit: u64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100).clamp(1, 500);
+    let raw = q.get("raw").is_some();
+    let blocks = take_blocks(&app, from, limit);
+    let out: Vec<serde_json::Value> = blocks.iter().map(|b| block_json(&app, b, raw)).collect();
     Json(serde_json::json!({"blocks": out})).into_response()
 }
 
+/// At most 10,001 blocks per request (continue with `from` = the last height + 1), read 200 at a time so the
+/// sequencer lock is held only for the copies.
 async fn blocks_stream(State(app): State<Arc<App>>, q: Q) -> Response {
     let from: u64 = q.get("from").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
-    let s = app.seq.lock().unwrap();
-    let last = s.log.last_height;
+    let raw = q.get("raw").is_some();
+    let end = from.saturating_add(10_001);
     let mut body = String::new();
-    for h in from..=last.min(from.saturating_add(10_000)) {
-        if let Ok(Some(b)) = s.block(h) {
-            body.push_str(&block_json(&app, &b, q.get("raw").is_some()).to_string());
+    let mut next = from;
+    while next < end {
+        let chunk = take_blocks(&app, next, (end - next).min(200));
+        if chunk.is_empty() {
+            break;
+        }
+        next += chunk.len() as u64;
+        for b in &chunk {
+            body.push_str(&block_json(&app, b, raw).to_string());
             body.push('\n');
         }
+        tokio::task::yield_now().await;
     }
     ([("content-type", "application/x-ndjson")], body).into_response()
 }
@@ -413,8 +696,61 @@ pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_co
             ),
         });
     }
+    // 397's decision 3 and step 6 (crate::attest): a valid attestation that declares a residence the list does not
+    // allow makes the account exit-only whatever its IP says; with --require-attestation an action that opens or
+    // changes exposure needs a valid attestation of an allowed residence
+    if !crate::attest::exit_like(&v.primary, ro) {
+        let at = app.attestations.lock().unwrap();
+        let st = at.status(&v.account, now);
+        let residence_allowed = st.residence_country.as_deref().map(|c| app.geo.allowed.contains(c));
+        if st.status == "valid" && residence_allowed == Some(false) {
+            return Err(error(451, "GEO_RESTRICTED", "PosternDEX Perpetuals is not available in the jurisdiction you declared; cancelling, reducing and withdrawing stay open.",
+                serde_json::json!({"country": st.residence_country, "listVersion": app.geo.version, "reason": "RESIDENCE_DECLARED_RESTRICTED", "policy": if app.geo.exit_only {"exit_only"} else {"actions_refused"}})));
+        }
+        if at.required && !(st.status == "valid" && residence_allowed == Some(true)) {
+            return Err(error(403, "ATTESTATION_REQUIRED", "this action needs a valid attestation of the account (POST /v1/attestations)", serde_json::json!({"status": st.status})));
+        }
+    }
     let r = app.seq.lock().unwrap().admit_signed(a, now);
     r.map_err(|e| error(e.http, e.code, &e.message, serde_json::json!({})))
+}
+
+fn attestation_json(account: &Address, st: &crate::attest::Status) -> serde_json::Value {
+    let m = st.record.as_ref().map(|r| &r["message"]);
+    let num = |k: &str| m.and_then(|m| m[k].as_str()).and_then(|s| s.parse::<u64>().ok());
+    serde_json::json!({"account": to_hex(account), "status": st.status, "residenceCountry": st.residence_country,
+        "statementId": m.and_then(|m| m["statementId"].as_str()), "issuedAt": num("issuedAt"), "expiresAt": num("expiresAt"), "record": st.record})
+}
+
+/// `POST /v1/attestations` `{message, signature}`: the signed eligibility record of 397's typed data. Verified
+/// (current statement, strict signature by the account, validity) and stored; the answer is `AttestationStatus`.
+async fn post_attestation(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAddr>, body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>) -> Response {
+    let Ok(body) = body else { return error(413, "TOO_LARGE", "body over 16 KiB", serde_json::json!({})) };
+    let now = now_ms();
+    if !app.ip_rate.lock().unwrap().allow(&ip_key(peer.ip()), now) {
+        return error(429, "RATE_LIMITED", "per-IP action rate", serde_json::json!({}));
+    }
+    let rec: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return error(400, "MALFORMED", &format!("body is not JSON: {e}"), serde_json::json!({})),
+    };
+    let mut at = app.attestations.lock().unwrap();
+    if at.statements.is_empty() {
+        return error(503, "ATTESTATION_UNAVAILABLE", "this node has no attestation statement configured (--attestation-statements)", serde_json::json!({}));
+    }
+    match at.submit(&rec, now) {
+        Ok(account) => Json(attestation_json(&account, &at.status(&account, now))).into_response(),
+        Err(e) => error(400, "ATTESTATION_INVALID", &e, serde_json::json!({"statements": at.statements})),
+    }
+}
+
+async fn get_attestation(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
+    let a = match addr_param(&a) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let at = app.attestations.lock().unwrap();
+    Json(attestation_json(&a, &at.status(&a, now_ms()))).into_response()
 }
 
 async fn post_action(
@@ -462,16 +798,25 @@ async fn get_action(State(app): State<Arc<App>>, Path(h): Path<String>) -> Respo
     }
 }
 
-async fn account(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
+async fn account(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
         Err(r) => return r,
     };
-    Json(account_shape(app.seq.lock().unwrap().engine.account_json(&a))).into_response()
+    let finalized = match q.get("finalized").map(|s| s.as_str()) {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(_) => return error(400, "MALFORMED", "finalized must be true or false", serde_json::json!({"path": "finalized"})),
+    };
+    let r = app.seq.lock().unwrap().account_view(&a, finalized);
+    match r {
+        Ok(j) => Json(account_shape(j)).into_response(),
+        Err(e) => not_found(&e),
+    }
 }
 
-/// API.md `Account` from the engine's account JSON: fields the engine adapter does not compute yet are given
-/// conservative values (margins 0, withdrawable = max(0, equity)); listed as a gap in the node report.
+/// API.md `Account`: exactly the schema's fields (the stub engine's extra `engine` label is dropped; values the
+/// stub does not have are zero).
 pub fn account_shape(e: serde_json::Value) -> serde_json::Value {
     let g = |k: &str, d: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
     let collateral = g("collateral", "0.000000");
@@ -483,18 +828,54 @@ pub fn account_shape(e: serde_json::Value) -> serde_json::Value {
         "initialMargin": g("initialMargin", "0.000000"), "maintenanceMargin": g("maintenanceMargin", "0.000000"),
         "freeCollateral": g("freeCollateral", &equity), "withdrawable": g("withdrawable", &withdrawable),
         "marginRatio": g("marginRatio", "0"),
-        "feeTier": {"tier": 0, "makerFeeBps": "1.5", "takerFeeBps": "4.5", "volume30d": "0"},
+        "feeTier": e.get("feeTier").cloned().unwrap_or(serde_json::json!({"tier": 0, "makerFeeBps": "1.5", "takerFeeBps": "4.5", "volume30d": "0"})),
         "positions": e.get("positions").cloned().unwrap_or(serde_json::json!([])),
         "openOrders": e.get("openOrders").cloned().unwrap_or(serde_json::json!(0)),
     })
 }
 
-async fn account_orders(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
+/// Open orders of an account as API `Order` objects (index), or the stub's list.
+fn open_orders(s: &crate::sequencer::Sequencer, a: &Address) -> serde_json::Value {
+    match &s.index {
+        Some(ix) => serde_json::Value::Array(ix.orders(a, true, None, 1000, None).0),
+        None => s.engine.orders_json(a)["orders"].clone(),
+    }
+}
+
+async fn account_orders(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
         Err(r) => return r,
     };
-    Json(app.seq.lock().unwrap().engine.orders_json(&a)).into_response()
+    let open_only = match q.get("status").map(|s| s.as_str()) {
+        None | Some("open") => true,
+        Some("all") => false,
+        Some(_) => return error(400, "MALFORMED", "status must be open or all", serde_json::json!({"path": "status"})),
+    };
+    let (limit, before) = match page(&q) {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let market = match symbol_filter(&app, &q) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let s = app.seq.lock().unwrap();
+    match &s.index {
+        Some(ix) => {
+            let (items, cursor) = ix.orders(&a, open_only, market, limit, before);
+            with_cursor("orders", items, cursor)
+        }
+        None => Json(s.engine.orders_json(&a)).into_response(),
+    }
+}
+
+async fn order_by_id(State(app): State<Arc<App>>, Path(id): Path<u64>) -> Response {
+    let s = app.seq.lock().unwrap();
+    match s.index.as_ref().and_then(|ix| ix.order(id).map(|o| ix.order_json(o))) {
+        Some(j) => Json(j).into_response(),
+        None => not_found("unknown or pruned order"),
+    }
 }
 
 async fn account_agents(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
@@ -502,22 +883,121 @@ async fn account_agents(State(app): State<Arc<App>>, Path(a): Path<String>) -> R
         Ok(a) => a,
         Err(r) => return r,
     };
-    Json(app.seq.lock().unwrap().engine.agents_json(&a)).into_response()
+    Json(app.seq.lock().unwrap().agents_view(&a)).into_response()
 }
 
-async fn account_fills(Path(a): Path<String>) -> Response {
-    if let Err(r) = addr_param(&a) {
-        return r;
-    }
-    // fills are engine events; the node's fill index is not built yet (stated gap)
-    Json(serde_json::json!({"fills": []})).into_response()
+async fn account_fills(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q) -> Response {
+    let a = match addr_param(&a) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let (limit, before) = match page(&q) {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let market = match symbol_filter(&app, &q) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let s = app.seq.lock().unwrap();
+    let (items, cursor) = s.index.as_ref().map(|ix| ix.fills(&a, market, limit, before)).unwrap_or_default();
+    with_cursor("fills", items, cursor)
 }
 
-async fn account_funding(Path(a): Path<String>) -> Response {
-    if let Err(r) = addr_param(&a) {
-        return r;
+async fn account_funding(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q) -> Response {
+    let a = match addr_param(&a) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let (limit, before) = match page(&q) {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let market = match symbol_filter(&app, &q) {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    let s = app.seq.lock().unwrap();
+    let (items, cursor) = s.index.as_ref().map(|ix| ix.payments(&a, market, limit, before)).unwrap_or_default();
+    with_cursor("payments", items, cursor)
+}
+
+/// `GET /v1/accounts/{address}/proof[?height=H]`: the `claimEscape` input against a FINAL checkpoint this node
+/// still holds the state of (default: the latest final).
+async fn account_proof(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q) -> Response {
+    let a = match addr_param(&a) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let height = match q.get("height").map(|h| h.parse::<u64>()) {
+        None => None,
+        Some(Ok(h)) => Some(h),
+        Some(Err(_)) => return error(400, "MALFORMED", "height", serde_json::json!({"path": "height"})),
+    };
+    // the engine state of that checkpoint is taken under the lock (an Arc clone); the proof (hashing every
+    // account leaf) is built outside it (R436-6)
+    // R436-11: a FINAL checkpoint whose state is no longer held is rebuilt from the log (the log holds every
+    // block since genesis), one rebuild at a time, checked against the checkpoint's state root, then kept
+    if let Some(h) = height {
+        if app.seq.lock().unwrap().final_without_frame(h) {
+            if let Err(e) = rebuild_frame(&app, h).await {
+                return error(503, "SEQUENCER_UNAVAILABLE", &format!("the state at checkpoint {h} could not be rebuilt from the log: {e}"), serde_json::json!({"height": h}));
+            }
+        }
     }
-    Json(serde_json::json!({"payments": []})).into_response()
+    let parts = app.seq.lock().unwrap().account_proof_parts(height);
+    match parts.and_then(|(e, root, cp)| crate::sequencer::build_account_proof(&e, &a, &root, cp)) {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => not_found(&e),
+    }
+}
+
+/// Rebuilds the engine state at final checkpoint `h` by replaying the log from the nearest held state.
+pub async fn rebuild_frame(app: &Arc<App>, h: u64) -> Result<(), String> {
+    let _one_at_a_time = app.rebuild_gate.lock().await;
+    let (base_h, base, want_root) = {
+        let s = app.seq.lock().unwrap();
+        if !s.final_without_frame(h) {
+            return Ok(()); // rebuilt meanwhile, or not final
+        }
+        let (bh, b) = s.rebuild_base(h).ok_or("this engine has no rebuildable state")?;
+        (bh, b, s.checkpoint_for(h).map(|c| c.state_root()).ok_or("checkpoint vanished")?)
+    };
+    let app2 = app.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        let take = |from: u64, limit: u64| take_blocks(&app2, from, limit);
+        crate::archive::rebuild(&app2.g, base_h, base, h, &take)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if built.state_root() != want_root {
+        return Err("the rebuilt state does not have the final checkpoint's state root".into());
+    }
+    let real = built.real().cloned().ok_or("not a real engine")?;
+    app.seq.lock().unwrap().insert_rebuilt_frame(h, real);
+    Ok(())
+}
+
+/// `GET /v1/withdrawals/{id}/proof[?count=N | ?height=H]`: the `withdraw(seq, w, siblings, want)` input for the
+/// accepted checkpoint whose `withdrawalCountAt(seq)` is N (or the final checkpoint at height H; default: the
+/// latest final).
+async fn withdrawal_proof(State(app): State<Arc<App>>, Path(id): Path<u64>, q: Q) -> Response {
+    let num = |k: &str| -> Result<Option<u64>, Response> {
+        match q.get(k).map(|h| h.parse::<u64>()) {
+            None => Ok(None),
+            Some(Ok(h)) => Ok(Some(h)),
+            Some(Err(_)) => Err(error(400, "MALFORMED", k, serde_json::json!({"path": k}))),
+        }
+    };
+    let (count, height) = match (num("count"), num("height")) {
+        (Ok(c), Ok(h)) => (c, h),
+        (Err(r), _) | (_, Err(r)) => return r,
+    };
+    let r = app.seq.lock().unwrap().withdrawal_proof(id, count, height);
+    match r {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => not_found(&e),
+    }
 }
 
 async fn account_nonce(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
@@ -527,7 +1007,7 @@ async fn account_nonce(State(app): State<Arc<App>>, Path(a): Path<String>) -> Re
     };
     let s = app.seq.lock().unwrap();
     let hi = s.engine.highest_nonce(&a);
-    let agents: Vec<serde_json::Value> = s.engine.agents_json(&a)["agents"]
+    let agents: Vec<serde_json::Value> = s.agents_view(&a)["agents"]
         .as_array()
         .cloned()
         .unwrap_or_default()
@@ -543,15 +1023,26 @@ async fn account_nonce(State(app): State<Arc<App>>, Path(a): Path<String>) -> Re
 fn withdrawal_json(app: &App, id: u64) -> Option<serde_json::Value> {
     let s = app.seq.lock().unwrap();
     let rec = s.engine.withdrawal(id)?;
-    let cert = s.certificate(id);
-    let status = if cert.is_some() { "certified" } else { "included" };
+    // API.md 4.1 certificate: the record, the 32 siblings against the newest final checkpoint that contains it,
+    // that checkpoint and its signatures (`GET /v1/withdrawals/{id}/proof` serves any other accepted checkpoint)
+    let cert = s.certificate(id).map(|c| {
+        serde_json::json!({"digest": c["digest"], "record": c["record"], "checkpoint": c["checkpoint"],
+            "proof": c["proof"]["siblings"], "signatures": c["signatures"]})
+    });
+    let relay = app.relay.lock().unwrap();
+    let paid = relay.paid.get(&id).cloned();
+    let status = match (&paid, &cert) {
+        (Some(_), _) => "paid",
+        (None, Some(_)) => "certified",
+        (None, None) => "included",
+    };
+    let time = s.block(rec.height).ok().flatten().map(|b| b.header.time).unwrap_or(0);
     Some(serde_json::json!({
         "withdrawalId": id.to_string(), "account": to_hex(&rec.account), "recipient": to_hex(&rec.recipient),
         "amount": crate::util::scaled_to_decimal(rec.amount as u128, 6), "fee": crate::util::scaled_to_decimal(rec.fee as u128, 6),
-        "status": status, "requestedHeight": rec.height, "includedHeight": rec.height,
+        "status": status, "requestedHeight": rec.height,
         "checkpointHeight": cert.as_ref().and_then(|c| c["checkpoint"]["height"].as_u64()),
-        "certificate": cert, "l2TxHash": null, "availableAt": null,
-        "note": "submitted / delayed / paid need the vault (agent 390): not tracked by this prototype"
+        "certificate": cert, "l2TxHash": paid, "availableAt": null, "time": time,
     }))
 }
 
@@ -562,36 +1053,30 @@ async fn withdrawal(State(app): State<Arc<App>>, Path(id): Path<u64>) -> Respons
     }
 }
 
+/// Newest first, at most 1,000. The ids come from the per-account index and each certificate proof costs 32
+/// hashes (R436-6: this used to scan every withdrawal and rebuild the whole tree per record).
 async fn account_withdrawals(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
     let a = match addr_param(&a) {
         Ok(a) => a,
         Err(r) => return r,
     };
-    let n = app.seq.lock().unwrap().engine.withdrawal_count();
-    let mut out = Vec::new();
-    for id in (0..n).rev() {
-        let is_mine = app.seq.lock().unwrap().engine.withdrawal(id).map(|w| w.account == a).unwrap_or(false);
-        if is_mine {
-            if let Some(j) = withdrawal_json(&app, id) {
-                out.push(j);
-            }
-        }
-        if out.len() >= 1000 {
-            break;
-        }
-    }
+    let ids: Vec<u64> = app.seq.lock().unwrap().wd_by_account.get(&a).map(|v| v.iter().rev().take(1000).copied().collect()).unwrap_or_default();
+    let out: Vec<serde_json::Value> = ids.into_iter().filter_map(|id| withdrawal_json(&app, id)).collect();
     Json(serde_json::json!({"withdrawals": out})).into_response()
 }
 
+/// API.md `Deposit`: exactly the schema's fields. `time` is the engine time of the crediting block (0 until
+/// credited: the L2 block's own timestamp is not part of the vault event).
 fn deposit_status_json(app: &App, d: &crate::types::DepositEvent) -> serde_json::Value {
     let s = app.seq.lock().unwrap();
     let credited = d.index < s.engine.next_deposit_index();
-    let mut j = deposit_json(d);
-    j["depositId"] = j["index"].clone();
-    j["amount"] = serde_json::Value::String(crate::util::scaled_to_decimal(d.amount as u128, 6));
-    j["status"] = serde_json::Value::String(if credited { "credited" } else { "l2Finalized" }.into());
-    j["creditedHeight"] = s.deposit_heights.get(&d.index).copied().into();
-    j
+    let ch = s.deposit_heights.get(&d.index).copied();
+    let time = ch.and_then(|h| s.block(h).ok().flatten()).map(|b| b.header.time).unwrap_or(0);
+    serde_json::json!({
+        "depositId": d.index.to_string(), "account": to_hex(&d.account), "amount": crate::util::scaled_to_decimal(d.amount as u128, 6),
+        "l2TxHash": to_hex(&d.l2_tx_hash), "logIndex": d.log_index, "l2Block": d.l2_block,
+        "status": if credited { "credited" } else { "l2Finalized" }, "creditedHeight": ch, "time": time,
+    })
 }
 
 async fn account_deposits(State(app): State<Arc<App>>, Path(a): Path<String>) -> Response {
@@ -615,19 +1100,33 @@ async fn forced(State(app): State<Arc<App>>, q: Q) -> Response {
         Some(Err(e)) => return error(400, "MALFORMED", &e, serde_json::json!({})),
         None => None,
     };
-    let fs: Vec<_> = app.view.lock().unwrap().forced.values().filter(|f| acc.is_none_or(|a| f.account == a)).cloned().collect();
+    let (fs, l2_time_s): (Vec<_>, u64) = {
+        let v = app.view.lock().unwrap();
+        (v.forced.values().filter(|f| acc.is_none_or(|a| f.account == a)).cloned().collect(), v.l2_time_s)
+    };
     let s = app.seq.lock().unwrap();
     let next = s.engine.next_forced_index();
-    let t = s.engine.time();
     let out: Vec<_> = fs
         .iter()
         .map(|f| {
-            let mut j = forced_json(f);
-            j["forcedId"] = j["index"].clone();
-            j["deadlineTime"] = f.deadline.into();
-            j["status"] = (if f.index < next { "included" } else if f.deadline < t { "expired" } else { "queued" }).into();
-            j["includedHeight"] = s.forced_heights.get(&f.index).copied().into();
-            j
+            // the engine's own verdict (SPEC 14): served, rejected (consumed, user-caused), pending (waits at the
+            // head of the queue: the vault's deadline keeps running)
+            let outcome = s.index.as_ref().and_then(|ix| ix.forced_outcome(f.index));
+            let done = matches!(outcome.as_ref().map(|o| o.0), Some("served") | Some("rejected"));
+            let status = if !done && l2_time_s > f.deadline {
+                "expired"
+            } else if f.index < next {
+                "included"
+            } else {
+                "queued"
+            };
+            serde_json::json!({
+                "forcedId": f.index.to_string(), "account": to_hex(&f.account), "kind": f.kind.name(), "l2TxHash": to_hex(&f.l2_tx_hash),
+                "l2Block": f.l2_block, "deadlineTime": f.deadline.saturating_mul(1000), "status": status,
+                "includedHeight": s.forced_heights.get(&f.index).copied(),
+                "arg": f.arg.to_string(), "outcome": outcome.as_ref().map(|o| o.0), "reason": outcome.as_ref().and_then(|o| o.1.clone()),
+                "processedHeight": outcome.as_ref().filter(|_| done).map(|o| o.2),
+            })
         })
         .collect();
     Json(serde_json::json!({"forced": out})).into_response()
@@ -653,14 +1152,66 @@ async fn ws(State(app): State<Arc<App>>, ConnectInfo(peer): ConnectInfo<SocketAd
     up.max_message_size(16 * 1024).on_upgrade(move |s| ws_session(app, s, peer, headers))
 }
 
+fn ws_err(id: &serde_json::Value, code: &str, message: &str) -> serde_json::Value {
+    serde_json::json!({"op":"error","id":id,"error":{"code":code,"message":message,"details":{}}})
+}
+
+/// The `AccountUpdate` of one block for one subscribed account (API.md section 9): the account, the orders whose
+/// state changed, the block's fills and funding payments, deposits credited and withdrawals created, and the
+/// acknowledgements of the account's actions.
+fn account_update(app: &App, info: &crate::sequencer::BlockInfo, a: &Address, inputs: &[crate::types::Input]) -> serde_json::Value {
+    let h = info.block.header.height;
+    let deposits: Vec<crate::types::DepositEvent> = inputs.iter().filter_map(|i| match i { crate::types::Input::Deposit(d) if d.account == *a => Some(d.clone()), _ => None }).collect();
+    let mut data = {
+        let s = app.seq.lock().unwrap();
+        let acks: Vec<serde_json::Value> = info.acks.iter().filter(|(x, _)| x == a).map(|(_, j)| j.clone()).collect();
+        let mut data = serde_json::json!({"height": h, "time": info.block.header.time,
+            "account": s.account_view(a, false).map(account_shape).unwrap_or(serde_json::Value::Null)});
+        match (&info.delta, &s.index) {
+            (Some(d), Some(ix)) => {
+                let orders: Vec<serde_json::Value> = d.orders.iter().filter_map(|id| ix.order(*id)).filter(|o| o.account == *a).map(|o| ix.order_json(o)).collect();
+                let fills: Vec<serde_json::Value> = d.fills.iter().filter(|(x, _)| x == a).map(|(_, f)| ix.fill_json(a, f)).collect();
+                let pays: Vec<serde_json::Value> = d.payments.iter().filter(|(x, _)| x == a).map(|(_, p)| ix.payment_json(p)).collect();
+                if !orders.is_empty() { data["orders"] = orders.into(); }
+                if !fills.is_empty() { data["fills"] = fills.into(); }
+                if !pays.is_empty() { data["funding"] = pays.into(); }
+            }
+            _ => data["orders"] = open_orders(&s, a),
+        }
+        if !acks.is_empty() { data["actions"] = acks.into(); }
+        data
+    };
+    if !deposits.is_empty() {
+        data["deposits"] = deposits.iter().map(|d| deposit_status_json(app, d)).collect::<Vec<_>>().into();
+    }
+    let wds: Vec<serde_json::Value> = info.outcome.withdrawals.iter().filter_map(|id| withdrawal_json(app, *id)).filter(|w| w["account"] == to_hex(a).as_str()).collect();
+    if !wds.is_empty() {
+        data["withdrawals"] = wds.into();
+    }
+    data
+}
+
 async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, headers: HeaderMap) {
     let mut rx = app.blocks_tx.subscribe();
     let mut status_sub = false;
     let mut accounts: Vec<Address> = Vec::new();
     let mut ping = tokio::time::interval(Duration::from_secs(15));
     let mut last_in = tokio::time::Instant::now();
-    let mut reply_override: Option<serde_json::Value> = None;
     let mut books: Vec<String> = Vec::new();
+    let mut trades: Vec<u32> = Vec::new();
+    let mut candles: Vec<(u32, usize)> = Vec::new();
+    // ticker subscriptions: market id -> (last time a ticker was sent, a block happened since). At most one per
+    // market per second; a change inside that second is sent when the second ends (`flush`), funding at once.
+    let mut tickers: HashMap<u32, (Option<tokio::time::Instant>, bool)> = HashMap::new();
+    let mut flush = tokio::time::interval(Duration::from_millis(200));
+    flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    macro_rules! send {
+        ($v:expr) => {
+            if sock.send(Message::Text($v.to_string().into())).await.is_err() {
+                return;
+            }
+        };
+    }
     loop {
         tokio::select! {
             m = sock.recv() => {
@@ -669,68 +1220,98 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                 let txt = match m { Message::Text(t) => t.to_string(), Message::Close(_) => return, _ => continue };
                 let j: serde_json::Value = match serde_json::from_str(&txt) {
                     Ok(j) => j,
-                    Err(_) => { let _ = sock.send(Message::Text(serde_json::json!({"op":"error","error":{"code":"MALFORMED","message":"not JSON","details":{}}}).to_string().into())).await; continue; }
+                    Err(_) => { send!(ws_err(&serde_json::Value::Null, "MALFORMED", "not JSON")); continue; }
                 };
                 let id = j.get("id").cloned().unwrap_or(serde_json::Value::Null);
-                let reply = match j.get("op").and_then(|v| v.as_str()) {
-                    Some("ping") => serde_json::json!({"op":"pong","time": now_ms()}),
+                let subs = accounts.len() + books.len() + trades.len() + candles.len() + tickers.len() + status_sub as usize;
+                match j.get("op").and_then(|v| v.as_str()) {
+                    Some("ping") => send!(serde_json::json!({"op":"pong","time": now_ms()})),
                     Some("subscribe") => {
                         let ch = j.get("channel").and_then(|v| v.as_str()).unwrap_or("");
+                        if subs >= 100 {
+                            send!(ws_err(&id, "RATE_LIMITED", "subscriptions per connection"));
+                            continue;
+                        }
                         match ch {
                             "status" => {
                                 status_sub = true;
-                                let _ = sock.send(Message::Text(serde_json::json!({"op":"subscribed","id":id,"channel":"status"}).to_string().into())).await;
+                                send!(serde_json::json!({"op":"subscribed","id":id,"channel":"status"}));
                                 let (lb, lf) = { let s = app.seq.lock().unwrap(); (s.block(s.log.last_height).ok().flatten().map(|b| block_summary(&b)), s.latest_final().and_then(|h| s.block(h).ok().flatten()).map(|b| block_summary(&b))) };
-                                serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": lb, "latestFinalized": lf}})
+                                send!(serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": lb, "latestFinalized": lf}}));
                             }
                             "account" => match j.get("account").and_then(|v| v.as_str()).map(parse_address) {
                                 Some(Ok(a)) => {
-                                    if accounts.len() >= 100 { serde_json::json!({"op":"error","id":id,"error":{"code":"RATE_LIMITED","message":"subscriptions per connection","details":{}}}) }
-                                    else {
-                                        accounts.push(a);
-                                        let snap = { let s = app.seq.lock().unwrap(); serde_json::json!({"account": account_shape(s.engine.account_json(&a)), "orders": s.engine.orders_json(&a)["orders"], "agents": s.engine.agents_json(&a)["agents"]}) };
-                                        let _ = sock.send(Message::Text(serde_json::json!({"op":"subscribed","id":id,"channel":"account","account":to_hex(&a)}).to_string().into())).await;
-                                        serde_json::json!({"channel":"account","type":"snapshot","account":to_hex(&a),"data":snap})
-                                    }
+                                    if !accounts.contains(&a) { accounts.push(a); }
+                                    let snap = { let s = app.seq.lock().unwrap(); serde_json::json!({"account": s.account_view(&a, false).map(account_shape).unwrap_or(serde_json::Value::Null), "orders": open_orders(&s, &a), "agents": s.agents_view(&a)["agents"]}) };
+                                    send!(serde_json::json!({"op":"subscribed","id":id,"channel":"account","account":to_hex(&a)}));
+                                    send!(serde_json::json!({"channel":"account","type":"snapshot","account":to_hex(&a),"data":snap}));
                                 }
-                                _ => serde_json::json!({"op":"error","id":id,"error":{"code":"MALFORMED","message":"account","details":{}}}),
+                                _ => send!(ws_err(&id, "MALFORMED", "account")),
                             },
                             "book" | "trades" | "ticker" | "candles" => {
                                 let sym = j.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
-                                if sym != "*" && app.g.market_by_symbol(sym).is_none() {
-                                    serde_json::json!({"op":"error","id":id,"error":{"code":"NOT_FOUND","message":"unknown market","details":{}}})
-                                } else {
-                                    let _ = sock.send(Message::Text(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}).to_string().into())).await;
-                                    if ch == "book" { books.push(sym.to_string()); }
-                                    if ch == "ticker" {
-                                        let ms: Vec<&crate::genesis::Market> = if sym == "*" { app.g.markets.iter().collect() } else { app.g.market_by_symbol(sym).into_iter().collect() };
-                                        let last = ms.len().saturating_sub(1);
-                                        for (i, m) in ms.iter().enumerate() {
-                                            let msg = serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)});
-                                            if i < last { let _ = sock.send(Message::Text(msg.to_string().into())).await; } else { reply_override = Some(msg); }
-                                        }
-                                        reply_override.take().unwrap_or(serde_json::json!({"op":"pong","time":now_ms()}))
-                                    } else {
-                                        let (h, t) = { let s = app.seq.lock().unwrap(); (s.engine.height(), s.engine.time()) };
-                                        let data = match ch {
-                                            "book" => { let _ = (h, t); app.seq.lock().unwrap().book_json(sym, j.get("depth").and_then(|d| d.as_u64()).unwrap_or(50) as usize).unwrap_or(serde_json::Value::Null) }
-                                            "trades" => serde_json::json!({"trades":[]}),
-                                            _ => serde_json::json!({"candles":[]}),
+                                let market = app.g.market_by_symbol(sym).map(|m| m.market_id);
+                                if market.is_none() && !(ch == "ticker" && sym == "*") {
+                                    send!(ws_err(&id, "NOT_FOUND", "unknown market"));
+                                    continue;
+                                }
+                                match ch {
+                                    "book" => {
+                                        let depth = match j.get("depth") {
+                                            None => 50,
+                                            Some(d) => match d.as_u64() { Some(n) if (1..=500).contains(&n) => n as usize, _ => { send!(ws_err(&id, "MALFORMED", "depth must be 1 to 500")); continue; } },
                                         };
-                                        let mut m = serde_json::json!({"channel":ch,"symbol":sym,"type":"snapshot","data":data});
-                                        if ch == "candles" { m["interval"] = j.get("interval").cloned().unwrap_or("1m".into()); }
-                                        m
+                                        if !books.iter().any(|b| b == sym) { books.push(sym.to_string()); }
+                                        let data = app.seq.lock().unwrap().book_json(sym, depth).unwrap_or(serde_json::Value::Null);
+                                        send!(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}));
+                                        send!(serde_json::json!({"channel":ch,"symbol":sym,"type":"snapshot","data":data}));
+                                    }
+                                    "trades" => {
+                                        let mid = market.unwrap();
+                                        if !trades.contains(&mid) { trades.push(mid); }
+                                        let items = app.seq.lock().unwrap().index.as_ref().map(|ix| ix.trades(mid, 50, None).0).unwrap_or_default();
+                                        send!(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}));
+                                        send!(serde_json::json!({"channel":ch,"symbol":sym,"type":"snapshot","data":{"trades": items}}));
+                                    }
+                                    "candles" => {
+                                        let mid = market.unwrap();
+                                        let name = j.get("interval").and_then(|v| v.as_str()).unwrap_or("1m");
+                                        let Some(iv) = crate::index::interval_index(name) else { send!(ws_err(&id, "MALFORMED", "unknown interval (1m 5m 15m 1h 4h 1d)")); continue; };
+                                        if !candles.contains(&(mid, iv)) { candles.push((mid, iv)); }
+                                        let items = app.seq.lock().unwrap().index.as_ref().map(|ix| ix.candles(mid, iv, None, None, 300)).unwrap_or_default();
+                                        send!(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym,"interval":name}));
+                                        send!(serde_json::json!({"channel":ch,"symbol":sym,"interval":name,"type":"snapshot","data":{"candles": items}}));
+                                    }
+                                    _ => {
+                                        let ms: Vec<&crate::genesis::Market> = if sym == "*" { app.g.markets.iter().collect() } else { app.g.market_by_symbol(sym).into_iter().collect() };
+                                        send!(serde_json::json!({"op":"subscribed","id":id,"channel":ch,"symbol":sym}));
+                                        for m in ms {
+                                            tickers.insert(m.market_id, (Some(tokio::time::Instant::now()), false));
+                                            send!(serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)}));
+                                        }
                                     }
                                 }
                             }
-                            _ => serde_json::json!({"op":"error","id":id,"error":{"code":"MALFORMED","message":"unknown channel","details":{}}}),
+                            _ => send!(ws_err(&id, "MALFORMED", "unknown channel")),
                         }
                     }
                     Some("unsubscribe") => {
                         let ch = j.get("channel").and_then(|v| v.as_str()).unwrap_or("");
-                        if ch == "status" { status_sub = false; }
-                        if ch == "account" { if let Some(Ok(a)) = j.get("account").and_then(|v| v.as_str()).map(parse_address) { accounts.retain(|x| *x != a); } }
-                        serde_json::json!({"op":"unsubscribed","id":id,"channel":ch})
+                        let sym = j.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+                        let market = app.g.market_by_symbol(sym).map(|m| m.market_id);
+                        match ch {
+                            "status" => status_sub = false,
+                            "account" => { if let Some(Ok(a)) = j.get("account").and_then(|v| v.as_str()).map(parse_address) { accounts.retain(|x| *x != a); } }
+                            "book" => books.retain(|b| b != sym),
+                            "trades" => trades.retain(|m| Some(*m) != market),
+                            "candles" => {
+                                let iv = j.get("interval").and_then(|v| v.as_str()).and_then(crate::index::interval_index);
+                                candles.retain(|(m, i)| !(Some(*m) == market && (iv.is_none() || iv == Some(*i))));
+                            }
+                            "ticker" => { if sym == "*" { tickers.clear(); } else if let Some(m) = market { tickers.remove(&m); } }
+                            _ => {}
+                        }
+                        send!(serde_json::json!({"op":"unsubscribed","id":id,"channel":ch}));
                     }
                     Some("action") => {
                         // the frame's own assertion; stripped before the request is parsed (never reaches the engine)
@@ -738,18 +1319,18 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                         let eg = j.get(crate::geo::EDGE_GEO_FIELD).or_else(|| req.get(crate::geo::EDGE_GEO_FIELD)).cloned();
                         let mut req = req;
                         if let Some(o) = req.as_object_mut() { o.remove(crate::geo::EDGE_GEO_FIELD); }
-                        match submit(&app, Some(peer), &headers, None, &req, Via::Ws(eg.as_ref())) {
+                        let reply = match submit(&app, Some(peer), &headers, None, &req, Via::Ws(eg.as_ref())) {
                             Ok(a) => serde_json::json!({"op":"actionResult","id":id,"ack":a.to_json()}),
                             Err(r) => {
                                 let body = axum::body::to_bytes(r.into_body(), 64 * 1024).await.unwrap_or_default();
                                 let e: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::json!({}));
                                 serde_json::json!({"op":"error","id":id,"error":e["error"]})
                             }
-                        }
+                        };
+                        send!(reply);
                     }
-                    _ => serde_json::json!({"op":"error","id":id,"error":{"code":"MALFORMED","message":"unknown op","details":{}}}),
-                };
-                if sock.send(Message::Text(reply.to_string().into())).await.is_err() { return; }
+                    _ => send!(ws_err(&id, "MALFORMED", "unknown op")),
+                }
             }
             b = rx.recv() => {
                 let info = match b { Ok(i) => i, Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -758,29 +1339,71 @@ async fn ws_session(app: Arc<App>, mut sock: WebSocket, peer: SocketAddr, header
                 } Err(_) => return };
                 for d in &info.book_deltas {
                     if books.iter().any(|b| d["symbol"] == b.as_str()) {
-                        let m = serde_json::json!({"channel":"book","symbol":d["symbol"],"type":"delta","data":d});
-                        if sock.send(Message::Text(m.to_string().into())).await.is_err() { return; }
+                        send!(serde_json::json!({"channel":"book","symbol":d["symbol"],"type":"delta","data":d}));
+                    }
+                }
+                if let Some(d) = &info.delta {
+                    let mut out: Vec<serde_json::Value> = Vec::new();
+                    {
+                        let s = app.seq.lock().unwrap();
+                        if let Some(ix) = &s.index {
+                            for mid in &trades {
+                                let ts: Vec<serde_json::Value> = d.trades.iter().filter(|t| t.market == *mid).map(|t| ix.trade_json(t)).collect();
+                                if !ts.is_empty() {
+                                    out.push(serde_json::json!({"channel":"trades","symbol":ts[0]["symbol"],"type":"update","data":{"trades": ts}}));
+                                }
+                            }
+                            for (mid, iv) in &candles {
+                                if d.candles.contains(&(*mid, *iv)) {
+                                    if let (Some(c), Some(m)) = (ix.last_candle(*mid, *iv), app.g.market(*mid)) {
+                                        out.push(serde_json::json!({"channel":"candles","symbol":m.symbol,"interval":crate::index::INTERVALS[*iv].0,"type":"update","data":c}));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for m in out { send!(m); }
+                }
+                if !tickers.is_empty() {
+                    let now = tokio::time::Instant::now();
+                    let funded: Vec<u32> = info.delta.as_ref().map(|d| d.funding.iter().map(|f| f.market).collect()).unwrap_or_default();
+                    for (_, v) in tickers.iter_mut() { v.1 = true; }
+                    let due: Vec<u32> = tickers.iter().filter(|(m, (last, _))| funded.contains(m) || last.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))).map(|(m, _)| *m).collect();
+                    for mid in due {
+                        if let Some(m) = app.g.market(mid) {
+                            tickers.insert(mid, (Some(now), false));
+                            send!(serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)}));
+                        }
                     }
                 }
                 if status_sub {
-                    let fin = app.seq.lock().unwrap().latest_final();
-                    let lf = fin.and_then(|h| app.seq.lock().unwrap().block(h).ok().flatten()).map(|b| block_summary(&b));
-                    let m = serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": block_summary(&info.block), "latestFinalized": lf}});
-                    if sock.send(Message::Text(m.to_string().into())).await.is_err() { return; }
+                    let lf = { let s = app.seq.lock().unwrap(); s.latest_final().and_then(|h| s.block(h).ok().flatten()).map(|b| block_summary(&b)) };
+                    send!(serde_json::json!({"channel":"status","type":"update","data":{"latestBlock": block_summary(&info.block), "latestFinalized": lf}}));
                 }
                 if !accounts.is_empty() {
                     let inputs = decode_inputs(&app.g.types, &info.block.inputs_encoded).unwrap_or_default();
-                    let touched: Vec<Address> = accounts.iter().copied().filter(|a| inputs.iter().any(|i| match i {
-                        crate::types::Input::Deposit(d) => d.account == *a,
-                        crate::types::Input::Forced(f) => f.account == *a,
-                        crate::types::Input::Action(x) => crate::actions::field_addr(&app.g, app.g.types.name(x.type_index).unwrap_or(""), &x.message, "account") == Some(*a),
-                        _ => false,
-                    })).collect();
+                    let touched: Vec<Address> = match &info.delta {
+                        Some(d) => accounts.iter().copied().filter(|a| d.accounts.contains(a)).collect(),
+                        None => accounts.iter().copied().filter(|a| inputs.iter().any(|i| match i {
+                            crate::types::Input::Deposit(d) => d.account == *a,
+                            crate::types::Input::Forced(f) => f.account == *a,
+                            crate::types::Input::Action(x) => crate::actions::field_addr(&app.g, app.g.types.name(x.type_index).unwrap_or(""), &x.message, "account") == Some(*a),
+                            _ => false,
+                        })).collect(),
+                    };
                     for a in touched {
-                        let acks: Vec<serde_json::Value> = { let s = app.seq.lock().unwrap(); s.acks.values().filter(|k| k.account == a && k.height == Some(info.block.header.height)).map(|k| k.to_json()).collect() };
-                        let data = { let s = app.seq.lock().unwrap(); serde_json::json!({"height": info.block.header.height, "time": info.block.header.time, "account": account_shape(s.engine.account_json(&a)), "orders": s.engine.orders_json(&a)["orders"], "actions": acks}) };
-                        let m = serde_json::json!({"channel":"account","type":"update","account":to_hex(&a),"data":data});
-                        if sock.send(Message::Text(m.to_string().into())).await.is_err() { return; }
+                        let data = account_update(&app, &info, &a, &inputs);
+                        send!(serde_json::json!({"channel":"account","type":"update","account":to_hex(&a),"data":data}));
+                    }
+                }
+            }
+            _ = flush.tick(), if tickers.values().any(|v| v.1) => {
+                let now = tokio::time::Instant::now();
+                let due: Vec<u32> = tickers.iter().filter(|(_, (last, pending))| *pending && last.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))).map(|(m, _)| *m).collect();
+                for mid in due {
+                    if let Some(m) = app.g.market(mid) {
+                        tickers.insert(mid, (Some(now), false));
+                        send!(serde_json::json!({"channel":"ticker","symbol":m.symbol,"type":"update","data":ticker_json(&app, m)}));
                     }
                 }
             }

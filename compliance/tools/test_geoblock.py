@@ -22,9 +22,23 @@ ISO = bg.iso_codes()
 def violations(geo, old=OLD, src=SRC, iso=ISO):
     """Every property the list must have. Pure function so the tests can mutate copies."""
     v = []
-    for k in ("rule", "tiers", "default_tier", "unknown_country_effect", "denied_policy"):
+    for k in ("rule", "tiers", "default_tier", "unknown_country_effect"):
         if geo.get(k) != old.get(k):
             v.append(f"G-1 {k} changed from 0.1.1")
+    # G-1 for denied_policy, restated in 0.2.2 (R436-7; before: the whole object equal to 0.1.1). Still required:
+    # every field but the exit list equal to 0.1.1; every exit action of 0.1.1 still present, in order. New: the
+    # exit list may grow ONLY by actions that remove authority or exposure and move no value (G-1b).
+    dp, odp = geo.get("denied_policy", {}), old["denied_policy"]
+    if {k: x for k, x in dp.items() if k != "exit_only_actions"} != {k: x for k, x in odp.items() if k != "exit_only_actions"}:
+        v.append("G-1 denied_policy changed from 0.1.1")
+    exits = dp.get("exit_only_actions", [])
+    if exits[:len(odp["exit_only_actions"])] != odp["exit_only_actions"]:
+        v.append("G-1 denied_policy exit action of 0.1.1 removed or reordered")
+    for a in exits[len(odp["exit_only_actions"]):]:
+        if a not in bg.EXIT_ONLY_ADDABLE:
+            v.append(f"G-1b exit action {a} added: only actions that remove authority and move no value may be added")
+    if len(set(exits)) != len(exits):
+        v.append("G-1b duplicate exit action")
     if geo["tiers"]["restricted-review"]["effect"] != "deny" or geo["unknown_country_effect"] != "deny":
         v.append("G-1 deny by default lost")
     for kind in ("tor", "vpn_proxy"):
@@ -118,6 +132,18 @@ class Mutations(unittest.TestCase):
 
     def test_g1_exit_only_changed(self):
         self.has(self.mut(lambda g: g["denied_policy"].__setitem__("policy", "none")), "G-1")
+
+    def test_g1_exit_action_of_0_1_1_removed(self):
+        self.has(self.mut(lambda g: g["denied_policy"]["exit_only_actions"].remove("Withdraw")), "G-1 denied_policy exit action")
+
+    def test_g1b_exposure_opening_action_cannot_become_an_exit_action(self):
+        for a in ("PlaceOrder", "ApproveAgent", "UpdateLeverage", "UpdateMargin"):
+            self.has(self.mut(lambda g, a=a: g["denied_policy"]["exit_only_actions"].append(a)), "G-1b exit action " + a)
+
+    def test_g1b_revoke_agent_is_an_exit_action(self):
+        # R436-7: a geo-denied user can end a leaked agent key
+        self.assertEqual(GEO["denied_policy"]["exit_only_actions"],
+                         OLD["denied_policy"]["exit_only_actions"] + ["RevokeAgent"])
 
     def test_g2_vpn(self):
         self.has(self.mut(lambda g: g["anonymizers"].__setitem__("vpn_proxy", "allow")), "G-2")

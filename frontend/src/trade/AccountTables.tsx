@@ -94,7 +94,9 @@ export function AccountTables({ only }: { only?: string }) {
                   <th className="r">Margin</th>
                   <th className="r">Unrealised PnL (ROE)</th>
                   <th className="r">Funding</th>
-                  <th />
+                  <th>
+                    <span className="sr-only">Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +233,11 @@ function OrderTable({ orders, market, onCancel }: { orders: Order[]; market: (s:
           <th className="r">Trigger</th>
           <th className="r">Filled / size</th>
           <th>Status</th>
-          {onCancel && <th />}
+          {onCancel && (
+            <th>
+              <span className="sr-only">Action</span>
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>

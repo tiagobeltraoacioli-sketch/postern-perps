@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutTags, liquidationZone, type TagInput } from '../levels';
+import { layoutTags, liquidationZone, undrawableLevels, type TagInput } from '../levels';
 
 const toY = (p: number) => 400 - p; // price 0..400 maps to y 400..0
 
@@ -76,3 +76,22 @@ describe('liquidation zone', () => {
     expect(liquidationZone(500, 'buy', 0, 400)).toBeNull();
   });
 });
+
+describe('undrawableLevels (R395-32)', () => {
+  it('returns exactly the levels whose price is not a finite number, in input order', () => {
+    const out = undrawableLevels([
+      { id: 'a', label: 'A', kind: 'liquidation', price: Number.NaN },
+      { id: 'b', label: 'B', kind: 'order', price: 1 },
+      { id: 'c', label: 'C', kind: 'trigger', price: Number.NEGATIVE_INFINITY },
+      { id: 'd', label: 'D', kind: 'position', price: 0 },
+    ]);
+    expect(out.map((l) => l.id)).toEqual(['a', 'c']);
+  });
+  it('every level is either placed-or-dropped by layoutTags or reported undrawable: none vanishes', () => {
+    const inputs = [1, Number.NaN, 5, Number.POSITIVE_INFINITY, 3].map((price, i) => ({ id: `l${i}`, label: `L${i}`, kind: 'order' as const, price }));
+    const layout = layoutTags(inputs, (p) => 100 - p * 10, 0, 100, 10);
+    const seen = new Set([...layout.placed.map((t) => t.id), ...layout.dropped, ...undrawableLevels(inputs).map((l) => l.id)]);
+    expect(seen.size).toBe(inputs.length);
+  });
+});
+

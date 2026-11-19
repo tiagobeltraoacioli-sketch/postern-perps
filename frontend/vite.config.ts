@@ -21,11 +21,31 @@ export default defineConfig(({ command }) => ({
   preview: { host: '127.0.0.1' },
   build: { target: 'es2022', sourcemap: false, chunkSizeWarningLimit: 900 },
   test: {
-    environment: 'jsdom',
-    environmentOptions: { jsdom: { url: 'https://perps.invalid/' } },
-    setupFiles: ['./src/test/setup.ts'],
-    restoreMocks: true,
-    // The chart's tests (agent 396) need their canvas stand-in setup: they run with their own config from `npm test`.
-    include: ['src/test/**/*.test.{ts,tsx}'],
+    // Two projects in one run (`vitest run`): the app's tests and the chart's (src/chart/test, agent 396's suite, which
+    // needs its own canvas stand-in setup). The chart's standalone config (src/chart/test/vitest.config.mts) still works.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'app',
+          environment: 'jsdom',
+          environmentOptions: { jsdom: { url: 'https://perps.invalid/' } },
+          setupFiles: ['./src/test/setup.ts'],
+          restoreMocks: true,
+          include: ['src/test/**/*.test.{ts,tsx}'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'chart',
+          environment: 'jsdom',
+          setupFiles: ['./src/chart/test/setup.ts'],
+          restoreMocks: true,
+          include: ['src/chart/test/**/*.test.{ts,tsx}'],
+          css: false,
+        },
+      },
+    ],
   },
 }));

@@ -14,16 +14,17 @@ function apply(obj, ops) {
   return o;
 }
 
-test("392's real list 0.2.1 loads, has no allowed entry, and keeps its guards", () => {
+test("the real list 0.2.2 loads, has no allowed entry, and keeps its guards", () => {
   const l = realList();
   // 0.1.1 -> 0.2.1 (392, merged on main 0cd66a0): every ISO 3166-1 code listed, still no allowed entry; the
   // 0.1.1 guards below are unchanged.
-  assert.equal(l.version, '0.2.1');
+  // 0.2.1 -> 0.2.2 (435, R436-7): RevokeAgent added to the exit actions, nothing else changed.
+  assert.equal(l.version, '0.2.2');
   assert.ok(Object.keys(l.countries).length >= 249, 'every ISO 3166-1 code is listed');
   assert.match(l.sha256, /^[0-9a-f]{64}$/);
   assert.equal(Object.values(l.countries).filter((e) => e.effect === 'allow').length, 0);
   assert.equal(l.deniedPolicy, 'exit_only');
-  assert.deepEqual([...l.exitActions], ['CancelOrder', 'CancelAll', 'PlaceOrder(reduceOnly=true)', 'Withdraw']);
+  assert.deepEqual([...l.exitActions], ['CancelOrder', 'CancelAll', 'PlaceOrder(reduceOnly=true)', 'Withdraw', 'RevokeAgent']);
   assert.deepEqual([...l.restrictedSubdivisionCountries], ['UA']);
   for (const cc of ['US', 'CA', 'GB', 'BR', 'CU', 'IR', 'KP', 'SY', 'RU', 'BY', 'CN']) assert.equal(l.countries[cc].effect, 'deny', cc);
   assert.ok(Object.isFrozen(l) && Object.isFrozen(l.countries) && Object.isFrozen(l.countries.BR));

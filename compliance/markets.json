@@ -1,7 +1,7 @@
 {
   "schema": "postern-perps/markets",
-  "version": "0.2.1",
-  "date": "2026-11-17",
+  "version": "0.2.2",
+  "date": "2026-11-18",
   "status": "UNAUDITED prototype. Launch-candidate market table proposed by agent 392; every number is explained in docs/MARKETS.md with its source. Nothing here is legal advice; listing any market in any jurisdiction is for counsel.",
   "conventions": {
     "spec": "docs/SPEC.md v0.1 (agent 388): fixed scales PRICE_SCALE 1e8, SIZE_SCALE 1e8, USDC_SCALE 1e6, rates in ppm (1e-6), funding rates in RATE_SCALE 1e9. Decimal strings here are converted by the engine's genesis converter with exact parsing (S-1.2): a value with more fractional digits than its scale is REJECTED, never rounded.",
@@ -72,7 +72,11 @@
         "agreeBps": 100,
         "jumpBps": 500,
         "maxStalenessMs": 10000,
-        "confirmRounds": 3
+        "confirmRounds": 3,
+        "exitHaircutBps": 500,
+        "exitHaircutPerMinBps": 100,
+        "exitMaxHaircutBps": 5000,
+        "maxHaltMs": 3600000
       }
     },
     {
@@ -119,7 +123,11 @@
         "agreeBps": 100,
         "jumpBps": 500,
         "maxStalenessMs": 10000,
-        "confirmRounds": 3
+        "confirmRounds": 3,
+        "exitHaircutBps": 700,
+        "exitHaircutPerMinBps": 100,
+        "exitMaxHaircutBps": 5000,
+        "maxHaltMs": 3600000
       }
     },
     {
@@ -166,7 +174,11 @@
         "agreeBps": 100,
         "jumpBps": 800,
         "maxStalenessMs": 10000,
-        "confirmRounds": 3
+        "confirmRounds": 3,
+        "exitHaircutBps": 1300,
+        "exitHaircutPerMinBps": 100,
+        "exitMaxHaircutBps": 5000,
+        "maxHaltMs": 3600000
       }
     }
   ]

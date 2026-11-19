@@ -45,7 +45,8 @@ export type TagLayout = { readonly placed: PlacedTag[]; readonly dropped: string
 
 /**
  * Place tags of height `h` in [top, bottom] (the axis band), given each tag's price y from `toY`.
- * Tags with a non-finite price are not placed and not reported (nothing to draw).
+ * Tags with a non-finite price cannot be placed. They are NOT silently lost: `undrawableLevels` names them and the
+ * component shows them in a visible notice (R395-32).
  */
 export function layoutTags(
   inputs: readonly TagInput[],
@@ -92,6 +93,15 @@ export function layoutTags(
     placed: work.map((w, i) => ({ id: w.id, kind: w.kind, priceY: w.priceY, y: ys[i], pinned: w.pinned })),
     dropped,
   };
+}
+
+/**
+ * R395-32. The levels that cannot be drawn because their numeric price is not a finite number (NaN, an infinity:
+ * a feed or conversion fault in the host). Such a level has no place on the canvas; the component names each one in a
+ * visible notice instead of leaving it out in silence. A liquidation level among them makes the notice an alert.
+ */
+export function undrawableLevels<T extends { readonly price: number }>(levels: readonly T[]): T[] {
+  return levels.filter((l) => !Number.isFinite(l.price));
 }
 
 /**

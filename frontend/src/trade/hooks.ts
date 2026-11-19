@@ -19,6 +19,23 @@ export function useAccountState(): AccountState | null {
 /** A price picked in the book, the trades or the chart: the order form takes it as its limit price. */
 export const pricePick = new Store<{ text: string; at: number } | null>(null);
 
+/** The side the order form is on (the phone's Long / Short bar sets it before opening the form). */
+export const orderSide = new Store<'buy' | 'sell'>('buy');
+
+/** True while the viewport matches `query` (layout decisions that CSS alone cannot make: inert, focus). */
+export function useMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const m = matchMedia(query);
+    const on = () => setMatches(m.matches);
+    on();
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, [query]);
+  return matches;
+}
+
 /** A clock that ticks every `ms` (countdowns, ages). */
 export function useNow(ms = 1000): number {
   const [now, setNow] = useState(() => Date.now());

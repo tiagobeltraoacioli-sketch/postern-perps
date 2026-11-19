@@ -155,6 +155,7 @@ pub fn committee_prices(
             return Err(Error::OracleRoundNotNew);
         }
     }
+    // C2 (structure), whole input refused: count, signer order, every price list's form.
     let n = signers.len();
     let c = u.observations.len();
     if c < quorum || c > n {
@@ -178,25 +179,43 @@ pub fn committee_prices(
         }
     }
     let round_start = u.round.checked_mul(ROUND_MS).ok_or(Error::OracleMalformed)?;
+    // Per observation, in input order (432's README section 5 as restated for R436-12, vectors c2d.json):
+    //   C2c round membership and C2b signature are facts about the observation ALONE: an honest sequencer never
+    //   includes one that fails them, so a failure refuses the WHOLE input (a block never carries garbage);
+    //   C2d: the two bounds relative to the BLOCK time are the only ones a signer cannot control and the sequencer
+    //   cannot pre-filter by the observation alone: an observation outside them is IGNORED for this input (its
+    //   prices enter no market), not a refusal. At f0e3967 it refused the whole update, so one signer of n, or one
+    //   feeder clock a second fast, vetoed every round. The signature of an ignored observation is still checked.
+    let mut counted: Vec<&crate::types::SignedObservation> = Vec::with_capacity(c);
     for o in &u.observations {
+        if o.time_ms < round_start || o.time_ms >= round_start.saturating_add(ROUND_MS) {
+            return Err(Error::OracleTime);
+        }
         let d = digest(domain_sep, &oracle_struct_hash(u.round, o.time_ms, &o.prices));
         if recover(&d, &o.signature) != Some(signers[o.signer as usize]) {
             return Err(Error::OracleBadSignature);
         }
-        if o.time_ms < round_start || o.time_ms >= round_start + ROUND_MS {
-            return Err(Error::OracleTime);
+        let ignored = o.time_ms > t.saturating_add(max_future_ms) || (o.time_ms <= t && t - o.time_ms > max_age_ms);
+        if !ignored {
+            counted.push(o);
         }
-        if o.time_ms > t.saturating_add(max_future_ms) || (o.time_ms <= t && t - o.time_ms > max_age_ms) {
-            return Err(Error::OracleTime);
-        }
+    }
+    // fewer than the quorum left: refused with ORACLE_TIME and NO state change (the round is not consumed: the same
+    // update may be presented again at a later block time)
+    if counted.len() < quorum {
+        return Err(Error::OracleTime);
     }
     let mut out = Vec::new();
     for (mid, p) in markets {
-        let mut v: Vec<u64> = u
-            .observations
+        let mut v: Vec<u64> = counted
             .iter()
             .filter_map(|o| o.prices.iter().find(|x| x.market_id == *mid))
             .filter(|x| x.sources >= p.min_sources)
+            // R430-2 (0.2): a value above MAX_PRICE (SPEC section 1) is not a price of this engine: the observation
+            // does not count for the market (as if its sources were too few), so a committee that signs such a
+            // value gets no index and the market goes stale and halts (fail closed) instead of an index outside
+            // the bound every product of section 1 relies on.
+            .filter(|x| x.price <= crate::num::MAX_PRICE)
             .map(|x| x.price)
             .collect();
         if v.len() < quorum {
