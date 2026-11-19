@@ -102,7 +102,8 @@ git checkout --detach origin/<branch>
 ```
 
 then the commands of the README's "Tests" table (Rust on the build host only), and for the system as a whole
-`e2e/README.md`. Evidence of the rehearsal runs is kept outside the repository, in the project folder
+`e2e/README.md` (that README table and `e2e/` come with the candidate branch: on `main` before it is merged, each
+area's own document names its tests). Evidence of the rehearsal runs is kept outside the repository, in the project folder
 (`agents/435-evidence/`).
 
 ## Open findings at the end of round 2
