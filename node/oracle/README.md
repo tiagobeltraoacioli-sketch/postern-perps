@@ -176,15 +176,16 @@ subset for every committee size up to 9 and every strict-majority quorum (more t
 With `f <= (q-1)/2` LYING signers colluding with the sequencer the reach is the whole range of the honest values it
 includes (section 5, "why the median is safe"): still never outside the honest range.
 
-**Size (measured, section 8a).** Honest feeders read the same venues in the same round, so their observations
-differ only by when inside the 3 s round each one sampled and by which venues answered. The move of one feeder's
-observation from one round to the next is an upper proxy for the spread between two feeders of the same round: in
-the live hour of 2026-11-18 it was at the median below 1 bps and at the 99th percentile below 10 bps for the three
-markets (exact figures in section 8a). The hard cap in a round that passes C4 is `agreeBps` (100 bps) from the
-included values. For comparison, the mark may already differ from the index by `markBandBps = 50` (SPEC S-5.3) and
-tier-0 maintenance is 250 bps or more: the bias cannot by itself liquidate an account that is not already within a
-few bps of maintenance, but it is a free, repeatable edge for whoever orders the liquidations. It is stated here
-and must be stated in SPEC section 12 (cross-area line to 430).
+**Size (measured, `calibration/CALIBRATION.md` section 4).** Honest feeders read the same venues in the same
+round, so their observations differ only by when inside the 3 s round each one sampled and by which venues
+answered. The move of one feeder's observation from one round to the next is an upper proxy for the spread between
+two feeders of the same round: in the live hour of 2026-11-18 (1,300 rounds) it was 0.5 to 0.8 bps at the median,
+5.2 to 5.4 bps at the 99th percentile and 22.7 bps at most over the three markets. A round that passes C4 has its
+median within `agreeBps` (100 bps) of at least `q` included values, which caps what any single round can carry.
+For comparison, the mark may already differ from the index by `markBandBps = 50` (SPEC S-5.3) and tier-0
+maintenance is 250 bps or more: the bias cannot by itself liquidate an account that is not already within a few
+bps of maintenance, but it is a free, repeatable edge for whoever orders the liquidations. It is stated here and
+in SPEC section 12 (430, 0.2.3).
 
 **What is implemented against it.**
 
@@ -413,9 +414,9 @@ venues (2026-11-18). No bound is loosened.
 | Parameter | Value | What the data shows | Result |
 |---|---|---|---|
 | `jumpBps` | 500 / 500 / 800 | a whole minute moved more than this in 0 / 1 / 4 of 48,960 minutes, all on 2025-10-10 | keep |
-| `agreeBps` | 100 | signers differ by sampling time inside a round; the 3 s move of an observation in the live hour stays far below it | keep |
+| `agreeBps` | 100 | signers differ by sampling time inside a round; the 3 s move of an observation in the live hour was 5.4 bps at the 99th percentile, 22.7 bps at most | keep |
 | `maxSourceDeviationBps` | 200 | never reached in 30 calm days; on the worst days the feeder would have abstained 1 / 1 / 36 minutes (fail closed) | keep |
-| `maxStalenessMs` | 10,000 | live hour: see CALIBRATION.md section 4 | keep |
+| `maxStalenessMs` | 10,000 | live hour: 1,300 of 1,300 rounds priced every market; no gap at all | keep |
 | `exitHaircutBps` | 500 / 500 / 800 | the band must contain the real move after m minutes of darkness: BTC yes (factor 1.9 or more), ETH barely (1.16 at 2 min), SOL NO (1,003 bps in 2 min against 1,000; 1,366 in 5 min against 1,300) | WIDEN to 500 / 700 / 1300 |
 | `exitHaircutPerMinBps`, `exitMaxHaircutBps` | 100, 5000 | the largest recorded move grows far slower than the band after 10 minutes; largest 60-minute move 1,692 bps | keep |
 | `maxHaltMs` | 3,600,000 | settling at the pre-halt index after an hour is wrong by up to 883 / 1,232 / 1,587 bps on the worst days | keep the hour; X3 only at a committee price (section 6a, proposal to 430) |
