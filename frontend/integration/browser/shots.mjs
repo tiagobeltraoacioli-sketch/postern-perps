@@ -5,9 +5,12 @@
 //
 //   node integration/browser/shots.mjs --app http://127.0.0.1:49811/ --out DIR [--port 49853]
 //        [--routes "#/,#/trade/BTC-USD"] [--sizes "1440x900,390x844m"] [--theme dark|light|both] [--account 0x…]
-//        [--no-wallet] [--wait 2500]
+//        [--no-wallet] [--wait 2500] [--attested] [--eval "js run in the page before the shot"] [--tag name]
+// --attested puts a DISPLAY-ONLY attestation record for the watch-only account in the page's storage (its signature
+// is not a signature; nothing can be signed or posted with it: the wallet declines everything), so the order form
+// is drawn instead of the first-order statement.
 // A size ending in "m" is a phone (device scale 2, touch). Files: <route>-<size>-<theme>.png, viewport only.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launch, openPage } from './cdp.mjs';
@@ -27,6 +30,17 @@ const ACCOUNT = opt('account', '0x1111111111111111111111111111111111111111');
 const WAIT = Number(opt('wait', '2500'));
 const WALLET = !args.includes('--no-wallet');
 const FULL = args.includes('--full');
+const ATTESTED = args.includes('--attested');
+const EVAL = opt('eval', '');
+const TAG = opt('tag', '');
+const eligibility = readFileSync(new URL('../../src/compliance/eligibility.ts', import.meta.url), 'utf8');
+const constant = (name) => new RegExp(`${name} = '([^']+)'`).exec(eligibility)[1];
+const attestation = JSON.stringify([
+  {
+    message: { account: ACCOUNT.toLowerCase(), statementId: constant('STATEMENT_ID'), statementHash: constant('STATEMENT_HASH'), residenceCountry: 'PT', issuedAt: String(Date.now()), expiresAt: String(Date.now() + 86_400_000) },
+    signature: '0x',
+  },
+]);
 const CHROME = opt('chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 mkdirSync(OUT, { recursive: true });
 
@@ -63,6 +77,7 @@ try {
       await page.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: phone ? 2 : 1, mobile: phone });
       await page.goto(APP);
       await page.evaluate(`localStorage.setItem('postern.theme.v1', ${JSON.stringify(theme)})`);
+      if (ATTESTED) await page.evaluate(`localStorage.setItem(${JSON.stringify(constant('KEY'))}, ${JSON.stringify(attestation)})`);
       for (const route of ROUTES) {
         await page.goto(`${APP}${route}`);
         await page.reload();
@@ -70,8 +85,12 @@ try {
           await page.click('Connect');
           await page.click('Watch-only wallet').catch(() => {});
         }
+        if (EVAL) {
+          await delay(1500);
+          await page.evaluate(EVAL);
+        }
         await delay(WAIT);
-        const file = join(OUT, `${name(route)}-${size}-${theme}.png`);
+        const file = join(OUT, `${name(route)}${TAG ? `-${TAG}` : ''}-${size}-${theme}.png`);
         if (FULL) await page.screenshot(file);
         else {
           const { data } = await page.cdp('Page.captureScreenshot', { format: 'png' });

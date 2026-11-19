@@ -3608,6 +3608,714 @@ td.strong {
   }
 }
 
+/* =====================================================================================================
+   Design pass 3. One block, after everything it refines; only tokens for colour, type and space.
+   Nothing under an action bar; one hinge for the book's bars; panels whose columns give way before they
+   scroll sideways; a depth view; the first screen of the home page composed against the real height.
+   ===================================================================================================== */
+
+/* ---------- Order gate: the form fits, the account and the action stand in the foot ---------- */
+.amount-label {
+  gap: var(--s-2);
+}
+.amount-label .amount-hint {
+  margin-left: auto;
+}
+.amount-single {
+  display: contents;
+}
+.amount-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-2);
+}
+.amount-pair .amount-hint {
+  display: none;
+}
+.amount-pair .amount-unit {
+  padding: 0 var(--s-2);
+}
+.amount-pair .amount-box input {
+  padding: 0 var(--s-2);
+  font-size: var(--text-body);
+}
+.estimate-note .note-short,
+.account-mini .unit-dt {
+  display: none;
+}
+.gate-foot {
+  position: relative;
+}
+.gate-top,
+.gate-body,
+.gate-foot {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* While the body has more below, its last lines fade out and the foot casts a soft edge: never a hard cut. */
+.gate-body[data-more='true'] {
+  mask-image: linear-gradient(to bottom, var(--bg) calc(100% - 28px), transparent);
+}
+.gate-foot .account-mini {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-1) var(--s-3);
+  padding-top: 0;
+  border-top: 0;
+}
+.gate-foot .account-mini div {
+  display: grid;
+  gap: 0;
+  font-size: var(--text-micro);
+}
+.gate-foot .account-mini div:nth-child(2) {
+  justify-items: end;
+}
+.gate-foot .account-mini dd {
+  font-size: var(--text-small);
+  color: var(--text);
+}
+.gate-foot .account-mini .mini-ratio {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.gate-foot .form-messages {
+  max-height: 96px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* ---------- Book: bars hinge on the right edge and stop before the prices ---------- */
+.book-depth {
+  right: 0;
+  left: auto;
+}
+.book-row .book-px {
+  z-index: 1;
+}
+
+/* ---------- Depth view ---------- */
+.trade-depth {
+  display: none;
+  min-height: 0;
+}
+.depth {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  height: 100%;
+  overflow: hidden;
+}
+.depth.is-stale .depth-plot {
+  opacity: 0.55;
+}
+.depth-max {
+  font-size: var(--text-micro);
+  color: var(--text-2);
+}
+.depth-plot {
+  position: relative;
+  flex: 1;
+  min-height: 140px;
+  margin: var(--s-2) 0 0;
+  cursor: crosshair;
+  outline: none;
+  touch-action: pan-y;
+}
+.depth-plot:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.depth-plot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.depth-area {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.depth-bid {
+  fill: color-mix(in srgb, var(--up) 18%, transparent);
+  stroke: var(--up);
+}
+.depth-ask {
+  fill: color-mix(in srgb, var(--down) 18%, transparent);
+  stroke: var(--down);
+}
+.depth-mid,
+.depth-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--line-strong);
+  pointer-events: none;
+}
+.depth-cursor {
+  border-left-style: solid;
+}
+.depth-cursor-bid {
+  border-left-color: var(--up);
+}
+.depth-cursor-ask {
+  border-left-color: var(--down);
+}
+.depth-axis {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  padding: var(--s-1) var(--s-3);
+  border-top: 1px solid var(--line);
+  font-size: var(--text-micro);
+  color: var(--text-3);
+}
+.depth-axis span:last-child {
+  text-align: right;
+}
+.depth-axis-mid {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--text-small);
+}
+.depth-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s-3);
+  min-height: 44px;
+  padding: var(--s-1) var(--s-3) var(--s-2);
+  font-size: var(--text-micro);
+  color: var(--text-2);
+}
+.depth-readout .up,
+.depth-readout .down {
+  flex-basis: 100%;
+  font-weight: 600;
+}
+.depth-far,
+.depth-hint {
+  color: var(--text-3);
+}
+
+/* ---------- Loading a page ---------- */
+.page-loading .skeleton {
+  width: min(320px, 60vw);
+  height: 14px;
+}
+
+/* ---------- Toasts: clear of the actions (bottom left on a desk, under the header on a phone) ---------- */
+.toaster {
+  right: auto;
+  left: var(--s-4);
+  bottom: calc(var(--s-7) + env(safe-area-inset-bottom));
+  width: min(360px, calc(100vw - 2 * var(--s-4)));
+}
+
+/* ---------- Markets: the head's figures sit on the title's line, the sentence under both ---------- */
+.page-head-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'eyebrow eyebrow'
+    'title stats'
+    'lead lead';
+  align-items: end;
+  gap: var(--s-2) var(--s-6);
+}
+.page-head-row > div:first-child {
+  display: contents;
+}
+.page-head-row .eyebrow {
+  grid-area: eyebrow;
+}
+.page-head-row h1 {
+  grid-area: title;
+}
+.page-head-row .lead {
+  grid-area: lead;
+  max-width: 72ch;
+}
+.page-head-row > :nth-child(2) {
+  grid-area: stats;
+}
+.page-head-row .head-stats {
+  padding-bottom: 4px;
+}
+.head-stats div {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+.head-stats dd {
+  line-height: 1;
+}
+.market-card-head {
+  min-width: 0;
+}
+.market-card-name {
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+}
+.market-card-name strong {
+  white-space: nowrap;
+}
+.market-card-name .sub {
+  font-size: var(--text-micro);
+}
+.market-card dt {
+  white-space: nowrap;
+}
+.market-cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 268px), 1fr));
+}
+
+/* ---------- Home: the first screen ---------- */
+.home-first {
+  display: grid;
+  gap: var(--s-6);
+}
+.hero-eyebrow {
+  text-wrap: balance;
+}
+.home {
+  gap: var(--s-8);
+  padding-top: var(--s-6);
+}
+@media (min-width: 900px) {
+  .hero {
+    min-height: 0;
+  }
+  .gate-art {
+    width: min(100%, 420px, calc((100dvh - var(--first-top, 124px)) * 0.62));
+  }
+  /* A window too short for hero and markets together: the hero has the first screen to itself and the markets
+     begin clearly under the fold. */
+  .home-first .hero {
+    min-height: calc(100dvh - var(--first-top, 124px) - var(--s-6));
+  }
+}
+/* Tall enough: hero and the live markets are one composed screen, the markets whole above the fold. */
+@media (min-width: 900px) and (min-height: 840px) {
+  .home-first {
+    min-height: calc(100dvh - var(--first-top, 124px) - var(--s-5));
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .home-first .hero {
+    min-height: 0;
+  }
+  .strip button {
+    padding-block: var(--s-3);
+  }
+}
+@media (min-width: 900px) and (min-height: 1100px) {
+  .home-first {
+    min-height: min(calc(100dvh - var(--first-top, 124px) - var(--s-5)), 980px);
+  }
+}
+
+/* ---------- Trade, fitted screen ---------- */
+@media (min-width: 1024px) and (min-height: 680px) {
+  .side-tabs {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .trade-side .trade-depth {
+    flex: 1;
+  }
+  .trade-side[data-side-tab='depth'] .trade-depth {
+    display: block;
+  }
+  .trade-side[data-side-tab='depth'] .trade-book,
+  .trade-side[data-side-tab='depth'] .trade-tape {
+    display: none;
+  }
+  .trade-side .depth {
+    min-height: 0;
+  }
+  .trade-side .depth .panel-head h2 {
+    display: block;
+  }
+  /* The market bar and the account table measure themselves: what gives way depends on their own width. */
+  .market-bar {
+    container: marketbar / inline-size;
+  }
+  .trade-account {
+    container: account / inline-size;
+  }
+  .market-stats {
+    overflow: hidden;
+  }
+  @container marketbar (max-width: 800px) {
+    .market-stats .stat-oi {
+      display: none;
+    }
+  }
+  @container marketbar (max-width: 690px) {
+    .market-stats .stat-volume {
+      display: none;
+    }
+  }
+  @container account (max-width: 1180px) {
+    .c-value,
+    .c-funding {
+      display: none;
+    }
+  }
+  @container account (max-width: 1010px) {
+    .c-mark {
+      display: none;
+    }
+  }
+  @container account (max-width: 820px) {
+    .c-mark,
+    .c-lev,
+    .c-words {
+      display: none;
+    }
+    .account-tables th,
+    .account-tables td {
+      padding-inline: 6px;
+    }
+    .account-tables td.r:last-child:has(.button) {
+      padding-left: var(--s-3);
+    }
+  }
+}
+/* Tall: book (or depth) over the tape; the switch offers Book and Depth. */
+@media (min-width: 1024px) and (min-height: 1000px) {
+  .side-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .trade-side[data-side-tab='depth'] .trade-book {
+    display: none;
+  }
+  .trade-side[data-side-tab='depth'] .trade-tape {
+    display: grid;
+  }
+  .trade-side[data-side-tab='depth'] .trade-depth {
+    flex: 2.2;
+  }
+  .trade-side .panel-head h2 {
+    display: none;
+  }
+  .trade-side .tape .panel-head h2 {
+    display: block;
+  }
+  .trade-side .book .panel-head {
+    justify-content: flex-end;
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+}
+.trade-side[data-tape-in-view] .side-tabs [data-tab='trades'] {
+  display: none;
+}
+/* Very wide: the tape has its own column; the switch stands over the book's column. */
+@media (min-width: 2100px) and (min-height: 680px) {
+  .trade {
+    grid-template-columns: minmax(0, 1fr) calc(var(--book-w) + 300px + var(--s-2)) var(--form-w);
+    grid-template-areas:
+      'bar bar form'
+      'alert alert form'
+      'chart side form'
+      'account account form';
+  }
+  .trade-side {
+    grid-area: side;
+    display: grid;
+    grid-template-columns: var(--book-w) 300px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--s-2);
+    min-height: 0;
+  }
+  .side-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .trade-side .trade-book,
+  .trade-side .trade-depth {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .trade-side .trade-tape {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+  .trade-side[data-side-tab='depth'] .trade-book {
+    display: none;
+  }
+  .trade-side[data-side-tab='depth'] .trade-tape {
+    display: grid;
+  }
+  .trade-side .panel-head h2 {
+    display: none;
+  }
+  .trade-side .tape .panel-head h2 {
+    display: block;
+  }
+  .trade-side .book .panel-head {
+    justify-content: flex-end;
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+}
+/* Up to 960 px of height the order form is tightened so that it needs no scrolling in any order type. */
+@media (min-width: 1024px) and (min-height: 680px) and (max-height: 960px) {
+  .order-panel {
+    padding-top: var(--s-4);
+  }
+  .gate-head {
+    display: none;
+  }
+  .gate-top,
+  .gate-body,
+  .gate-foot {
+    gap: var(--s-2);
+  }
+  .trade-form .gate-body {
+    padding-block: var(--s-2);
+  }
+  .side-switch button {
+    min-height: 34px;
+    padding-block: var(--s-1);
+  }
+  .amount {
+    gap: 1px;
+  }
+  .amount-label {
+    line-height: 1.25;
+  }
+  .amount-box input {
+    height: 34px;
+    font-size: var(--text-body);
+  }
+  .fractions button {
+    padding-block: 2px;
+  }
+  /* The time-in-force choice and "reduce only" share one row; the select's options name themselves, so its
+     caption is kept for assistive technology only. */
+  .options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-1) var(--s-2);
+  }
+  .options .tif {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .options .tif > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .options .tif select {
+    width: 100%;
+    min-width: 0;
+  }
+  .options .check {
+    flex: none;
+    white-space: nowrap;
+  }
+  .estimate {
+    padding: var(--s-2) var(--s-3);
+    gap: 0;
+  }
+  .estimate div {
+    line-height: 1.4;
+  }
+  .estimate-note .note-long {
+    display: none;
+  }
+  .estimate-note .note-short {
+    display: inline;
+  }
+  .gate-foot {
+    padding-block: var(--s-2) var(--s-3);
+  }
+  /* One line: equity, available (the unit is the exchange's only collateral and is named once), margin ratio. */
+  .gate-foot .account-mini {
+    grid-template-columns: auto auto auto;
+    justify-content: space-between;
+    gap: var(--s-2);
+  }
+  .gate-foot .account-mini div:nth-child(2) {
+    justify-items: start;
+  }
+  .gate-foot .account-mini .mini-ratio {
+    grid-column: auto;
+    display: grid;
+    justify-items: end;
+  }
+  .gate-foot .account-mini .mini-ratio .health-meter {
+    display: none;
+  }
+  .gate-foot .account-mini .unit {
+    display: none;
+  }
+  .gate-foot .account-mini .unit-dt {
+    display: inline;
+  }
+}
+/* The shortest fitted windows: a last few pixels for the longest form (a stop order). */
+@media (min-width: 1024px) and (min-height: 680px) and (max-height: 760px) {
+  .trade-form .gate-body {
+    gap: 6px;
+  }
+  .amount-box input {
+    height: 32px;
+  }
+  .mode-tabs [role='tab'] {
+    padding-block: var(--s-1);
+  }
+}
+/* A short desktop window (680 to 820 px): tighter rows, so the book shows more levels and the account's rows are whole. */
+@media (min-width: 1024px) and (min-height: 680px) and (max-height: 820px) {
+  .trade {
+    grid-template-rows: auto auto minmax(0, 1fr) 148px;
+  }
+  .trade .book-body {
+    --row-h: 20px;
+  }
+  .trade .book-cols {
+    padding-block: 2px;
+  }
+  .trade .book-spread {
+    padding-block: 2px;
+  }
+  .trade .book-mid {
+    font-size: var(--text-body);
+  }
+  .trade-side {
+    gap: var(--s-1);
+  }
+  .side-tabs button {
+    padding-block: 2px;
+  }
+  .trade-side .book .panel-head {
+    padding-block: var(--s-1) 0;
+  }
+  .market-bar {
+    padding-block: var(--s-1);
+  }
+  .trade-account .tabs button {
+    padding-block: var(--s-2);
+  }
+  .trade-account th {
+    padding-block: var(--s-1);
+  }
+  .trade-account td {
+    padding-block: 3px;
+  }
+}
+
+/* ---------- The price chart measures itself too ---------- */
+.pc {
+  container: pc / inline-size;
+}
+@container pc (max-width: 640px) {
+  .pc-head {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .pc-tools {
+    order: 1;
+    width: 100%;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+  }
+  .pc-readout {
+    order: 2;
+    flex: 1 1 100%;
+    column-gap: var(--s-2);
+    font-size: var(--text-micro);
+  }
+  .pc-time,
+  .pc-ma-note {
+    display: none;
+  }
+}
+@container pc (max-width: 500px) {
+  .pc-vol {
+    display: none;
+  }
+}
+
+/* ---------- Phone ---------- */
+@media (max-width: 899px) {
+  .toaster {
+    left: var(--s-3);
+    right: var(--s-3);
+    bottom: auto;
+    top: calc(64px + env(safe-area-inset-top));
+    width: auto;
+  }
+  .trade .trade-depth {
+    grid-area: book;
+  }
+  .trade[data-phone-tab='depth'] .trade-depth {
+    display: block;
+  }
+  .trade[data-phone-tab='depth'] .trade-chart,
+  .trade[data-phone-tab='depth'] .trade-book,
+  .trade[data-phone-tab='depth'] .trade-tape {
+    display: none;
+  }
+  .trade .depth {
+    height: clamp(320px, calc(100dvh - 404px), 560px);
+  }
+  .phone-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    justify-self: stretch;
+  }
+  /* The Long / Short bar is solid: nothing of the page shows through or between it and the navigation. */
+  .trade-cta {
+    background: var(--bg);
+    bottom: calc(54px + env(safe-area-inset-bottom));
+    box-shadow: 0 8px 0 var(--bg);
+  }
+  .markets-head {
+    flex-wrap: wrap;
+    gap: var(--s-2) var(--s-3);
+  }
+  .markets-head .search {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+  .markets-head .fine {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .page-head-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'eyebrow'
+      'title'
+      'lead'
+      'stats';
+  }
+  .head-stats div {
+    justify-items: start;
+  }
+  .hero-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+  .hero-actions .button {
+    justify-content: center;
+  }
+}
+
 /* ---------- Print: history and statements on paper ---------- */
 @media print {
   .trade-cta,

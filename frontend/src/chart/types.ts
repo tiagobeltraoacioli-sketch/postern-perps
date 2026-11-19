@@ -54,6 +54,8 @@ export type ChartLevel = {
   readonly priceText: string;
   /** The line's label, formatted by the app: "Long 0.5000 BTC", "Buy 0.2500", "Stop 0.1000", "Liquidation". */
   readonly label: string;
+  /** A shorter label for a narrow plot, formatted by the app: "Long 0.5", "Buy 0.25", "Liq.". Default: `label`. */
+  readonly short?: string;
   /** Optional second text, formatted by the app: unrealised PnL "+225.60 USDC", "mark below", "reduce-only". */
   readonly detail?: string;
   /** Colour of `detail`: up and down use the chart's up and down colours; neutral the secondary text colour. */
@@ -122,6 +124,13 @@ export type PriceChartProps = {
   onPricePick?: (price: number) => void;
   /** Hollow up candles (default) carry the direction by shape as well as colour; solid fills both. */
   candleStyle?: CandleStyle;
+  /**
+   * Periods of simple moving averages of the closes, drawn as lines and named in the readout as display-only
+   * (average.ts): at most three whole numbers from 2 to 400. Absent or empty: none.
+   */
+  averages?: readonly number[];
+  /** With it the chart offers a switch for the averages (pressed when `averages` is not empty). */
+  onAveragesToggle?: (on: boolean) => void;
   /** Vertical wheel zooms the chart (default true). False: only ctrl/pinch zooms and the page scrolls. */
   wheelZoom?: boolean;
   /** Current theme (useTheme()[0]); a change re-reads the colours. Without it the chart watches <html data-theme>. */

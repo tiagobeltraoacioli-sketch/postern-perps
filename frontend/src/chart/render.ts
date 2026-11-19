@@ -42,6 +42,10 @@ export type Scene = {
   readonly volMax: number;
   /** True when the price range is the automatic one (the volume lane is then clear of candles). */
   readonly laneClear?: boolean;
+  /** CSS px free between the newest candle and the price axis at this view; the level labels stand there when they fit. */
+  readonly labelRoom?: number;
+  /** Moving averages of the visible candles: values[j] belongs to candle i0 + j (NaN: none there). Display only. */
+  readonly averages?: readonly { readonly period: number; readonly values: Float64Array }[];
   readonly palette: Palette;
   readonly candleStyle: CandleStyle;
   readonly priceDecimals: number;
@@ -166,7 +170,7 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   if (range) {
     for (const level of s.levels) {
       if (level.kind !== 'liquidation' || !Number.isFinite(level.price)) continue;
-      const zone = liquidationZone(toY(level.price), level.side, 0, plotH);
+      const zone = liquidationZone(toY(level.price), level.side, 0, laneTop);
       if (!zone) continue;
       const g = ctx.createLinearGradient(0, zone[0], 0, zone[1]);
       const near = level.side === 'buy' ? 0 : 1;
@@ -198,8 +202,8 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
       ctx.font = font(s, 500, s.fontPx - 1);
       ctx.textBaseline = 'top';
       ctx.fillStyle = p.text3;
-      // In the middle: labels of levels pinned to the bottom edge stand at the left, the names of the live prices at the right.
-      fillTabular(ctx, 'Volume', plotW / 2, plotH - band + 5, 'center');
+      // At the left of its own lane: tags and level labels stop at the lane's top (engine.ts), so nothing covers it.
+      fillTabular(ctx, 'Volume', 8, plotH - band + 5, 'left');
     }
     for (let g = 0; g < 3; g++) {
       ctx.fillStyle = withAlpha(inks[g], alphas[g]);
@@ -267,11 +271,41 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
     }
   }
 
-  // Live lines: index (dotted), last (dotted, direction colour), mark (dashed lamp).
+  // Moving averages (display only): one line per period over the candles, broken wherever there is no value.
+  if (range && s.averages?.length) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, plotW, laneTop);
+    ctx.clip();
+    ctx.lineWidth = 1.25;
+    ctx.lineJoin = 'round';
+    s.averages.forEach((a, n) => {
+      ctx.strokeStyle = p.averages[n % p.averages.length];
+      ctx.beginPath();
+      let open = false;
+      for (let i = s.i0; i < s.i1; i++) {
+        const v = a.values[i - s.i0];
+        if (!Number.isFinite(v) || (open && slots[i] - slots[i - 1] !== 1)) {
+          open = false;
+          if (!Number.isFinite(v)) continue;
+        }
+        const x = slotX(slots[i], view, plotW);
+        const y = toY(v);
+        if (open) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+        open = true;
+      }
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  // Live lines: index (dotted), last (dotted, direction colour), mark (dashed lamp). None is drawn in the volume
+  // lane: a price that far down is below the price pane (its tag is pinned at the pane's edge instead).
   const live = (price: number, color: string, dash: number[], alpha = 1) => {
     if (!range) return;
     const y = toY(price);
-    if (y < 0 || y > plotH) return;
+    if (y < 0 || y > laneTop) return;
     ctx.setLineDash(dash);
     ctx.strokeStyle = withAlpha(color, alpha);
     ctx.lineWidth = 1 / dpr;
@@ -316,25 +350,40 @@ export function drawBase(ctx: Ctx, s: Scene): { candles: number; volumes: number
   ctx.font = font(s, 500);
   ctx.textBaseline = 'middle';
   const tagById = new Map(s.tags.map((t) => [t.id, t]));
-  let elbowX = 0;
-  for (const level of s.levels) {
-    const tag = tagById.get(level.id);
-    if (tag && Number.isFinite(level.price)) elbowX = Math.max(elbowX, 8 + levelLabelWidth(ctx, s, level, tag) + 10);
-  }
-  elbowX = Math.min(elbowX, s.plotW - 12);
+  // Where the labels stand. In the breathing room right of the newest candle when EVERY label fits there (with its
+  // detail, or without it), so no label covers a candle; otherwise all at the left edge (a narrow plot, or a view the
+  // user panned), over the oldest candles on screen. One side for all labels: they stay a column.
+  // Three wordings, the fullest that fits the room for every label: with the detail, the label alone, the short one.
+  const room = (s.labelRoom ?? 0) - 12;
+  const widestOf = (mode: LabelMode) => {
+    let w = 0;
+    for (const level of s.levels) {
+      const tag = tagById.get(level.id);
+      if (tag && Number.isFinite(level.price)) w = Math.max(w, levelLabelWidth(ctx, s, level, tag, mode));
+    }
+    return w;
+  };
+  const fits = (['full', 'main', 'short'] as LabelMode[]).find((m) => {
+    const w = widestOf(m);
+    return w > 0 && w <= room;
+  });
+  const side: LabelSide = fits ? 'right' : 'left';
+  const mode: LabelMode = fits ?? 'full';
+  const widest = widestOf(mode);
+  const elbowX = side === 'left' ? Math.min(8 + widest + 10, s.plotW - 12) : Math.max(12, s.plotW - 8 - widest - 10);
   for (const level of s.levels) {
     if (!range || !Number.isFinite(level.price)) continue;
     const st = levelStyle(level, p);
     const y = toY(level.price);
     const tag = tagById.get(level.id);
-    if (y >= 0 && y <= plotH) {
+    if (y >= 0 && y <= laneTop) {
       ctx.setLineDash(st.dash);
       ctx.strokeStyle = st.color;
       ctx.lineWidth = st.width;
       line(ctx, 0, st.width === 1 ? crisp(y, dpr) : y, plotW, st.width === 1 ? crisp(y, dpr) : y);
       ctx.setLineDash([]);
     }
-    if (tag) drawLevelLabel(ctx, s, level, st.color, tag, elbowX);
+    if (tag) drawLevelLabel(ctx, s, level, st.color, tag, elbowX, side, mode);
     drawn.levels++;
   }
 
@@ -446,37 +495,50 @@ function drawAxisTag(ctx: Ctx, s: Scene, tag: PlacedTag, text: string) {
 }
 
 /** Width of a level's left label box (shared by the drawing and the common leader column). */
-function levelLabelWidth(ctx: Ctx, s: Scene, level: ChartLevel, tag: PlacedTag): number {
-  const main = tag.pinned === 'above' ? `\u2191 ${level.label}` : tag.pinned === 'below' ? `\u2193 ${level.label}` : level.label;
+export type LabelSide = 'left' | 'right';
+/** Wording of the level labels: the label with its detail, the label alone, or the app's short label. */
+export type LabelMode = 'full' | 'main' | 'short';
+
+function labelMain(level: ChartLevel, tag: PlacedTag, mode: LabelMode): string {
+  const words = mode === 'short' ? (level.short ?? level.label) : level.label;
+  // A pinned level says on its label too that its price is beyond the edge.
+  return tag.pinned === 'above' ? `\u2191 ${words}` : tag.pinned === 'below' ? `\u2193 ${words}` : words;
+}
+
+function levelLabelWidth(ctx: Ctx, s: Scene, level: ChartLevel, tag: PlacedTag, mode: LabelMode = 'full'): number {
   ctx.font = font(s, 600);
-  const wMain = tabularWidth(ctx, main);
+  const wMain = tabularWidth(ctx, labelMain(level, tag, mode));
   ctx.font = font(s, 500);
-  const wDetail = level.detail ? tabularWidth(ctx, level.detail) + 8 : 0;
+  const wDetail = mode === 'full' && level.detail ? tabularWidth(ctx, level.detail) + 8 : 0;
   return Math.min(s.plotW - 16, wMain + wDetail + 14);
 }
 
-function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, tag: PlacedTag, elbowX: number) {
+function drawLevelLabel(ctx: Ctx, s: Scene, level: ChartLevel, color: string, tag: PlacedTag, elbowX: number, side: LabelSide = 'left', mode: LabelMode = 'full') {
   const p = s.palette;
   ctx.font = font(s, 600);
-  // A pinned level says on its label too that its price is beyond the edge.
-  const main = tag.pinned === 'above' ? `\u2191 ${level.label}` : tag.pinned === 'below' ? `\u2193 ${level.label}` : level.label;
-  const detail = level.detail ?? '';
+  const main = labelMain(level, tag, mode);
+  const detail = mode === 'full' ? (level.detail ?? '') : '';
   const pad = 7;
   const wMain = tabularWidth(ctx, main);
   ctx.font = font(s, 500);
   const wDetail = detail ? tabularWidth(ctx, detail) + 8 : 0;
   const w = Math.min(s.plotW - 16, wMain + wDetail + pad * 2);
   const h = s.tagH;
-  const x = 8;
+  const x = side === 'left' ? 8 : s.plotW - 8 - w;
   const y = tag.y - h / 2;
   // A label pushed off its line (crowded levels) is tied to it by a leader, so it never names another line.
   if (!tag.pinned && Math.abs(tag.y - tag.priceY) > 1) {
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
-    // All leaders turn at one column, in price order, so they never cross.
-    line(ctx, x + w, tag.y, elbowX, tag.y);
-    line(ctx, elbowX, tag.y, elbowX + 8, tag.priceY);
+    // All leaders turn at one column, in price order, so they never cross (mirrored when the labels stand at the right).
+    if (side === 'left') {
+      line(ctx, x + w, tag.y, elbowX, tag.y);
+      line(ctx, elbowX, tag.y, elbowX + 8, tag.priceY);
+    } else {
+      line(ctx, x, tag.y, elbowX, tag.y);
+      line(ctx, elbowX, tag.y, elbowX - 8, tag.priceY);
+    }
   }
   ctx.fillStyle = withAlpha(p.bg, 0.92);
   roundRect(ctx, x, y, w, h, 3);

@@ -5,12 +5,15 @@ import { useStore } from '../lib/store';
 import { MarketBar } from './MarketBar';
 import { ChartPanel, chartInterval } from './ChartPanel';
 import { OrderBook, TradeTape } from './BookAndTrades';
+import { DepthChart } from './DepthChart';
 import { OrderPanel } from './OrderPanel';
 import { AccountTables } from './AccountTables';
 import { orderSide, pricePick, useMarket, useMedia, useTicker } from './hooks';
 import { signingProblem } from '../lib/pins';
 
-type PhoneTab = 'chart' | 'book' | 'trades';
+type PhoneTab = 'chart' | 'book' | 'depth' | 'trades';
+type SideTab = 'book' | 'depth' | 'trades';
+const SIDE_WORDS: Record<SideTab, string> = { book: 'Book', depth: 'Depth', trades: 'Trades' };
 
 export function TradePage({ symbol }: { symbol: string }) {
   const market = useMarket(symbol);
@@ -19,8 +22,12 @@ export function TradePage({ symbol }: { symbol: string }) {
   const marketsError = useStore(feed.marketsError);
   const interval = useStore(chartInterval);
   const [phoneTab, setPhoneTab] = useState<PhoneTab>('chart');
-  const [sideTab, setSideTab] = useState<'book' | 'trades'>('book');
+  const [sideTab, setSideTab] = useState<SideTab>('book');
   const phone = useMedia('(max-width: 899px)');
+  // Where the tape is in view beside or under the book (a tall or a very wide fitted screen) the switch offers only
+  // Book and Depth; a remembered "Trades" then reads as Book.
+  const tapeInView = useMedia('(min-width: 1024px) and (min-height: 1000px), (min-width: 2100px) and (min-height: 680px)');
+  const sideShown: SideTab = tapeInView && sideTab === 'trades' ? 'book' : sideTab;
   const [sheet, setSheet] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
   const openSheet = (side: 'buy' | 'sell') => {
@@ -75,9 +82,9 @@ export function TradePage({ symbol }: { symbol: string }) {
         </p>
       )}
       <div className="phone-tabs segmented" role="group" aria-label="View">
-        {(['chart', 'book', 'trades'] as PhoneTab[]).map((t) => (
+        {(['chart', 'book', 'depth', 'trades'] as PhoneTab[]).map((t) => (
           <button key={t} type="button" aria-pressed={phoneTab === t} onClick={() => setPhoneTab(t)}>
-            {t === 'chart' ? 'Chart' : t === 'book' ? 'Book' : 'Trades'}
+            {t === 'chart' ? 'Chart' : SIDE_WORDS[t]}
           </button>
         ))}
       </div>
@@ -86,17 +93,19 @@ export function TradePage({ symbol }: { symbol: string }) {
       </div>
       {/* On a fitted desktop screen of moderate height the book and the tape share one column behind a switch (the
           book keeps its full depth); on a tall one, and on every other layout, both are shown. */}
-      <div className="trade-side" data-side-tab={sideTab}>
-        <div className="side-tabs segmented" role="group" aria-label="Book or trades">
-          {(['book', 'trades'] as const).map((t) => (
-            <button key={t} type="button" aria-pressed={sideTab === t} onClick={() => setSideTab(t)}>
-              {t === 'book' ? 'Order book' : 'Trades'}
+      <div className="trade-side" data-side-tab={sideShown} data-tape-in-view={tapeInView ? 'true' : undefined}>
+        <div className="side-tabs segmented" role="group" aria-label="Book, depth or trades">
+          {(['book', 'depth', 'trades'] as const).map((t) => (
+            <button key={t} type="button" data-tab={t} aria-pressed={sideShown === t} onClick={() => setSideTab(t)}>
+              {SIDE_WORDS[t]}
             </button>
           ))}
         </div>
         <div className="trade-book">
           <OrderBook market={market} />
         </div>
+        {/* Drawn only while it is the chosen view. */}
+        <div className="trade-depth">{(phone ? phoneTab : sideShown) === 'depth' && <DepthChart market={market} />}</div>
         <div className="trade-tape">
           <TradeTape market={market} />
         </div>

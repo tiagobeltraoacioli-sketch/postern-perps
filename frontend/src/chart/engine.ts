@@ -14,7 +14,9 @@ import {
   clamp,
   clampView,
   defaultView,
+  rightRoomPx,
   priceTicks,
+  slotX,
   priceY,
   snapPrice,
   timeTicks,
@@ -30,6 +32,7 @@ import { drawBase, drawOverlay, font, pickBox, placeFills, VOLUME_SHARE, type Cr
 import { readPalette, type Palette, type Theme } from './palette';
 import { formatCandleTime, formatNumber } from './format';
 import { tabularWidth } from './text';
+import { averageLine, cleanPeriods } from './average';
 
 /** Process-wide frame statistics (all chart instances), for the performance page and the measurement harness. */
 export const chartStats: ChartFrameStats = { baseFrames: 0, overlayFrames: 0, frameMs: [], updates: 0 };
@@ -57,6 +60,8 @@ export type EngineData = {
   candleStyle: CandleStyle;
   wheelZoom: boolean;
   pickable: boolean;
+  /** Periods of the moving averages to draw (display only; average.ts). */
+  averages?: readonly number[];
 };
 
 export type HoverInfo = {
@@ -174,11 +179,16 @@ export class ChartEngine {
         if (this.anim) this.anim = { ...this.anim, to: this.anim.to + (last - prevLast) };
       }
     }
+    const hadLevels = (this.data?.levels.length ?? 0) > 0;
     this.data = d;
     if (!this.viewSet && this.series.candles.length) {
-      this.view = defaultView(this.lastSlot()!);
+      this.view = defaultView(this.lastSlot()!, undefined, this.roomPx());
       this.viewSet = true;
       this.setFollowing(true);
+    } else if (this.viewSet && this.following && !this.anim && hadLevels !== d.levels.length > 0 && this.lastSlot() !== null) {
+      // The first level arriving (or the last one leaving) changes the room the labels need: a view that follows
+      // the newest candle takes the new default; a view the user moved is left alone.
+      this.view = defaultView(this.lastSlot()!, this.view.spacing, this.roomPx());
     }
     this.invalidate(true);
   }
@@ -264,11 +274,16 @@ export class ChartEngine {
     return this.scene;
   }
 
+  /** The breathing room of the default view for the current width and data (scale.ts rightRoomPx). */
+  private roomPx(): number {
+    return rightRoomPx(Math.max(0, this.width - 72), (this.data?.levels.length ?? 0) > 0);
+  }
+
   /** Back to the newest candle (animated unless reduced motion). */
   goToLatest() {
     const last = this.lastSlot();
     if (last === null) return;
-    const target = defaultView(last, this.view.spacing).right;
+    const target = defaultView(last, this.view.spacing, this.roomPx()).right;
     this.manualRange = null;
     if (this.reducedMotion) {
       this.anim = null;
@@ -575,7 +590,13 @@ export class ChartEngine {
     if (d.mark) tagInputs.push({ id: '@mark', kind: 'mark', price: d.mark.price });
     if (lastCandle) tagInputs.push({ id: '@last', kind: 'last', price: lastCandle.c });
     if (d.index) tagInputs.push({ id: '@index', kind: 'index', price: d.index.price });
-    const tags = range ? layoutTags(tagInputs, (p) => priceY(p, range!, 0, plotH), 0, plotH, TAG_H) : { placed: [], dropped: [] };
+    // With the automatic range the volume lane is clear of candles: tags (and the labels of levels pinned below)
+    // stop at its top, so the lane holds only volume and its name.
+    const tagBottom = this.manualRange === null && ext.vMax > 0 ? plotH * (1 - VOLUME_SHARE) : plotH;
+    const tags = range ? layoutTags(tagInputs, (p) => priceY(p, range!, 0, plotH), 0, tagBottom, TAG_H) : { placed: [], dropped: [] };
+    // Room right of the newest candle at this view (what the labels may use without covering a candle).
+    const lastSlotNow = this.lastSlot();
+    const labelRoom = lastSlotNow === null ? plotW : Math.max(0, plotW - slotX(lastSlotNow, view, plotW) - view.spacing / 2 - 4);
     // Live tags (mark, last, index) are not pinned: off screen they are simply not shown on the axis.
     const placed = tags.placed.filter((t) => !(t.pinned && (t.kind === 'mark' || t.kind === 'last' || t.kind === 'index')));
     this.droppedTags = tags.dropped;
@@ -596,6 +617,8 @@ export class ChartEngine {
       i1,
       volMax: ext.vMax,
       laneClear: this.manualRange === null,
+      labelRoom,
+      averages: cleanPeriods(d.averages).map((period) => ({ period, values: averageLine(this.series.candles, (i) => this.series.slots[i], i0, i1, period) })),
       palette: this.palette,
       candleStyle: d.candleStyle,
       priceDecimals: d.priceDecimals,

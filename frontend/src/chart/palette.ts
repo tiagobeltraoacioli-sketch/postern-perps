@@ -24,6 +24,8 @@ export type Palette = {
   readonly warn: string;
   readonly danger: string;
   readonly ok: string;
+  /** Inks of the moving-average lines, in the order of the periods. */
+  readonly averages: readonly string[];
   readonly font: string;
 };
 
@@ -36,8 +38,18 @@ export const OWN_CANDLES: Readonly<Record<Theme, { up: string; down: string }>> 
   light: { up: '#0b5e3e', down: '#c03a24' },
 };
 
+/**
+ * The chart's own inks for the moving-average lines: violet, sky and sand, none of them a colour that means
+ * something elsewhere on the chart (up, down, mark, stop, liquidation). Each reaches 3:1 on the committed
+ * backgrounds of its theme (SC 1.4.11; palette.test.ts).
+ */
+export const OWN_AVERAGES: Readonly<Record<Theme, readonly string[]>> = {
+  dark: ['#b9a2ff', '#7cc4f4', '#d9c9a3'],
+  light: ['#5b3fb3', '#1c5f96', '#6b5a2e'],
+};
+
 /** Committed token values of the frontend (src/styles/tokens.css), the fallback when a variable is missing. */
-export const TOKEN_FALLBACK: Readonly<Record<Theme, Omit<Palette, 'theme' | 'up' | 'down'>>> = {
+export const TOKEN_FALLBACK: Readonly<Record<Theme, Omit<Palette, 'theme' | 'up' | 'down' | 'averages'>>> = {
   dark: {
     bg: '#0b0e0f',
     surface: '#111516',
@@ -142,6 +154,7 @@ export function readPalette(read: Reader, theme: Theme): Palette {
     ok: pick('--ok', fb.ok),
     up: candle('--chart-up', OWN_CANDLES[theme].up),
     down: candle('--chart-down', OWN_CANDLES[theme].down),
+    averages: OWN_AVERAGES[theme],
     font,
   };
 }
