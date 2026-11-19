@@ -58,7 +58,9 @@ D["BlockInput"]={"oneOf":[
 D["Block"]=obj({"height":R("Int"),"time":R("Ms"),"prevLogHash":R("Hash"),"logHash":R("Hash"),"stateRoot":R("Hash"),"inputs":arr(R("BlockInput")),"inputsEncoded":R("Hex"),"sequencerSignature":R("Sig")})
 D["FeeTier"]=obj({"tier":R("Int"),"makerFeeBps":R("Dec"),"takerFeeBps":R("UDec"),"volume30d":R("UDec")})
 D["Position"]=obj({"symbol":R("Symbol"),"size":R("Dec"),"entryPrice":R("UDec"),"markPrice":R("UDec"),"notional":R("UDec"),"unrealizedPnl":R("Dec"),"realizedPnl":R("Dec"),
- "liquidationPrice":nul(R("UDec")),"marginMode":enum("cross","isolated"),"leverage":R("UDec"),"isolatedMargin":nul(R("UDec")),"initialMargin":R("UDec"),"maintenanceMargin":R("UDec"),"fundingSinceOpen":R("Dec")})
+ "liquidationPrice":nul(R("UDec")),"marginMode":enum("cross","isolated"),"leverage":R("UDec"),"isolatedMargin":nul(R("UDec")),"initialMargin":R("UDec"),"maintenanceMargin":R("UDec"),"fundingSinceOpen":R("Dec"),
+ # API 0.3 addition (optional): the engine's own signed integer, notional units 1e-16 USD
+ "openNotional":{"type":"string","pattern":r"^-?(0|[1-9][0-9]*)$"}},opt=("openNotional",))
 D["Account"]=obj({"address":R("Address"),"height":R("Int"),"time":R("Ms"),"collateral":R("Dec"),"unrealizedPnl":R("Dec"),"equity":R("Dec"),"initialMargin":R("UDec"),"maintenanceMargin":R("UDec"),
  "freeCollateral":R("Dec"),"withdrawable":R("UDec"),"marginRatio":R("UDec"),"feeTier":R("FeeTier"),"positions":arr(R("Position")),"openOrders":R("Int")})
 D["Order"]=obj({"orderId":R("U64"),"clientOrderId":nul(R("Hash")),"account":R("Address"),"symbol":R("Symbol"),"side":R("Side"),

@@ -50,6 +50,16 @@ const be = (v, n) => {
   for (let i = n - 1; i >= 0; i--) { b[i] = Number(x & 255n); x >>= 8n; }
   return b;
 };
+/** "4.5" (bps, as /v1/markets publishes fee rates) -> 45000 (units of 1e-4 bps = ppm x 100); exact or refused. */
+function bpsScaled(s) {
+  const [i, f = ''] = s.split('.');
+  if (!/^\d+$/.test(i) || !/^\d{0,4}$/.test(f)) throw new Error(`fee rate ${s}`);
+  return BigInt(i + f.padEnd(4, '0'));
+}
+/** SPEC S-9.3 from PUBLISHED values: ceil(price x size x feePpm / 1e6 / 1e10) USDC units, price and size in 1e-8. */
+export function publishedFee(price8, size8, bps) {
+  return (BigInt(price8) * BigInt(size8) * bpsScaled(bps) + 10n ** 18n - 1n) / 10n ** 18n;
+}
 export function stateRootOfForTest(c) {
   return stateRootOf(c);
 }
@@ -488,8 +498,8 @@ async function suite(base, { mock = false, schema, runId = String(Date.now()), f
         const dec8 = (v, dp) => { const t = String(v).padStart(9, '0'); const i = t.slice(0, -8), f = t.slice(-8).slice(0, dp); return dp ? `${i}.${f}` : i; };
         const num = (x) => Number(x);
         const place = (who, isBuy, tif, extra = {}) => post('/v1/actions?wait=included', signed('PlaceOrder', { account: who.addr, nonce: nextNonce(), marketId: mk.marketId, isBuy, orderType: 0, timeInForce: tif, price: String(P), size: String(size8), reduceOnly: false, triggerPrice: '0', clientOrderId: '0x' + '00'.repeat(32), ...extra }, who.key), hdr);
-        const bps = (s2) => scaleInt(s2, 4);                                  // "4.5" bps -> 45000 (1e-4 bps)
-        const feeOf = (rate) => (P * size8 * bps(rate) + 10n ** 24n - 1n) / 10n ** 24n;   // ceil(price*size*bps/1e4 / 1e10), SPEC S-9.3
+        const bps = bpsScaled;
+        const feeOf = (rate) => publishedFee(P, size8, rate);
         const t0 = (await get('/v1/status')).body.time;
         const acc0 = { A: (await get(`/v1/accounts/${A.addr}`)).body, B: balB0 };
         const pos = (a) => a.positions.find((p) => p.symbol === sym);
