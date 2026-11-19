@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for check_params.py: the committed files pass, and every rule R-1..R-9 rejects a mutation that breaks it
+"""Tests for check_params.py: the committed files pass, and every rule R-1..R-10 rejects a mutation that breaks it
 (each mutation is a test that would pass vacuously if its rule were removed). Also checks stress.py reproduces the
 committed stress file byte for byte.
 
@@ -24,6 +24,50 @@ def run(mut):
     m, r, s, p = (copy.deepcopy(x) for x in BASE)
     mut(m, r, s, p)
     return cp.check(m, r, s, p)[0]
+
+
+def mkt(m, sym):
+    return next(x for x in m["markets"] if x["symbol"] == sym)
+
+
+class ExitBandR10(unittest.TestCase):
+    """R-10 (0.2.2, asked by agent 432 with its calibration): every mutation below must be refused."""
+
+    def has(self, v, text):
+        self.assertTrue(any(x.startswith("R-10") and text in x for x in v), f"{text!r} not raised: {v}")
+
+    def test_committed_values_are_the_calibrated_ones(self):
+        got = {x["symbol"]: [x["oracle"][k] for k in cp.EXIT_FIELDS] for x in BASE[0]["markets"]}
+        self.assertEqual(got, {"BTC-USD": [500, 100, 5000, 3600000], "ETH-USD": [700, 100, 5000, 3600000], "SOL-USD": [1300, 100, 5000, 3600000]})
+
+    def test_a_missing_field_is_not_left_to_a_default(self):
+        for k in cp.EXIT_FIELDS:
+            self.has(run(lambda m, r, s, p, k=k: mkt(m, "ETH-USD")["oracle"].pop(k)), "oracle." + k)
+
+    def test_band_below_the_jump_bound(self):
+        def mut(m, r, s, p):
+            mkt(m, "SOL-USD")["oracle"]["jumpBps"] = 1400
+        self.has(run(mut), "below jumpBps")
+
+    def test_band_below_the_calibrated_floor(self):
+        for sym, floor in cp.EXIT_HAIRCUT_FLOOR_BPS.items():
+            self.has(run(lambda m, r, s, p, sym=sym, floor=floor: mkt(m, sym)["oracle"].__setitem__("exitHaircutBps", floor - 1)), "calibrated floor")
+
+    def test_band_that_never_widens(self):
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("exitHaircutPerMinBps", 0)), "exitHaircutPerMinBps")
+
+    def test_maximum_haircut_bounds(self):
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("exitMaxHaircutBps", 10000)), "exitMaxHaircutBps < 10000")
+        self.has(run(lambda m, r, s, p: mkt(m, "SOL-USD")["oracle"].__setitem__("exitMaxHaircutBps", 1299)), "exitMaxHaircutBps < 10000")
+
+    def test_max_halt_bounds(self):
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("maxHaltMs", 9999)), "below maxStalenessMs")
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("maxHaltMs", 86_400_001)), "above one day")
+
+    def test_a_float_or_a_string_is_not_an_integer(self):
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("exitHaircutBps", "500")), "must be an integer")
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("exitHaircutBps", 500.0)), "must be an integer")
+        self.has(run(lambda m, r, s, p: mkt(m, "BTC-USD")["oracle"].__setitem__("exitHaircutBps", True)), "must be an integer")
 
 
 class CommittedFiles(unittest.TestCase):

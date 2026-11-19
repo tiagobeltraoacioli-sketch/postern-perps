@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks compliance/markets.json and compliance/risk.json against the rules R-1..R-9 of risk.json and recomputes
+"""Checks compliance/markets.json and compliance/risk.json against the rules R-1..R-10 of risk.json and recomputes
 the insurance-fund seed from the recorded stress measurements. UNAUDITED prototype tooling; stdlib only; exact
 integer / Decimal arithmetic (no floats).
 
@@ -38,6 +38,39 @@ def frac_digits(s):
 
 def ceil_div(a, b):
     return -((-a) // b)
+
+
+# R-10: the exit band of a halted market (SPEC S-4.10, S-9.2, 14; oracle README 6a). Floors per market from agent
+# 432's calibration on public minute candles, 34 days including the worst days (node/oracle/calibration/CALIBRATION.md
+# on the oracle line, cross-area 2026-11-18 23:57 and 2026-11-19 00:11 UTC): BTC 500, ETH 700, SOL 1300 bps. For SOL
+# the engine's default band (the jump bound, then +100 bps per minute) was too narrow on 2025-10-10: 1,003 bps in two
+# minutes against 1,000 and 1,366 in five against 1,300. The table only ever WIDENS a band: a floor may be raised, never
+# lowered, without new numbers.
+EXIT_HAIRCUT_FLOOR_BPS = {"BTC-USD": 500, "ETH-USD": 700, "SOL-USD": 1300}
+EXIT_FIELDS = ("exitHaircutBps", "exitHaircutPerMinBps", "exitMaxHaircutBps", "maxHaltMs")
+
+
+def check_exit_band(s, o):
+    """R-10 for one market's oracle object; returns violations."""
+    v = []
+    missing = [k for k in EXIT_FIELDS if not isinstance(o.get(k), int) or isinstance(o.get(k), bool)]
+    if missing:
+        return [f"R-10 {s}: oracle.{k} must be an integer (the exit band is stated per market, never left to a default)" for k in missing]
+    if o["exitHaircutBps"] < o["jumpBps"]:
+        v.append(f"R-10 {s}: exitHaircutBps {o['exitHaircutBps']} below jumpBps {o['jumpBps']} (the band must cover the move that halts)")
+    if s not in EXIT_HAIRCUT_FLOOR_BPS:
+        v.append(f"R-10 {s}: no calibrated exit-band floor for this market")
+    elif o["exitHaircutBps"] < EXIT_HAIRCUT_FLOOR_BPS[s]:
+        v.append(f"R-10 {s}: exitHaircutBps {o['exitHaircutBps']} below the calibrated floor {EXIT_HAIRCUT_FLOOR_BPS[s]}")
+    if not 1 <= o["exitHaircutPerMinBps"]:
+        v.append(f"R-10 {s}: exitHaircutPerMinBps must be >= 1 (the band widens while the market is dark)")
+    if not o["exitHaircutBps"] <= o["exitMaxHaircutBps"] < 10000:
+        v.append(f"R-10 {s}: need exitHaircutBps <= exitMaxHaircutBps < 10000")
+    if o["maxHaltMs"] < o["maxStalenessMs"]:
+        v.append(f"R-10 {s}: maxHaltMs below maxStalenessMs")
+    if o["maxHaltMs"] > 86_400_000:
+        v.append(f"R-10 {s}: maxHaltMs above one day (the vault's minimum forcedDelay: a halted position must settle before a forced request can expire)")
+    return v
 
 
 def reference_prices(root=ROOT):
@@ -118,6 +151,7 @@ def check(markets, risk, stress, prices):
             v.append(f"R-6 {s}: tier-0 mmf {t0['mmfPpm']} ppm below half the worst 1h move {st} bps")
         if m["takerFeePpm"] != ft[0]["takerFeePpm"] or m["makerFeePpm"] != ft[0]["makerFeePpm"]:
             v.append(f"R-8 {s}: market fees differ from fee tier 0")
+        v += check_exit_band(s, m["oracle"])
         oi_usd = Decimal(oi) / SIZE_SCALE * px
         term = oi_usd * max(0, st - t0["mmfPpm"] // 100) / 10000
         term = int(term.to_integral_value(rounding="ROUND_CEILING"))
