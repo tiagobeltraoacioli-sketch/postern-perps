@@ -176,15 +176,16 @@ subset for every committee size up to 9 and every strict-majority quorum (more t
 With `f <= (q-1)/2` LYING signers colluding with the sequencer the reach is the whole range of the honest values it
 includes (section 5, "why the median is safe"): still never outside the honest range.
 
-**Size (measured, section 8a).** Honest feeders read the same venues in the same round, so their observations
-differ only by when inside the 3 s round each one sampled and by which venues answered. The move of one feeder's
-observation from one round to the next is an upper proxy for the spread between two feeders of the same round: in
-the live hour of 2026-11-18 it was at the median below 1 bps and at the 99th percentile below 10 bps for the three
-markets (exact figures in section 8a). The hard cap in a round that passes C4 is `agreeBps` (100 bps) from the
-included values. For comparison, the mark may already differ from the index by `markBandBps = 50` (SPEC S-5.3) and
-tier-0 maintenance is 250 bps or more: the bias cannot by itself liquidate an account that is not already within a
-few bps of maintenance, but it is a free, repeatable edge for whoever orders the liquidations. It is stated here
-and must be stated in SPEC section 12 (cross-area line to 430).
+**Size (measured, `calibration/CALIBRATION.md` section 4).** Honest feeders read the same venues in the same
+round, so their observations differ only by when inside the 3 s round each one sampled and by which venues
+answered. The move of one feeder's observation from one round to the next is an upper proxy for the spread between
+two feeders of the same round: in the live hour of 2026-11-18 (1,300 rounds) it was 0.5 to 0.8 bps at the median,
+5.2 to 5.4 bps at the 99th percentile and 22.7 bps at most over the three markets. A round that passes C4 has its
+median within `agreeBps` (100 bps) of at least `q` included values, which caps what any single round can carry.
+For comparison, the mark may already differ from the index by `markBandBps = 50` (SPEC S-5.3) and tier-0
+maintenance is 250 bps or more: the bias cannot by itself liquidate an account that is not already within a few
+bps of maintenance, but it is a free, repeatable edge for whoever orders the liquidations. It is stated here and
+in SPEC section 12 (430, 0.2.3).
 
 **What is implemented against it.**
 
@@ -413,9 +414,9 @@ venues (2026-11-18). No bound is loosened.
 | Parameter | Value | What the data shows | Result |
 |---|---|---|---|
 | `jumpBps` | 500 / 500 / 800 | a whole minute moved more than this in 0 / 1 / 4 of 48,960 minutes, all on 2025-10-10 | keep |
-| `agreeBps` | 100 | signers differ by sampling time inside a round; the 3 s move of an observation in the live hour stays far below it | keep |
+| `agreeBps` | 100 | signers differ by sampling time inside a round; the 3 s move of an observation in the live hour was 5.4 bps at the 99th percentile, 22.7 bps at most | keep |
 | `maxSourceDeviationBps` | 200 | never reached in 30 calm days; on the worst days the feeder would have abstained 1 / 1 / 36 minutes (fail closed) | keep |
-| `maxStalenessMs` | 10,000 | live hour: see CALIBRATION.md section 4 | keep |
+| `maxStalenessMs` | 10,000 | live hour: 1,300 of 1,300 rounds priced every market; no gap at all | keep |
 | `exitHaircutBps` | 500 / 500 / 800 | the band must contain the real move after m minutes of darkness: BTC yes (factor 1.9 or more), ETH barely (1.16 at 2 min), SOL NO (1,003 bps in 2 min against 1,000; 1,366 in 5 min against 1,300) | WIDEN to 500 / 700 / 1300 |
 | `exitHaircutPerMinBps`, `exitMaxHaircutBps` | 100, 5000 | the largest recorded move grows far slower than the band after 10 minutes; largest 60-minute move 1,692 bps | keep |
 | `maxHaltMs` | 3,600,000 | settling at the pre-halt index after an hour is wrong by up to 883 / 1,232 / 1,587 bps on the worst days | keep the hour; X3 only at a committee price (section 6a, proposal to 430) |
@@ -426,11 +427,12 @@ venues (2026-11-18). No bound is loosened.
 - R395-9 is stated and measured, not closed: the sequencer can still choose which valid observations a block
   carries (section 5a). What would close it needs the node (validator refusal with an observation gossip plane) or
   a consensus change (an omission-proof median); neither is built.
-- R436-10: the oracle side is restated and tested (section 6a); the ENGINE still serves a forced close in a halt at
-  `settle` until 430 changes SPEC 14 and the engine. X3 at the pre-halt index after `maxHaltMs` of withheld oracle
-  inputs remains possible until 430 adopts the committee-price condition.
-- The widened `exitHaircutBps` (ETH 700, SOL 1300) is a proposal: `compliance/markets.json` (435) and the engine's
-  converter default (430) still give `jumpBps`.
+- R436-10: the oracle side is restated and tested (section 6a); the engine follows it from SPEC 0.2.3 (430,
+  `c6d4ff9`: forced close at the band side worse for the closer, X3 only at a committee price). Residue, stated: a
+  market that nobody prices stays halted until the vault's escape.
+- The widened `exitHaircutBps` (ETH 700, SOL 1300) reaches the engine only through `compliance/markets.json`
+  0.2.2 (435, `d7065d1`, with a parameter check against the calibrated floors); the converter's default when the
+  field is absent is still `jumpBps`. Whether to accept the values is an owner input.
 - Calibration limits (CALIBRATION.md section 1): minute candles cannot resolve a 3 s round; four venues of seven;
   34 chosen days; `jumpBps` and `agreeBps` are therefore confirmed as not too tight for genuine moves, NOT shown to
   be as tight as they could be. No order-book depth study: the cost of moving a majority of venues was not

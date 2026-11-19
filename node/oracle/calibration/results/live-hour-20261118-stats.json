@@ -1,0 +1,635 @@
+{
+ "rounds": 1300,
+ "firstRound": 598348075,
+ "lastRound": 598349374,
+ "firstTimeMs": 1795044225001,
+ "lastTimeMs": 1795048122000,
+ "roundsMissingInSequence": 0,
+ "clockRefused": 0,
+ "noObservation": 0,
+ "samplingDelayMs": {
+  "n": 1300,
+  "p50": 0,
+  "p90": 0,
+  "p99": 1,
+  "max": 2
+ },
+ "venueRequests": {
+  "api-pub.bitfinex.com": {
+   "requests": 3900,
+   "status": {
+    "200": 3900
+   },
+   "errors": {},
+   "latencyMs": {
+    "n": 3900,
+    "p50": 19,
+    "p90": 26,
+    "p99": 50,
+    "max": 173
+   }
+  },
+  "api.binance.com": {
+   "requests": 3900,
+   "status": {
+    "200": 3900
+   },
+   "errors": {},
+   "latencyMs": {
+    "n": 3900,
+    "p50": 243,
+    "p90": 249,
+    "p99": 683,
+    "max": 729
+   }
+  },
+  "api.exchange.coinbase.com": {
+   "requests": 5200,
+   "status": {
+    "200": 5200
+   },
+   "errors": {},
+   "latencyMs": {
+    "n": 5200,
+    "p50": 17,
+    "p90": 28,
+    "p99": 112,
+    "max": 370
+   }
+  },
+  "api.gemini.com": {
+   "requests": 5200,
+   "status": {
+    "200": 5145,
+    "0": 55
+   },
+   "errors": {
+    "timeout: global": 55
+   },
+   "latencyMs": {
+    "n": 5200,
+    "p50": 408,
+    "p90": 612,
+    "p99": 1514,
+    "max": 1563
+   }
+  },
+  "api.kraken.com": {
+   "requests": 1300,
+   "status": {
+    "200": 1300
+   },
+   "errors": {},
+   "latencyMs": {
+    "n": 1300,
+    "p50": 39,
+    "p90": 45,
+    "p99": 60,
+    "max": 187
+   }
+  },
+  "www.bitstamp.net": {
+   "requests": 5200,
+   "status": {
+    "200": 5194,
+    "0": 6
+   },
+   "errors": {
+    "timeout: global": 6
+   },
+   "latencyMs": {
+    "n": 5200,
+    "p50": 7,
+    "p90": 12,
+    "p99": 43,
+    "max": 1562
+   }
+  },
+  "www.okx.com": {
+   "requests": 3900,
+   "status": {
+    "200": 3893,
+    "0": 7
+   },
+   "errors": {
+    "timeout: global": 7
+   },
+   "latencyMs": {
+    "n": 3900,
+    "p50": 264,
+    "p90": 276,
+    "p99": 344,
+    "max": 1562
+   }
+  }
+ },
+ "requestsPerRound": {
+  "n": 1300,
+  "p50": 22,
+  "p90": 22,
+  "p99": 22,
+  "max": 22
+ },
+ "dropEvents": [],
+ "health": [
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api-pub.bitfinex.com/v2/ticker/tETHUSD"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api-pub.bitfinex.com/v2/ticker/tSOLUSD"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.binance.com/api/v3/ticker/bookTicker?symbol=BTCUSDT"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.binance.com/api/v3/ticker/bookTicker?symbol=ETHUSDT"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.binance.com/api/v3/ticker/bookTicker?symbol=SOLUSDT"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.exchange.coinbase.com/products/ETH-USD/ticker"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.exchange.coinbase.com/products/SOL-USD/ticker"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.exchange.coinbase.com/products/USDT-USD/ticker"
+  },
+  {
+   "drops": 0,
+   "failed": 13,
+   "ok": 1287,
+   "url": "https://api.gemini.com/v1/pubticker/btcusd"
+  },
+  {
+   "drops": 0,
+   "failed": 11,
+   "ok": 1289,
+   "url": "https://api.gemini.com/v1/pubticker/ethusd"
+  },
+  {
+   "drops": 0,
+   "failed": 11,
+   "ok": 1289,
+   "url": "https://api.gemini.com/v1/pubticker/solusd"
+  },
+  {
+   "drops": 0,
+   "failed": 20,
+   "ok": 1280,
+   "url": "https://api.gemini.com/v1/pubticker/usdtusd"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://api.kraken.com/0/public/Ticker?pair=USDTUSD,XBTUSD,ETHUSD,SOLUSD"
+  },
+  {
+   "drops": 0,
+   "failed": 2,
+   "ok": 1298,
+   "url": "https://www.bitstamp.net/api/v2/ticker/btcusd/"
+  },
+  {
+   "drops": 0,
+   "failed": 1,
+   "ok": 1299,
+   "url": "https://www.bitstamp.net/api/v2/ticker/ethusd/"
+  },
+  {
+   "drops": 0,
+   "failed": 3,
+   "ok": 1297,
+   "url": "https://www.bitstamp.net/api/v2/ticker/solusd/"
+  },
+  {
+   "drops": 0,
+   "failed": 0,
+   "ok": 1300,
+   "url": "https://www.bitstamp.net/api/v2/ticker/usdtusd/"
+  },
+  {
+   "drops": 0,
+   "failed": 3,
+   "ok": 1297,
+   "url": "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT"
+  },
+  {
+   "drops": 0,
+   "failed": 2,
+   "ok": 1298,
+   "url": "https://www.okx.com/api/v5/market/ticker?instId=ETH-USDT"
+  },
+  {
+   "drops": 0,
+   "failed": 2,
+   "ok": 1298,
+   "url": "https://www.okx.com/api/v5/market/ticker?instId=SOL-USDT"
+  }
+ ],
+ "markets": {
+  "BTC-USD": {
+   "roundsPriced": 1300,
+   "abstain": {},
+   "sourcesHistogram": {
+    "6": 18,
+    "7": 1282
+   },
+   "gapsOfRoundsWithoutPrice": {
+    "count": 0,
+    "longest": 0
+   },
+   "priceFirstLast": [
+    62689.098,
+    62800.353
+   ],
+   "priceMinMax": [
+    62559.4,
+    63209.279
+   ],
+   "venueSpreadBps(max-min over valid venues)": {
+    "n": 1300,
+    "p50": 13.968,
+    "p90": 17.758,
+    "p99": 22.946,
+    "max": 43.352
+   },
+   "roundToRoundMoveBps(3 s)": {
+    "n": 1299,
+    "p50": 0.537,
+    "p90": 2.26,
+    "p99": 5.44,
+    "max": 22.704
+   },
+   "venueDeviationFromObservationBps": {
+    "binance-BTC-USDT": {
+     "n": 1300,
+     "p50": 0.208,
+     "p90": 0.842,
+     "p99": 2.964,
+     "max": 17.691
+    },
+    "bitfinex-BTC-USD": {
+     "n": 1300,
+     "p50": 13.143,
+     "p90": 16.729,
+     "p99": 21.817,
+     "max": 42.296
+    },
+    "bitstamp-BTC-USD": {
+     "n": 1298,
+     "p50": 0.409,
+     "p90": 1.33,
+     "p99": 3.311,
+     "max": 6.634
+    },
+    "coinbase-BTC-USD": {
+     "n": 1300,
+     "p50": 0.298,
+     "p90": 0.912,
+     "p99": 2.236,
+     "max": 3.494
+    },
+    "gemini-BTC-USD": {
+     "n": 1287,
+     "p50": 0.872,
+     "p90": 2.24,
+     "p99": 4.667,
+     "max": 20.659
+    },
+    "kraken-BTC-USD": {
+     "n": 1300,
+     "p50": 0.379,
+     "p90": 1.171,
+     "p99": 2.544,
+     "max": 4.611
+    },
+    "okx-BTC-USDT": {
+     "n": 1297,
+     "p50": 0.24,
+     "p90": 0.843,
+     "p99": 1.945,
+     "max": 6.086
+    }
+   },
+   "venueReasons": {
+    "binance-BTC-USDT": {
+     "ok": 1300
+    },
+    "bitfinex-BTC-USD": {
+     "ok": 1300
+    },
+    "bitstamp-BTC-USD": {
+     "ok": 1298,
+     "fetch-failed: timeout: global": 2
+    },
+    "coinbase-BTC-USD": {
+     "ok": 1300
+    },
+    "gemini-BTC-USD": {
+     "ok": 1287,
+     "fetch-failed: timeout: global": 13
+    },
+    "kraken-BTC-USD": {
+     "ok": 1300
+    },
+    "okx-BTC-USDT": {
+     "ok": 1297,
+     "fetch-failed: timeout: global": 3
+    }
+   },
+   "venueUsedRounds": {
+    "binance-BTC-USDT": 1300,
+    "bitfinex-BTC-USD": 1300,
+    "bitstamp-BTC-USD": 1298,
+    "coinbase-BTC-USD": 1300,
+    "gemini-BTC-USD": 1287,
+    "kraken-BTC-USD": 1300,
+    "okx-BTC-USDT": 1297
+   }
+  },
+  "ETH-USD": {
+   "roundsPriced": 1300,
+   "abstain": {},
+   "sourcesHistogram": {
+    "6": 14,
+    "7": 1286
+   },
+   "gapsOfRoundsWithoutPrice": {
+    "count": 0,
+    "longest": 0
+   },
+   "priceFirstLast": [
+    1770.31,
+    1775.53
+   ],
+   "priceMinMax": [
+    1767.594,
+    1781.451
+   ],
+   "venueSpreadBps(max-min over valid venues)": {
+    "n": 1300,
+    "p50": 13.674,
+    "p90": 18.161,
+    "p99": 23.903,
+    "max": 38.13
+   },
+   "roundToRoundMoveBps(3 s)": {
+    "n": 1299,
+    "p50": 0.775,
+    "p90": 2.665,
+    "p99": 5.152,
+    "max": 14.557
+   },
+   "venueDeviationFromObservationBps": {
+    "binance-ETH-USDT": {
+     "n": 1300,
+     "p50": 0.242,
+     "p90": 0.994,
+     "p99": 2.731,
+     "max": 8.74
+    },
+    "bitfinex-ETH-USD": {
+     "n": 1300,
+     "p50": 12.646,
+     "p90": 16.902,
+     "p99": 22.375,
+     "max": 37.621
+    },
+    "bitstamp-ETH-USD": {
+     "n": 1299,
+     "p50": 0.422,
+     "p90": 1.357,
+     "p99": 2.937,
+     "max": 6.107
+    },
+    "coinbase-ETH-USD": {
+     "n": 1300,
+     "p50": 0.393,
+     "p90": 1.356,
+     "p99": 2.707,
+     "max": 5.316
+    },
+    "gemini-ETH-USD": {
+     "n": 1289,
+     "p50": 1.444,
+     "p90": 2.841,
+     "p99": 4.535,
+     "max": 6.516
+    },
+    "kraken-ETH-USD": {
+     "n": 1300,
+     "p50": 0.534,
+     "p90": 1.462,
+     "p99": 3.084,
+     "max": 4.864
+    },
+    "okx-ETH-USDT": {
+     "n": 1298,
+     "p50": 0.287,
+     "p90": 0.998,
+     "p99": 2.094,
+     "max": 4.277
+    }
+   },
+   "venueReasons": {
+    "binance-ETH-USDT": {
+     "ok": 1300
+    },
+    "bitfinex-ETH-USD": {
+     "ok": 1300
+    },
+    "bitstamp-ETH-USD": {
+     "ok": 1299,
+     "fetch-failed: timeout: global": 1
+    },
+    "coinbase-ETH-USD": {
+     "ok": 1300
+    },
+    "gemini-ETH-USD": {
+     "ok": 1289,
+     "fetch-failed: timeout: global": 11
+    },
+    "kraken-ETH-USD": {
+     "ok": 1300
+    },
+    "okx-ETH-USDT": {
+     "ok": 1298,
+     "fetch-failed: timeout: global": 2
+    }
+   },
+   "venueUsedRounds": {
+    "binance-ETH-USDT": 1300,
+    "bitfinex-ETH-USD": 1300,
+    "bitstamp-ETH-USD": 1299,
+    "coinbase-ETH-USD": 1300,
+    "gemini-ETH-USD": 1289,
+    "kraken-ETH-USD": 1300,
+    "okx-ETH-USDT": 1298
+   }
+  },
+  "SOL-USD": {
+   "roundsPriced": 1300,
+   "abstain": {},
+   "sourcesHistogram": {
+    "6": 16,
+    "7": 1284
+   },
+   "gapsOfRoundsWithoutPrice": {
+    "count": 0,
+    "longest": 0
+   },
+   "priceFirstLast": [
+    73.279,
+    73.36
+   ],
+   "priceMinMax": [
+    73.123,
+    73.88
+   ],
+   "venueSpreadBps(max-min over valid venues)": {
+    "n": 1300,
+    "p50": 13.961,
+    "p90": 18.387,
+    "p99": 23.624,
+    "max": 33.752
+   },
+   "roundToRoundMoveBps(3 s)": {
+    "n": 1299,
+    "p50": 0.681,
+    "p90": 2.631,
+    "p99": 5.328,
+    "max": 14.826
+   },
+   "venueDeviationFromObservationBps": {
+    "binance-SOL-USDT": {
+     "n": 1300,
+     "p50": 0.68,
+     "p90": 1.918,
+     "p99": 3.514,
+     "max": 11.844
+    },
+    "bitfinex-SOL-USD": {
+     "n": 1300,
+     "p50": 12.655,
+     "p90": 16.66,
+     "p99": 21.674,
+     "max": 32.249
+    },
+    "bitstamp-SOL-USD": {
+     "n": 1297,
+     "p50": 0.679,
+     "p90": 1.504,
+     "p99": 2.999,
+     "max": 9.661
+    },
+    "coinbase-SOL-USD": {
+     "n": 1300,
+     "p50": 0.409,
+     "p90": 1.493,
+     "p99": 2.729,
+     "max": 4.083
+    },
+    "gemini-SOL-USD": {
+     "n": 1289,
+     "p50": 2.596,
+     "p90": 4.649,
+     "p99": 6.136,
+     "max": 7.468
+    },
+    "kraken-SOL-USD": {
+     "n": 1300,
+     "p50": 0.409,
+     "p90": 1.364,
+     "p99": 2.748,
+     "max": 7.873
+    },
+    "okx-SOL-USDT": {
+     "n": 1298,
+     "p50": 0.389,
+     "p90": 1.287,
+     "p99": 2.047,
+     "max": 3.419
+    }
+   },
+   "venueReasons": {
+    "binance-SOL-USDT": {
+     "ok": 1300
+    },
+    "bitfinex-SOL-USD": {
+     "ok": 1300
+    },
+    "bitstamp-SOL-USD": {
+     "ok": 1297,
+     "fetch-failed: timeout: global": 3
+    },
+    "coinbase-SOL-USD": {
+     "ok": 1300
+    },
+    "gemini-SOL-USD": {
+     "ok": 1289,
+     "fetch-failed: timeout: global": 11
+    },
+    "kraken-SOL-USD": {
+     "ok": 1300
+    },
+    "okx-SOL-USDT": {
+     "ok": 1298,
+     "fetch-failed: timeout: global": 2
+    }
+   },
+   "venueUsedRounds": {
+    "binance-SOL-USDT": 1300,
+    "bitfinex-SOL-USD": 1300,
+    "bitstamp-SOL-USD": 1297,
+    "coinbase-SOL-USD": 1300,
+    "gemini-SOL-USD": 1289,
+    "kraken-SOL-USD": 1300,
+    "okx-SOL-USDT": 1298
+   }
+  }
+ },
+ "usdtUsd": {
+  "roundsWithRate": 1300,
+  "min": "0.99862",
+  "max": "0.99882"
+ }
+}
