@@ -47,6 +47,26 @@ build refuses to compile).
 `validator` flags: GENESIS + `--index I --sequencer URL --data DIR --listen 127.0.0.1:P --l2 A,B --l2-start-block N
 --l2-poll-ms MS`.
 
+**Dev clock (dev only, for rehearsals that must cross a UTC day: the engine's daily fee sweep).**
+`--dev-clock-offset-ms N` on `dev` AND on every `validator` of the stack, the SAME `N`: engine time = wall clock
++ `N` ms (forward only, at most 400 days). Gated like the dev oracle: only in a binary built with the cargo
+feature `dev-clock` (a build without debug assertions refuses to compile it; without the feature the flag stops
+the process with exit code 2), and only in dev mode. What runs on the engine clock: block times, the validators'
+block-time rules, oracle rounds (ingest and `--dev-oracle`), the nonce window, `status.time`. What stays on the
+wall clock: edge assertions, attestations, rate limits, alarms, the L2. The validators' rules are not relaxed:
+each applies them to its own clock, so a validator given another offset signs nothing, and a remote validator
+also compares its offset with the one the sequencer announces (`GET /v1/node`: `engineClock.devOffsetMs`) before
+it follows, and every 3 s after, and stops with `ENGINE CLOCK MISMATCH` on a difference. There is no runtime
+"jump": to advance time mid-run, stop the stack and start every process with a LARGER offset (a start-time
+value is one configuration every process reads the same way and that the log recovery path already handles; a
+runtime control would have to reach every process at the same instant or the validators would refuse blocks in
+between). A node whose log is ahead of its clock (restarted with a smaller offset, or without it) refuses to
+start and says which offset it needs. Clients of a shifted stack must take time from `GET /v1/status` (`time`):
+a nonce from the wall clock is outside the engine's window, and an oracle feeder on the wall clock signs rounds
+the engine no longer accepts (use `--dev-oracle`, or give the feeder the same offset: 432's area). To cross
+midnight one minute after start: `N = (floor(now / 86400000) + 1) * 86400000 - 60000 - now`, computed ONCE and
+given to every process.
+
 Both listen on loopback only and stop cleanly on SIGINT / SIGTERM (nothing is lost by stopping: a block is
 fsynced before it is published).
 
@@ -139,7 +159,8 @@ pages anyone (an operator must watch it).
 ## 8. Tests and measurements
 
 `cargo test` in `node/` (build host only; `--features dev-oracle` adds the tests that need the dev-only
-injection). `tests/anvil.rs` is ignored by default: it needs anvil, cast, forge and agent 433's contracts tree
+injection; `--features dev-clock` the dev clock's: `tests/devclock.rs`, which without the feature holds the one
+test that the flag is refused). `tests/anvil.rs` is ignored by default: it needs anvil, cast, forge and agent 433's contracts tree
 (`PERPS_ANVIL_DIR`, `PERPS_CONTRACTS_DIR`, `PERPS_ANVIL_PORT`, `-- --ignored`) and proves the watcher, the relayer
 and both proofs against the real PerpsVault. `tests/process.rs` runs the binaries as processes.
 

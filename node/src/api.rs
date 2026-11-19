@@ -116,7 +116,9 @@ async fn status(State(app): State<Arc<App>>) -> Response {
         "mode": app.mode.name(), "unaudited": true,
         "network": {"eip712": app.g.engine_domain.to_json(), "collateralChainId": 700770, "vault": to_hex(&app.g.vault),
             "collateralToken": to_hex(&app.collateral_token), "collateralSymbol": "bUSDC", "collateralDecimals": 6},
-        "time": now_ms(),
+        // engine time: what block times, the nonce window and oracle rounds are judged against (the wall clock,
+        // except in a dev stack with a dev clock offset: /v1/node engineClock)
+        "time": app.engine_now(),
         "latestBlock": latest.as_ref().map(block_summary).unwrap_or(genesis_ref),
         "latestFinalized": fin.as_ref().map(block_summary),
         "sequencer": {"state": if s.halted.is_some() {"halted"} else {"running"}, "blockIntervalMs": app.block_interval_ms,
@@ -136,6 +138,7 @@ async fn node_info(State(app): State<Arc<App>>) -> Response {
     let vals = app.validators.lock().unwrap();
     Json(serde_json::json!({
         "engine": s.engine.name(), "haltReason": s.halted,
+        "engineClock": {"devOffsetMs": app.clock.lock().unwrap().offset_ms(), "now": app.engine_now()},
         "index": s.index.as_ref().map(|ix| serde_json::json!({"fromHeight": ix.from_height, "height": ix.height, "mismatches": ix.mismatches,
             "lastMismatch": ix.last_mismatch, "nextTradeId": ix.next_trade_id.to_string(), "nextFillId": ix.next_fill_id.to_string()})),
         "oracleIngest": {"enabled": app.oracle_token.is_some(), "pool": s.oracle_pool.to_json(&app.g)},
@@ -520,7 +523,7 @@ async fn oracle_observation(State(app): State<Arc<App>>, headers: HeaderMap, bod
     let signer = o.signer;
     let mut s = app.seq.lock().unwrap();
     let last = s.engine.last_oracle_round();
-    let r = s.oracle_pool.offer(&app.g, round, o, last, now_ms());
+    let r = s.oracle_pool.offer(&app.g, round, o, last, app.engine_now());
     drop(s);
     match offer_json(&app, round, signer, r) {
         Ok(j) => Json(j).into_response(),
@@ -566,7 +569,7 @@ async fn oracle_update(State(app): State<Arc<App>>, headers: HeaderMap, body: ax
         let last = s.engine.last_oracle_round();
         for o in parsed {
             let signer = o.signer;
-            match s.oracle_pool.offer(&app.g, round, o, last, now_ms()) {
+            match s.oracle_pool.offer(&app.g, round, o, last, app.engine_now()) {
                 Ok(h) => {
                     any = true;
                     let (k, st) = match h {
@@ -1079,7 +1082,10 @@ pub fn submit(app: &App, peer: Option<SocketAddr>, headers: &HeaderMap, query_co
             return Err(error(403, "ATTESTATION_REQUIRED", "this action needs a valid attestation of the account (POST /v1/attestations)", serde_json::json!({"status": st.status})));
         }
     }
-    let r = app.seq.lock().unwrap().admit_signed(a, now);
+    // the nonce window and the per-account rate are judged on the engine clock (the edge assertion, the IP rate
+    // and the attestation above on the wall clock)
+    let engine_now = app.engine_now();
+    let r = app.seq.lock().unwrap().admit_signed(a, engine_now);
     r.map_err(|e| error(e.http, e.code, &e.message, serde_json::json!({})))
 }
 

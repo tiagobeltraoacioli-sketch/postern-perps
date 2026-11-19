@@ -46,6 +46,11 @@ postern-geoblock = { path = "../compliance/geoblock/rust" }
 # refused in a build without debug assertions (the release profile) by a compile_error, and at start unless the
 # node runs in dev mode with the dev-derived oracle committee.
 dev-oracle = []
+# DEV ONLY: an offset added to the ENGINE clock of a dev stack (`--dev-clock-offset-ms`), so a rehearsal can cross
+# a UTC day (the engine's daily fee sweep) without waiting for one. Off by default; refused in a build without
+# debug assertions by a compile_error, and at start unless the node runs in dev mode. The sequencer and every
+# validator must be given the SAME offset: the validators' block-time rules are applied to the shifted clock.
+dev-clock = []
 
 [dev-dependencies]
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect"] }

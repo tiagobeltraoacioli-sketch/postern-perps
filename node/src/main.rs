@@ -63,7 +63,7 @@ async fn main() {
             std::process::exit(2);
         }
         _ => {
-            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN]... [--edge-client-header NAME] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--operator-token-file F] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
+            eprintln!("usage: postern-perps-node dev --data DIR [--listen 127.0.0.1:48900] [GENESIS] [--local-validators N] [--block-ms 200] [--block-actions 600] [--snapshot-every 1000] [--engine real|stub] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000] [--token 0x..] [--cors-origin ORIGIN]... [--edge-client-header NAME] [--dev-clock-offset-ms N (dev-clock feature)] [--oracle-token-file F] [--oracle-gather-ms 500] [--relay-rpc http://A,http://B --relay-key-file F [--relay-poll-ms 2000] [--relay-max-gas-price-gwei 50]] [--geoblock FILE] [--attestation-statements FILE] [--require-attestation] [--operator-token-file F] [--ip-rate 50] [--account-rate 20] [--read-rate 100] [--dev-default-country ZZ] [--edge-secret-file F] [--dev-oracle]");
             eprintln!("       postern-perps-node validator --index I --sequencer http://127.0.0.1:48900 [--data DIR] [GENESIS] [--l2 http://A,http://B] [--l2-start-block N] [--l2-poll-ms 1000]");
             eprintln!("       postern-perps-node verify-log --data DIR [GENESIS] [--engine real|stub]");
             eprintln!("       postern-perps-node dev-genesis [GENESIS]      (prints the dev genesis as JSON: addresses only, no key)");
@@ -75,6 +75,25 @@ async fn main() {
 
 /// The GENESIS flags (usage text) -> dev options. Any malformed value stops the process: a silently ignored flag
 /// would start a different deployment than the operator named.
+/// `--dev-clock-offset-ms N`: the gate is `EngineClock::dev_offset` (feature + dev mode); a refusal stops the
+/// process, it is never silently ignored.
+fn dev_clock(a: &HashMap<String, String>, mode: Mode) -> perps_node::node::EngineClock {
+    let Some(raw) = a.get("dev-clock-offset-ms") else { return perps_node::node::EngineClock::wall() };
+    let n: u64 = raw.parse().unwrap_or_else(|_| die(format!("--dev-clock-offset-ms {raw:?}: not a number of milliseconds (forward only)")));
+    match perps_node::node::EngineClock::dev_offset(mode, n) {
+        Ok(c) => {
+            if c.offset_ms() != 0 {
+                eprintln!("DEV CLOCK: engine time = wall clock + {} ms (dev only; every process of the stack must be given the same offset)", c.offset_ms());
+            }
+            c
+        }
+        Err(e) => {
+            eprintln!("--dev-clock-offset-ms refused: {e}");
+            std::process::exit(2);
+        }
+    }
+}
+
 fn die(m: String) -> ! {
     eprintln!("{m}");
     std::process::exit(2)
@@ -172,6 +191,8 @@ async fn remote_validator(a: HashMap<String, String>) {
     let genesis_engine = e.clone_box();
     let v = perps_node::validator::Validator::new(g.clone(), keys.validators[i].clone(), e, view, a.get("data").map(PathBuf::from)).expect("validator");
     let base = a.get("sequencer").cloned().unwrap_or_else(|| "http://127.0.0.1:48900".into());
+    // the `validator` command exists in dev only (throwaway keys from the seed); the same gate as the sequencer's
+    let clock = dev_clock(&a, Mode::Dev);
     eprintln!("postern-perps-node validator {} (UNAUDITED, THROWAWAY key) following {base}", perps_node::util::to_hex(&v.address));
     // its own log and read service (R436-11): with --data the validator keeps the blocks it applied and restarts
     // from them; with --listen it serves them and account proofs from its own replay
@@ -195,7 +216,7 @@ async fn remote_validator(a: HashMap<String, String>) {
         eprintln!("validator read service on http://{listen}");
     }
     tokio::select! {
-        r = perps_node::node::run_remote_validator_with(base, v, rx, store) => {
+        r = perps_node::node::run_remote_validator_clocked(base, v, rx, store, clock) => {
             if let Err(e) = r {
                 eprintln!("{e}");
                 std::process::exit(1);
@@ -327,7 +348,20 @@ async fn dev(a: HashMap<String, String>) {
     seq.rate = RateLimit::new(get(&a, "account-rate", 20.0), get(&a, "account-rate", 20.0) * 2.0);
     seq.oracle_pool.gather_ms = get(&a, "oracle-gather-ms", perps_node::oracle_pool::DEFAULT_GATHER_MS);
     eprintln!("recovered: {:?}", seq.recovered);
+    // the engine clock: the wall clock, or (dev-clock feature, dev mode) the wall clock plus a fixed offset
+    let clock = dev_clock(&a, Mode::Dev);
+    // block times never go back: a log that is ahead of this clock (a stack restarted with a smaller offset, or
+    // without the one it ran with) would get blocks its validators refuse as "from the future". Say so and stop.
+    if seq.log.last_time > clock.now().saturating_add(60_000) {
+        die(format!(
+            "the log's last block (time {}) is {} ms ahead of this node's engine clock: refused. A dev stack that ran with --dev-clock-offset-ms must be restarted with the same or a larger offset (at least {} ms now)",
+            seq.log.last_time,
+            seq.log.last_time - clock.now(),
+            seq.log.last_time.saturating_sub(perps_node::node::now_ms())
+        ));
+    }
     let app = App::with(g.clone(), seq, geo, Mode::Dev, seq_view, get(&a, "block-ms", 200), l2.is_some(), token, oracle_token);
+    *app.clock.lock().unwrap() = clock;
     *app.ip_rate.lock().unwrap() = RateLimit::new(get(&a, "ip-rate", 50.0), get(&a, "ip-rate", 50.0) * 2.0);
     *app.read_rate.lock().unwrap() = RateLimit::new(get(&a, "read-rate", 100.0), get(&a, "read-rate", 100.0) * 2.0);
     // attestation records (397's design): the statement set from compliance/legal/notices.json (or the file named)

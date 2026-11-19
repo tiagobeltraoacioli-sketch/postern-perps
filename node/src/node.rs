@@ -67,6 +67,8 @@ pub struct App {
     /// `--edge-client-header`: the header in which the EDGE names the client's address. Believed only on a
     /// request that carries a valid edge assertion (R436-14 residue); None = never.
     pub edge_client_header: Mutex<Option<String>>,
+    /// the engine clock (the wall clock unless a dev stack was started with a dev clock offset)
+    pub clock: Mutex<EngineClock>,
     /// Bearer token of the operator's reads (`--operator-token-file`; `None`: no operator path exists)
     pub operator_token: Mutex<Option<Vec<u8>>>,
     /// Attestation records (`crate::attest`)
@@ -82,6 +84,57 @@ pub struct App {
 
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+#[cfg(all(feature = "dev-clock", not(debug_assertions)))]
+compile_error!("the dev-clock feature is DEV ONLY and must never be built into a release (no debug assertions)");
+
+/// The largest dev clock offset (400 days: far more than any rehearsal needs, far from any overflow).
+pub const DEV_CLOCK_MAX_OFFSET_MS: u64 = 400 * 86_400_000;
+
+/// The ENGINE clock: the time block production, the validators' block-time rules (R395-29, R395-37/-38), the
+/// oracle ingest and the nonce window are judged against. It is the wall clock, always, except in a DEV stack
+/// built with the `dev-clock` feature and started with `--dev-clock-offset-ms`, where it is the wall clock plus a
+/// fixed, forward offset. The offset is private and can only be set through `dev_offset`, which holds the gate.
+/// Everything that is not engine time (edge assertions, attestations, rate limits, alarms) stays on `now_ms`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineClock {
+    offset_ms: u64,
+}
+
+impl EngineClock {
+    /// The wall clock (every non-dev configuration).
+    pub fn wall() -> EngineClock {
+        EngineClock { offset_ms: 0 }
+    }
+    pub fn now(&self) -> u64 {
+        now_ms().saturating_add(self.offset_ms)
+    }
+    pub fn offset_ms(&self) -> u64 {
+        self.offset_ms
+    }
+    /// Start-time gate of the dev clock (the R393 gate, as for the dev oracle): a non-zero offset exists only in a
+    /// binary built with the `dev-clock` feature (which a release build refuses to compile) AND in dev mode.
+    pub fn dev_offset(mode: Mode, offset_ms: u64) -> Result<EngineClock, String> {
+        if offset_ms == 0 {
+            return Ok(EngineClock::wall());
+        }
+        #[cfg(not(feature = "dev-clock"))]
+        {
+            let _ = mode;
+            Err("a dev clock offset is refused: this binary is built without the dev-clock feature".into())
+        }
+        #[cfg(feature = "dev-clock")]
+        {
+            if mode != Mode::Dev {
+                return Err("a dev clock offset is refused outside dev mode".into());
+            }
+            if offset_ms > DEV_CLOCK_MAX_OFFSET_MS {
+                return Err(format!("a dev clock offset above {DEV_CLOCK_MAX_OFFSET_MS} ms is refused"));
+            }
+            Ok(EngineClock { offset_ms })
+        }
+    }
 }
 
 pub fn ip_key(ip: IpAddr) -> [u8; 20] {
@@ -114,6 +167,7 @@ impl App {
             block_renders: crate::api::BlockRenders::new(),
             read_replay: Mutex::new(Default::default()),
             edge_client_header: Mutex::new(None),
+            clock: Mutex::new(EngineClock::wall()),
             g,
             seq: Mutex::new(seq),
             geo,
@@ -130,9 +184,15 @@ impl App {
         })
     }
 
+    /// Engine time now (`EngineClock`).
+    pub fn engine_now(&self) -> u64 {
+        self.clock.lock().unwrap().now()
+    }
+
     /// One production step (also used directly by tests).
     pub fn produce_once(&self) -> Result<Option<Arc<BlockInfo>>, String> {
-        let r = self.seq.lock().unwrap().produce(now_ms());
+        let now = self.engine_now();
+        let r = self.seq.lock().unwrap().produce(now);
         if let Ok(Some(info)) = &r {
             let _ = self.blocks_tx.send(info.clone());
             self.new_block.notify_waiters();
@@ -175,7 +235,8 @@ pub async fn run_local_validator(app: Arc<App>, mut v: Validator, mut stop: toki
                 continue;
             }
         };
-        let r = v.process(&b, now_ms());
+        // the in-process validators share the sequencer's engine clock (one process, one configuration)
+        let r = v.process(&b, app.engine_now());
         let last = match &r {
             VResult::Applied { checkpoint: Some((body, sig)) } => {
                 let res = app.seq.lock().unwrap().add_signature(body.height, *sig);
@@ -234,8 +295,46 @@ pub async fn run_remote_validator(base: String, v: Validator, stop: tokio::sync:
 /// As `run_remote_validator`, with the validator's own store (`crate::vserve`): at start the blocks of its own log
 /// are re-applied without the sequencer (`Validator::replay_own`), and every block it applies afterwards is
 /// appended to that log, so its read service can serve blocks and account proofs from its own replay (R436-11).
-pub async fn run_remote_validator_with(base: String, mut v: Validator, mut stop: tokio::sync::watch::Receiver<bool>, store: Option<crate::vserve::SharedStore>) -> Result<(), String> {
+pub async fn run_remote_validator_with(base: String, v: Validator, stop: tokio::sync::watch::Receiver<bool>, store: Option<crate::vserve::SharedStore>) -> Result<(), String> {
+    run_remote_validator_clocked(base, v, stop, store, EngineClock::wall()).await
+}
+
+/// The dev clock offset the sequencer at `base` announces in `GET /v1/node` (`engineClock.devOffsetMs`; a node
+/// that names none has none). None while the sequencer cannot be asked.
+pub async fn announced_clock_offset(base: &str) -> Option<u64> {
+    match crate::watcher::http_call("GET", &format!("{base}/v1/node"), None, &[]).await {
+        Ok((200, body)) => serde_json::from_slice::<serde_json::Value>(&body).ok().map(|j| j["engineClock"]["devOffsetMs"].as_u64().unwrap_or(0)),
+        _ => None,
+    }
+}
+
+/// As `run_remote_validator_with`, on the engine clock `clock`. The validator's block-time rules (not too far
+/// ahead, not first seen too late) are applied to ITS OWN clock. Before it processes any block it compares its
+/// clock offset with the one the sequencer announces: a difference is a configuration error of a dev stack and
+/// ends the validator (it signs nothing); and whatever is announced, a block whose time does not fit this
+/// validator's clock is refused or left unsigned by the unchanged rules.
+pub async fn run_remote_validator_clocked(base: String, mut v: Validator, mut stop: tokio::sync::watch::Receiver<bool>, store: Option<crate::vserve::SharedStore>, clock: EngineClock) -> Result<(), String> {
     use crate::watcher::http_call;
+    loop {
+        if *stop.borrow() {
+            return Ok(());
+        }
+        match announced_clock_offset(&base).await {
+            Some(theirs) if theirs == clock.offset_ms() => break,
+            Some(theirs) => {
+                return Err(format!(
+                    "ENGINE CLOCK MISMATCH: the sequencer runs with a dev clock offset of {theirs} ms, this validator with {} ms: not following, nothing is signed (start both with the same --dev-clock-offset-ms, or neither)",
+                    clock.offset_ms()
+                ));
+            }
+            None => {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                    _ = stop.changed() => return Ok(()),
+                }
+            }
+        }
+    }
     if let Some(st) = &store {
         let last = st.lock().unwrap().log.last_height;
         for h in 1..=last {
@@ -259,9 +358,19 @@ pub async fn run_remote_validator_with(base: String, mut v: Validator, mut stop:
             s.last = last;
         }
     };
+    let mut clock_checked = std::time::Instant::now();
     loop {
         if *stop.borrow() {
             return Ok(());
+        }
+        // the sequencer may have been restarted with another offset: ask again every few seconds
+        if clock_checked.elapsed() >= Duration::from_secs(3) {
+            clock_checked = std::time::Instant::now();
+            if let Some(theirs) = announced_clock_offset(&base).await {
+                if theirs != clock.offset_ms() {
+                    return Err(format!("ENGINE CLOCK MISMATCH: the sequencer now runs with a dev clock offset of {theirs} ms, this validator with {} ms: stopped, nothing more is signed", clock.offset_ms()));
+                }
+            }
         }
         let from = v.height + 1;
         let r = http_call("GET", &format!("{base}/v1/blocks?from={from}&limit=200&raw=1"), None, &[]).await;
@@ -283,7 +392,7 @@ pub async fn run_remote_validator_with(base: String, mut v: Validator, mut stop:
             continue;
         }
         for b in blocks {
-            let r = v.process(&b, now_ms());
+            let r = v.process(&b, clock.now());
             // a block this validator applied goes into its own log (with the checkpoint it signed, if any)
             if let (Some(st), VResult::Applied { .. } | VResult::AppliedNotSigned(_)) = (&store, &r) {
                 let cp = match &r {
@@ -372,7 +481,7 @@ async fn run_dev_oracle(app: Arc<App>, keys: Vec<k256::ecdsa::SigningKey>, price
             _ = iv.tick() => {}
             _ = stop.changed() => return,
         }
-        let u = dev_oracle_update(&app.g, &keys, now_ms(), &prices);
+        let u = dev_oracle_update(&app.g, &keys, app.engine_now(), &prices);
         let _ = app.seq.lock().unwrap().submit_oracle(u);
     }
 }
