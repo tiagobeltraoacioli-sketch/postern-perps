@@ -651,11 +651,14 @@ impl Engine {
         e.accounts = accounts;
         e.by_addr = by_addr;
         e.agent_owner = agent_owner;
-        e.last_passes = (0, true);
+        // the pass diagnostic of the block the snapshot was taken after is not stored: I-6 (which holds only after
+        // a completed step 9) is therefore not asserted on a loaded state; the caller's state root binds it anyway
+        e.last_passes = (0, false);
         // structural invariants of section 8 (I-1, I-2, I-3, book and order cross-references, forced queue)
         if let Err(m) = crate::invariants::check(&e) {
             return inv(format!("invariant: {m}"));
         }
+        e.last_passes = (0, true);
         // one encoding per state: whatever parsed must re-encode to exactly these bytes
         if e.snapshot() != bytes {
             return inv("non-canonical encoding");

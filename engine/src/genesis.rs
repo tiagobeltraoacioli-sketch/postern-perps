@@ -141,6 +141,28 @@ pub struct Genesis {
     /// keeps its `logHash(0)` and every root; a genesis bound to a real vault MUST set it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collateral_token: Option<String>,
+    /// SPEC 6.5 (0.2.5, R436-5): the part of the backstop's genesis seed (`launchBackstopMin`) it may lose, ppm.
+    /// Its equity floor is `ceil(launchBackstopMin * (10^6 - budget) / 10^6)`. Optional and LAST, omitted from the
+    /// canonical encoding when absent (old genesis hashes stand); absent = 10^6 (floor 0: the backstop is then
+    /// stopped by its maintenance requirement alone).
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optnum")]
+    pub backstop_loss_budget_ppm: Option<u32>,
+}
+
+/// An optional integer as a decimal string (same strictness as `strnum`).
+pub mod optnum {
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(v: &Option<u32>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(x) => super::strnum::serialize(x, s),
+            None => s.serialize_none(),
+        }
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+        #[derive(Deserialize)]
+        struct W(#[serde(with = "super::strnum")] u32);
+        Ok(Some(W::deserialize(d)?.0))
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -165,6 +187,8 @@ pub struct Checked {
     pub fee_recipient: Addr,
     pub oracle_signers: Vec<Addr>,
     pub collateral_token: Option<Addr>,
+    /// SPEC 6.5: the backstop's equity floor, USDC units (rounded UP: toward stopping earlier).
+    pub backstop_floor: u64,
     pub hash: H256,
 }
 
@@ -238,6 +262,11 @@ impl Genesis {
         if self.backstop_oi_ppm as i128 > PPM {
             return Err("backstopOiPpm <= 1e6".into());
         }
+        let budget = self.backstop_loss_budget_ppm.unwrap_or(1_000_000) as u128;
+        if budget > 1_000_000 {
+            return Err("backstopLossBudgetPpm <= 1e6".into());
+        }
+        let backstop_floor = ((self.launch_backstop_min as u128) * (1_000_000 - budget)).div_ceil(1_000_000) as u64;
         if self.markets.is_empty() || self.markets.len() > 255 {
             return Err("markets count".into());
         }
@@ -309,7 +338,7 @@ impl Genesis {
             }
         }
         let hash = keccak(&self.encoding());
-        Ok(Checked { verifying_contract: vc, fee_recipient: fr, oracle_signers: signers, collateral_token: token, hash, g: self })
+        Ok(Checked { verifying_contract: vc, fee_recipient: fr, oracle_signers: signers, collateral_token: token, backstop_floor, hash, g: self })
     }
 }
 
@@ -456,6 +485,8 @@ pub fn from_compliance(
         markets: ms,
         // a deployment input (the bUSDC address of the vault's chain): the caller sets it; never guessed here
         collateral_token: None,
+        // an owner input (SPEC 6.5): the caller sets it; absent = the maintenance stop alone
+        backstop_loss_budget_ppm: None,
     }
     .check()
     .map(|c| c.g)

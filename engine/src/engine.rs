@@ -219,6 +219,10 @@ pub enum Event {
     /// A PlaceOrder input was given this order id (pushed where the id is allocated, before any fill of it; the
     /// ids of liquidation and forced takes are not announced: they belong to no input).
     Accepted { order: u64, account: u32 },
+    /// SPEC 6.5: the backstop's equity fell below its stop level; its positions in active markets are closed in
+    /// this step (the `Fill` events that follow, taker = BACKSTOP, kinds `Liquidation` and `Adl`, name each
+    /// counterparty). `equity` and `stop` in USDC units (equity rounded down).
+    BackstopStopped { equity: i128, stop: i128 },
     Rested { order: u64 },
     TriggerStored { order: u64 },
     Triggered { order: u64 },
@@ -1154,7 +1158,8 @@ impl Engine {
         let d = (dir * q as i128) as i64;
         let e_after = self.equity(ACCT_BACKSTOP) + (d as i128) * (mark as i128 - price as i128);
         let (_, mr_after) = self.account_req(ACCT_BACKSTOP, Some((mid, bs + d, None)));
-        if e_after >= mr_after {
+        // SPEC 6.5 (0.2.5): and only while its equity after stays at or above its floor (loss budget not used up)
+        if e_after >= mr_after && e_after >= (self.g.backstop_floor as i128) * N_PER_USDC {
             q
         } else {
             0
@@ -1642,7 +1647,53 @@ impl Engine {
                 any = true;
             }
         }
+        if self.backstop_stop() {
+            any = true;
+        }
         any
+    }
+
+    /// The backstop's stop level in notional units (SPEC 6.5): the larger of its equity floor and its own
+    /// maintenance requirement.
+    pub fn backstop_stop_level(&self) -> i128 {
+        let (_, mr) = self.account_req(ACCT_BACKSTOP, None);
+        mr.max((self.g.backstop_floor as i128) * N_PER_USDC)
+    }
+
+    /// SPEC 6.5 (R436-5's residue, 0.2.5): the loss cap of the backstop. `BACKSTOP` has no key and was never
+    /// liquidated, so a position it took could lose without bound (436's fuzz: -80,283 USDC with the insurance
+    /// fund empty). Now, in every pass of step 9 after the users' liquidations: if it holds a position in an ACTIVE
+    /// market and its equity at the mark is below its stop level, every such position is closed at once: through
+    /// the book at the mark or better for the backstop (orders of this block skipped, as for any liquidation), the
+    /// rest against the opposite positions in ADL order AT THE MARK (the counterparties realise their result at
+    /// the mark: nothing is taken from them but the position). Positions in halted markets wait (no price).
+    fn backstop_stop(&mut self) -> bool {
+        let mids: Vec<u32> = self.accounts[ACCT_BACKSTOP as usize].positions.keys().copied().filter(|m| self.active(*m)).collect();
+        if mids.is_empty() {
+            return false;
+        }
+        let e = self.equity(ACCT_BACKSTOP);
+        let stop = self.backstop_stop_level();
+        if e >= stop {
+            return false;
+        }
+        self.events.push(Event::BackstopStopped { equity: div_floor(e, N_PER_USDC), stop: div_ceil(stop, N_PER_USDC) });
+        for mid in mids {
+            let s = self.pos_size(ACCT_BACKSTOP, mid);
+            if s == 0 {
+                continue;
+            }
+            let is_buy = s < 0;
+            let mark = self.markets[&mid].mark;
+            let oid = self.next_order_id;
+            self.next_order_id += 1;
+            self.take(ACCT_BACKSTOP, mid, is_buy, mark, abs64(s), true, Mode::Liquidation, oid);
+            let r = abs64(self.pos_size(ACCT_BACKSTOP, mid));
+            if r > 0 {
+                self.adl(ACCT_BACKSTOP, mid, mark, r, is_buy, 0);
+            }
+        }
+        true
     }
 
     /// Price at which E would be 0 for position `mid`, the others held at mark (SPEC 6.3 step 2).

@@ -111,6 +111,15 @@ pub fn check(e: &Engine) -> Result<(), String> {
             return Err("BACKSTOP with a negative balance while INSURANCE holds funds (realised loss not settled)".into());
         }
     }
+    // SPEC 6.5 (0.2.5, I-6): after a block whose step 9 ran to completion the backstop holds no position in an
+    // active market unless its equity is at or above its stop level (floor and own maintenance requirement)
+    if e.last_passes.1 {
+        let b = &e.accounts[crate::engine::ACCT_BACKSTOP as usize];
+        let in_active = b.positions.keys().any(|m| e.markets[m].oracle.status == crate::oracle::Status::Active && e.markets[m].mark > 0);
+        if in_active && e.equity(crate::engine::ACCT_BACKSTOP) < e.backstop_stop_level() {
+            return Err(format!("I-6: BACKSTOP holds a position in an active market with equity {} below its stop level {}", e.equity(crate::engine::ACCT_BACKSTOP), e.backstop_stop_level()));
+        }
+    }
     // the same for users: bad debt of a flat account is paid by the insurance fund as far as it goes
     {
         let ins = e.accounts[crate::engine::ACCT_INSURANCE as usize].balance;

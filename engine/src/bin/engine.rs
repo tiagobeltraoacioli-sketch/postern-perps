@@ -315,6 +315,11 @@ fn genesis_cmd(args: &[String]) {
     let ppm: u32 = opt("--backstop-oi-ppm").and_then(|v| v.parse().ok()).unwrap_or(250_000);
     let mut g = postern_perps_engine::genesis::from_compliance(&rd(&args[0]), &rd(&args[1]), &vault, signers, q, &seed, ppm).unwrap_or_else(|e| die(&e));
     // S-9.2.1 (R395-22): the bUSDC address of the vault's chain, a deployment input; never guessed
+    if let Some(b) = opt("--backstop-loss-budget-ppm") {
+        // SPEC 6.5: an owner input; absent = the backstop is stopped by its maintenance requirement alone
+        g.backstop_loss_budget_ppm = Some(b.parse().unwrap_or_else(|_| die("--backstop-loss-budget-ppm: integer 0..=1000000")));
+        g = g.check().unwrap_or_else(|e| die(&e)).g;
+    }
     if let Some(t) = opt("--collateral-token") {
         g.collateral_token = Some(t);
         g = g.check().unwrap_or_else(|e| die(&e)).g;

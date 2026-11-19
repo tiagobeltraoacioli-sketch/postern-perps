@@ -14,6 +14,9 @@
 //!   end of the run) an engine restored from a mid-run snapshot replays the rest of the log to the same roots and
 //!   log hashes;
 //! - P-5 replay through the codec also reproduces every log hash and every per-input outcome.
+//! - P-6 (SPEC 6.5, 0.2.5) the backstop's loss cap: after a block whose step 9 ran to completion the backstop holds
+//!   no position in an active market unless its equity is at or above its stop level (its floor from the genesis
+//!   numbers and its own maintenance requirement, both recomputed here).
 use k256::ecdsa::SigningKey;
 use postern_perps_engine::codec::{decode_inputs, encode_inputs};
 use postern_perps_engine::testkit::*;
@@ -165,6 +168,21 @@ fn round2_properties(sim: &mut Sim, b: &Block, out: &BlockOutcome) {
     }
     if !complete {
         *sim.stats.entry("p3:pass-bound-hit".into()).or_default() += 1;
+    }
+    // ---- P-6
+    {
+        let bs = &e.accounts[2];
+        let active = |m: &u32| e.markets[m].oracle.status == postern_perps_engine::oracle::Status::Active && e.markets[m].mark > 0;
+        let budget = e.g.g.backstop_loss_budget_ppm.unwrap_or(1_000_000) as i128;
+        let floor = (e.g.g.launch_backstop_min as i128 * (1_000_000 - budget) + 999_999) / 1_000_000 * 10_000_000_000;
+        let mr: i128 = bs.positions.iter().map(|(m, p)| mmr_independent((p.size as i128).abs() * e.markets[m].mark as i128, &e.markets[m].p.tiers)).sum();
+        if bs.positions.keys().any(active) && e.equity(2) < mr.max(floor) {
+            assert!(!complete, "P-6: BACKSTOP holds a position in an active market with equity {} below its stop level {} at the end of height {h}", e.equity(2), mr.max(floor));
+            *sim.stats.entry("p6:carried-to-next-block".into()).or_default() += 1;
+        }
+        if bs.positions.keys().any(|m| !active(m)) && e.equity(2) < mr.max(floor) {
+            *sim.stats.entry("p6:waiting-in-a-halted-market".into()).or_default() += 1;
+        }
     }
     // R430-1 / R436-5: the backstop's state is visible in the statistics
     let bs = &e.accounts[2];
@@ -481,7 +499,16 @@ fn backstop_takes_positions_goes_under_water_and_its_debt_is_reported() {
     sim.run(&ops);
     replay_matches(&sim);
     eprintln!("backstop sequence stats: {:?}", sim.stats);
-    for k in ["fill:Backstop", "backstop:holds-position", "backstop:under-water", "backstop:negative-balance", "backstop:bad-debt-event", "Liquidated"] {
+    // Restated at SPEC 0.2.5 (loss cap, SPEC 6.5). Until 0.2.4 this sequence had to reach "backstop:under-water"
+    // (a position held with negative equity, for 33 blocks): that state is now forbidden while the market is
+    // active (P-6 in every block) and must NOT be reached; instead the backstop must be seen STOPPED. Kept: it
+    // takes positions and loses on them. NOT kept as a requirement of THIS sequence: "backstop:negative-balance"
+    // and "backstop:bad-debt-event". With the cap the backstop is stopped (twice here) while its equity is still
+    // positive, so this sequence no longer produces a debt at all; the debt path (a single move larger than its
+    // equity, reported as BadDebt and paid by INSURANCE) stays covered by
+    // `r430_1_backstop_loss_beyond_its_balance_is_bad_debt_paid_by_insurance` (tests/r2_failing_first.rs).
+    for k in ["fill:Backstop", "backstop:holds-position", "BackstopStopped", "Liquidated"] {
         assert!(sim.stats.get(k).copied().unwrap_or(0) > 0, "the sequence never reached {k}: {:?}", sim.stats);
     }
+    assert_eq!(sim.stats.get("backstop:under-water").copied().unwrap_or(0), 0, "the backstop never ends a block under water with a position: {:?}", sim.stats);
 }
