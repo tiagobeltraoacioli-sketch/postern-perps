@@ -25,8 +25,19 @@ export class Api {
     this.nonces = new Map();
     this.eip = null;
   }
+  /** fetch that survives a short loss of the ssh tunnel (it is supervised and comes back): a NETWORK error is retried
+   *  for up to 60 s and counted in `networkRetries`; an HTTP answer of any status is never retried. */
+  async net(url, init) {
+    for (let i = 0; ; i++) {
+      try { return await fetch(url, init); } catch (e) {
+        if (i >= 30) throw new Error(`no connection to the stack for 60 s (ssh tunnel down?): ${e.message}`);
+        this.networkRetries = (this.networkRetries ?? 0) + 1;
+        await sleep(2000);
+      }
+    }
+  }
   async get(path, headers = {}) {
-    const r = await fetch(this.base + path, { headers });
+    const r = await this.net(this.base + path, { headers });
     const text = await r.text();
     let body;
     try { body = JSON.parse(text); } catch { body = text; }
@@ -38,7 +49,8 @@ export class Api {
     return r.body;
   }
   async post(path, body, headers = {}) {
-    const r = await fetch(this.base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    // a POST is retried only when the connection could not be made at all (nothing reached the node)
+    const r = await this.net(this.base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
     return { status: r.status, body: await r.json().catch(() => null) };
   }
   async init() {
