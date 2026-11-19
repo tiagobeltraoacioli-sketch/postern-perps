@@ -26,7 +26,7 @@ export default async function (ctx) {
 
   let before;
   await ctx.check('C-02', 'a taker buy fills at the maker\'s price and pays exactly ceil(notional x 4.5 bps)', async () => {
-    before = { alice: await bal(api, alice.address), maker: await bal(api, maker.address), fee: await bal(api, SYSTEM.fee) };
+    before = { t: (await api.json('/v1/status')).time, alice: await bal(api, alice.address), maker: await bal(api, maker.address), fee: await bal(api, SYSTEM.fee) };
     const r = await api.order(alice, btc, { buy: true, price: onTick(btc, ref, 50), size, type: 1, tif: 1 });
     expect(r.body?.status === 'included' && r.body?.result?.ok === true, JSON.stringify(r.body));
     const fee = tradeFee(ask, size, 450);
@@ -105,7 +105,9 @@ export default async function (ctx) {
     // the round trip: alice lost the spread and two taker fees, nothing else
     const spread = ((px(ask) - px(bid)) * sz(size)) / 10n ** 10n;   // exact: both prices on the tick, round size
     const aliceLoss = before.alice - (await bal(api, alice.address));   // since just before her first order of this phase
-    const expectLoss = spread + tradeFee(ask, size, 450) + tradeFee(bid, size, 450);
+    // a funding boundary (one per minute on this stack) may fall while the position is open: counted from the API
+    const funding = (await api.json(`/v1/accounts/${alice.address}/funding?limit=20`)).payments.filter((p) => p.time >= before.t).reduce((t, p) => t + usdc(p.payment), 0n);
+    const expectLoss = spread + tradeFee(ask, size, 450) + tradeFee(bid, size, 450) - funding;
     expect(aliceLoss === expectLoss, `alice lost ${fmtUsdc(aliceLoss)}, expected spread + fees ${fmtUsdc(expectLoss)}`);
     return { depositsMinusWithdrawals: fmtUsdc(deposits), sumOfBalances: fmtUsdc(tb.total), balances: tb.per, aliceRoundTripCost: fmtUsdc(aliceLoss) };
   });

@@ -15,10 +15,10 @@ On `main` at the end of round 2 (on top of `f0e3967`, the end of round 1): the w
 |---|---|---|
 | `codex/perps-contracts-r2-20261118` | `95029f9` | vault v0.3 (system accounts fundable through the vault), local deployment, engine-produced vectors replayed in forge, invariants, deploy gate |
 | `codex/perps-engine-r2-20261118` (inside the node branch) | `5106fea` | engine + SPEC 0.2.4 |
-| `codex/perps-node-r2-20261118` | `cdf1b6b` | node API 0.3 from the real engine, oracle ingest, proofs, checkpoint relayer, validator processes with their own read service |
+| `codex/perps-node-r2-20261118` | `737f5a7` | node API 0.3 from the real engine, oracle ingest, proofs, checkpoint relayer, validator processes with their own read service |
 | `codex/perps-oracle-r2-20261118` | `c88ac6e` (first `850e3ae`) | feeder to ingest, replay tapes, calibration, rule C2d, exit-price rule |
 | `codex/perps-e2e-r2-20261118` | branch tip | `e2e/` (stack and rehearsal), conformance for API 0.3, mock account tree in the SPEC 11 format, geoblock.json 0.2.2, markets.json 0.2.2 |
-| `codex/perps-frontend-r2-20261118` | `1ac26b3` | the page against the real node and vault, vault module, wallet path, exact arithmetic, product pages |
+| `codex/perps-frontend-r2-20261118` | `a41ebe1` | the page against the real node and vault, vault module, wallet path, exact arithmetic, product pages |
 
 They reached `main` through the integration branch `codex/perps-e2e-r2-candidate-20261118`, tested as one tree and
 rehearsed end to end. It was held once, for a node test that was flaky in the release profile (R435-5: a nonce
@@ -29,8 +29,8 @@ collision inside the test; fixed by its owner at `cdf1b6b`, 25 of 25 release run
 | Area | End of round 1 (`f0e3967`) | End of round 2 (`main`) | Measured |
 |---|---|---|---|
 | engine | 50 | 94 | build host, `cargo test --release` |
-| node (release) | 39 | 79 + 1 ignored (the anvil scenario, run by hand) | build host |
-| node (`dev-oracle` feature) | 41 | 82 + 1 ignored | build host |
+| node (release) | 39 | 93 + 1 ignored (the anvil scenario, run by hand) | build host |
+| node (`dev-oracle` feature) | 41 | 96 + 1 ignored | build host |
 | a release build with the dev oracle | refused | refused | build host |
 | node/oracle | 60 | 95 | build host, `cargo test --release --workspace` |
 | compliance/geoblock Rust port | 9 | 10 | build host |
@@ -41,8 +41,8 @@ collision inside the test; fixed by its owner at `cdf1b6b`, 25 of 25 release run
 | compliance/tools | 48 | 59 | Mac |
 | compliance/geoblock JS | 63 | 64 | Mac |
 | e2e helpers | none | 8 | Mac |
-| frontend (vitest) | 70 + 87 (app, chart) | 266 (app 171, chart 95) | Mac, `npm run check` |
-| rehearsal checks | none | 70 checks: 69 pass, 0 fail, 1 blocked with its reason (the geoblock edge module is not a process of the stack) | local stack |
+| frontend (vitest) | 70 + 87 (app, chart) | 296 | Mac, `npm run check` |
+| rehearsal checks | none | 74 checks of phases A to L and K: every one passed on the merged code, 1 blocked with its reason (the edge module is not a stack process); plus the forced-request escape variant; plus phase P (the page writes to the stack, 6 checks): 1 pass, 5 fail, all on the page harness (see the README) | local stack |
 
 No test was removed in round 2 (each owner's statement, checked by reviewer 436 for engine, node, contracts and
 oracle, and by the integrator's counts above). Tests restated with a written reason, as their owners report: three
@@ -56,10 +56,10 @@ R436-7: the property each pinned is kept by new tests).
 | Branch | Agent | What it is | State |
 |---|---|---|---|
 | `codex/perps-engine-r2-20261118` | 430 | engine + SPEC 0.2.x: round-1 findings closed, compliance parameters read at genesis, snapshots, oracle vectors, property suite, worked-example and proof vectors, review-436 fixes | merged at `5106fea`; reviewer 436: fit to merge, both Highs closed |
-| `codex/perps-node-r2-20261118` | 431 | API 0.3 from the real engine, oracle ingest, account and withdrawal proofs, checkpoint relayer, separate validator processes, `/v1/genesis`, CORS | merged at `cdf1b6b`; reviewer 436: fit to merge at `b810675` (pass 2 on later commits in its report) |
+| `codex/perps-node-r2-20261118` | 431 | API 0.3 from the real engine, oracle ingest, account and withdrawal proofs, checkpoint relayer, separate validator processes, `/v1/genesis`, CORS | merged at `737f5a7`; reviewer 436: fit to merge, no High or Critical (passes 1 and 2 and the re-checks) |
 | `codex/perps-oracle-r2-20261118` | 432 | feeder to node ingest, scripted and recorded replay tapes, run-time dev committee, calibration, rule C2d | merged at `c88ac6e` (reviewer 436: fit to merge); later commits (live hour, README) not merged |
 | `codex/perps-contracts-r2-20261118` | 433 | vault v0.3 (system accounts fundable), local deployment, engine-produced vectors replayed in forge, invariants, keeper duty, deploy gate | merged at `95029f9`; reviewer 436: no finding above Low |
-| `codex/perps-frontend-r2-20261118` | 434 | the page against the real node and vault, vault module, wallet path, exact arithmetic from the engine's vectors, product pages | merged at `1ac26b3` (`npm run check` green on the merged tree); reviewer 436 pass 2: Low findings only (R436-18) |
+| `codex/perps-frontend-r2-20261118` | 434 | the page against the real node and vault, vault module, wallet path, exact arithmetic from the engine's vectors, product pages | merged at `a41ebe1` (`npm run check` green on the merged tree); reviewer 436 pass 2: Low findings only |
 | `codex/perps-e2e-r2-20261118` | 435 | `e2e/` (stack + rehearsal), conformance suite for API 0.3, mock in the SPEC 11 tree format, compliance data fixes (geoblock 0.2.2, markets 0.2.2) | merged |
 | `codex/perps-review2-r2-20261118` | 436 | reviewer demonstrations and the independent fuzzer | review material, never merged |
 
