@@ -4,6 +4,7 @@
 
 pub mod actions;
 pub mod api;
+pub mod archive;
 pub mod checkpoint;
 pub mod dev;
 pub mod eip712;
@@ -20,5 +21,6 @@ pub mod sig;
 pub mod types;
 pub mod util;
 pub mod validator;
+pub mod vserve;
 pub mod vaultfmt;
 pub mod watcher;

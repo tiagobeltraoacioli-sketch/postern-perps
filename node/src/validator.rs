@@ -168,6 +168,35 @@ impl Validator {
         VResult::Refused { reason, latched: true }
     }
 
+    /// RESTART ONLY: re-applies a block read from THIS validator's own log (`crate::vserve::ValidatorStore`, which
+    /// holds only blocks `process` accepted in full: link, sequencer signature, own L2 view, engine, state root).
+    /// The link, the decoding and the state root are checked again; the L2 view is not consulted (it was when the
+    /// block was first accepted, and it may still be empty right after a start). It NEVER signs, and every
+    /// replayed block counts as late, exactly as a block pulled again from the sequencer after a restart would
+    /// (R395-29): the checkpoint interval that contains replayed blocks is not signed.
+    pub fn replay_own(&mut self, b: &Block) -> Result<(), String> {
+        if let Some(r) = &self.latched {
+            return Err(format!("latched: {r}"));
+        }
+        check_block_link(&self.g, self.height, &self.log_hash, self.time, b)?;
+        let inputs = decode_inputs(&self.g.types, &b.inputs_encoded)?;
+        let out = self.engine.apply_block(b.header.height, b.header.time, &inputs).map_err(|e| format!("own log block {}: engine refused: {e}", b.header.height))?;
+        if self.engine.state_root() != b.header.state_root {
+            let r = format!("own log block {}: DIVERGENCE on replay", b.header.height);
+            self.latched = Some(r.clone());
+            return Err(r);
+        }
+        self.height = b.header.height;
+        self.log_hash = b.header.log_hash;
+        self.time = b.header.time;
+        if is_checkpoint_height(&self.g, b.header.height, &inputs, !out.withdrawals.is_empty()) {
+            self.late_since_checkpoint = None;
+        } else if self.late_since_checkpoint.is_none() {
+            self.late_since_checkpoint = Some(b.header.height);
+        }
+        Ok(())
+    }
+
     pub fn process(&mut self, b: &Block, now_ms: u64) -> VResult {
         if let Some(r) = &self.latched {
             return VResult::Refused { reason: format!("latched: {r}"), latched: true };

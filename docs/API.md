@@ -345,7 +345,20 @@ matches (`liquidity` maker or taker), and the transfers outside the book: backst
 bottom-up. The node recomputes the root from `leaf` and `proof` and serves the object only when it equals the
 checkpoint's `accountsRoot`. The checkpoint must be the one the VAULT holds as latest: pass its `height`. The node
 keeps the state of the 8 newest final checkpoints, of every checkpoint its relayer submitted (the newest 8) and
-of up to 32 not yet final ones; older heights answer `404`. The system accounts the vault needs in escape
+of up to 32 not yet final ones; for any OLDER final checkpoint it rebuilds the state from the input log (replay
+from the nearest held state or from genesis, checked against the checkpoint's state root; one rebuild at a time,
+the 4 newest rebuilt states are kept), so the answer can take as long as the replay. A height that is not a final
+checkpoint answers `404`.
+
+**The same proof without the sequencer (R436-11).** The escape hatch must not depend on the party whose silence it
+exists for. Every validator process (`postern-perps-node validator --data DIR --listen ADDR`) keeps its own copy of
+the input log and serves, from its OWN replay: `GET /v1/validator` (its address, height, latch state),
+`GET /v1/genesis`, `GET /v1/blocks`, `/v1/blocks/{height}`, `/v1/blocks/stream` (the same `Block` objects) and
+`GET /v1/accounts/{address}/proof?height=H` for any height it has applied (from a held state, else rebuilt from its
+log). A validator's `AccountProof` adds `"source":"validator"`, `height`, `stateRoot` and `accountsRoot` (the roots
+it computed) and carries as `checkpoint` the body it signed at that height with its own signature only
+(`final:false`), or null when it signed none there. It is not a certificate: the claimant compares `accountsRoot`
+with the root the VAULT holds (`latest()` on the L2), which is all `claimEscape` checks. The system accounts the vault needs in escape
 (`0x…02` INSURANCE, `0x…03` BACKSTOP) are served like any other address.
 
 ### 4.1 Deposits and withdrawals
@@ -659,5 +672,7 @@ version; clients must ignore unknown fields. Anything else raises the major vers
 - The machine-readable schema is still the draft `node/mock/schema/api.schema.json` (agent 435): the v0.3
   additions (`ForcedAction` extras, `WithdrawalProof`, `OracleIngestAck`, `OracleRounds`, `AccountProof.leafData`
   fields) are specified here and not yet in that file.
+- A validator's read service has no rate limit and no CORS headers of its own (put it behind the operator's
+  proxy); a state rebuild replays from genesis when no nearer state is held (linear in the height).
 - The oracle ingest token is a shared secret over loopback HTTP; a deployment needs TLS or a private network, and
   per-signer credentials are not built (the observation's own signature is the real authentication).

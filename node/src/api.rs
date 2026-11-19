@@ -555,14 +555,19 @@ async fn finality_signature(State(app): State<Arc<App>>, Json(body): Json<serde_
 }
 
 fn block_json(app: &App, b: &crate::types::Block, raw: bool) -> serde_json::Value {
-    let inputs = decode_inputs(&app.g.types, &b.inputs_encoded).unwrap_or_default();
+    block_json_g(&app.g, b, raw)
+}
+
+/// API.md `Block` (also served by a validator's own read service, `crate::vserve`).
+pub fn block_json_g(g: &crate::genesis::Genesis, b: &crate::types::Block, raw: bool) -> serde_json::Value {
+    let inputs = decode_inputs(&g.types, &b.inputs_encoded).unwrap_or_default();
     let mut j = serde_json::json!({
         "height": b.header.height, "time": b.header.time, "prevLogHash": to_hex(&b.header.prev_log_hash),
         "logHash": to_hex(&b.header.log_hash), "stateRoot": to_hex(&b.header.state_root),
         "inputs": inputs.iter().map(|i| {
-            let mut j = input_json(&app.g.types, i);
+            let mut j = input_json(&g.types, i);
             if let crate::types::Input::Action(a) = i {
-                if let Ok(v) = verify_signed_action(&app.g, a) {
+                if let Ok(v) = verify_signed_action(g, a) {
                     j["account"] = to_hex(&v.account).into();
                     j["signer"] = to_hex(&v.signer).into();
                 }
@@ -874,11 +879,46 @@ async fn account_proof(State(app): State<Arc<App>>, Path(a): Path<String>, q: Q)
     };
     // the engine state of that checkpoint is taken under the lock (an Arc clone); the proof (hashing every
     // account leaf) is built outside it (R436-6)
+    // R436-11: a FINAL checkpoint whose state is no longer held is rebuilt from the log (the log holds every
+    // block since genesis), one rebuild at a time, checked against the checkpoint's state root, then kept
+    if let Some(h) = height {
+        if app.seq.lock().unwrap().final_without_frame(h) {
+            if let Err(e) = rebuild_frame(&app, h).await {
+                return error(503, "SEQUENCER_UNAVAILABLE", &format!("the state at checkpoint {h} could not be rebuilt from the log: {e}"), serde_json::json!({"height": h}));
+            }
+        }
+    }
     let parts = app.seq.lock().unwrap().account_proof_parts(height);
     match parts.and_then(|(e, root, cp)| crate::sequencer::build_account_proof(&e, &a, &root, cp)) {
         Ok(j) => Json(j).into_response(),
         Err(e) => not_found(&e),
     }
+}
+
+/// Rebuilds the engine state at final checkpoint `h` by replaying the log from the nearest held state.
+pub async fn rebuild_frame(app: &Arc<App>, h: u64) -> Result<(), String> {
+    let _one_at_a_time = app.rebuild_gate.lock().await;
+    let (base_h, base, want_root) = {
+        let s = app.seq.lock().unwrap();
+        if !s.final_without_frame(h) {
+            return Ok(()); // rebuilt meanwhile, or not final
+        }
+        let (bh, b) = s.rebuild_base(h).ok_or("this engine has no rebuildable state")?;
+        (bh, b, s.checkpoint_for(h).map(|c| c.state_root()).ok_or("checkpoint vanished")?)
+    };
+    let app2 = app.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        let take = |from: u64, limit: u64| take_blocks(&app2, from, limit);
+        crate::archive::rebuild(&app2.g, base_h, base, h, &take)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if built.state_root() != want_root {
+        return Err("the rebuilt state does not have the final checkpoint's state root".into());
+    }
+    let real = built.real().cloned().ok_or("not a real engine")?;
+    app.seq.lock().unwrap().insert_rebuilt_frame(h, real);
+    Ok(())
 }
 
 /// `GET /v1/withdrawals/{id}/proof[?count=N | ?height=H]`: the `withdraw(seq, w, siblings, want)` input for the

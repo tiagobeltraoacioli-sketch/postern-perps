@@ -754,3 +754,56 @@ async fn r436_6_rest_reads_are_rate_limited_per_ip() {
     assert_eq!(get_json(&format!("{}/v1/status", n.url)).await.0, 200, "the bucket refills");
     let _ = n.stop.send(true);
 }
+
+/// R436-11 (sequencer side): an account proof against an OLD final checkpoint, whose engine state this node no
+/// longer holds, is rebuilt from the log (deterministic replay, checked against the checkpoint's state root)
+/// instead of answering 404; a height that is not a final checkpoint still has no proof.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn r436_11_account_proof_at_an_old_final_checkpoint_is_rebuilt_from_the_log() {
+    let n = start_real_node("rebuild").await;
+    let g = n.g.clone();
+    let base = n.url.clone();
+    let users: Vec<_> = (0..4).map(|i| user(300 + i)).collect();
+    // unfunded actions make blocks; a checkpoint every 5 blocks: more than FRAMES_FINAL_KEEP (8) final ones
+    let mut height = 0;
+    let mut i = 0u64;
+    while height < 62 {
+        let u = &users[(i % 4) as usize];
+        i += 1;
+        let a = signed(&g, u, "CancelAll", serde_json::json!({"account": to_hex(&key_address(u)), "nonce": (now() + i).to_string(), "marketId": 0}));
+        let (s, ack) = post_json(&format!("{base}/v1/actions?wait=included"), &request(&g, &a), &[("X-Mock-Country", "PA")]).await;
+        assert_eq!(s, 200, "{ack}");
+        height = ack["height"].as_u64().unwrap_or(height);
+    }
+    let mut fin = serde_json::Value::Null;
+    for _ in 0..80 {
+        let (s, f) = get_json(&format!("{base}/v1/finality/latest")).await;
+        if s == 200 && f["height"].as_u64() >= Some(60) {
+            fin = f;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(fin["height"].as_u64() >= Some(60), "{fin}");
+    let (_, ni) = get_json(&format!("{base}/v1/node")).await;
+    let held: Vec<u64> = ni["proofFrames"]["held"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap()).collect();
+    assert!(!held.contains(&5) && !held.contains(&10), "the first checkpoints' states were dropped: {held:?}");
+    assert!(n.app.seq.lock().unwrap().final_without_frame(10));
+    // the proof at height 10 is rebuilt from the log and verifies against THAT checkpoint
+    let insurance = "0x0000000000000000000000000000000000000002";
+    let (s, p) = get_json(&format!("{base}/v1/accounts/{insurance}/proof?height=10")).await;
+    assert_eq!(s, 200, "{p}");
+    let body = verify_checkpoint_json(&g, &p["checkpoint"]).unwrap();
+    assert_eq!(body.height, 10);
+    let leaf = perps_node::util::parse_hex_fixed::<32>(p["leaf"].as_str().unwrap()).unwrap();
+    let sib: Vec<[u8; 32]> = p["proof"].as_array().unwrap().iter().map(|x| perps_node::util::parse_hex_fixed::<32>(x.as_str().unwrap()).unwrap()).collect();
+    assert!(postern_perps_engine::merkle::verify(&leaf, 1, &sib, &body.accounts_root));
+    let (_, ni) = get_json(&format!("{base}/v1/node")).await;
+    assert!(ni["proofFrames"]["held"].as_array().unwrap().iter().any(|x| x == 10), "the rebuilt state is kept: {ni}");
+    // a second request is served from the kept state; a height without a final checkpoint has no proof
+    let (s, _) = get_json(&format!("{base}/v1/accounts/{insurance}/proof?height=10")).await;
+    assert_eq!(s, 200);
+    let (s, _) = get_json(&format!("{base}/v1/accounts/{insurance}/proof?height=7")).await;
+    assert_eq!(s, 404, "7 is not a checkpoint height");
+    let _ = n.stop.send(true);
+}

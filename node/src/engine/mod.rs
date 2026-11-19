@@ -327,6 +327,11 @@ pub trait Engine: Send + Sync {
     fn genesis_document(&self) -> Option<Vec<u8>> {
         None
     }
+    /// An engine of this kind (same genesis) over the given real-engine state: the base of a state rebuild from a
+    /// held frame (`crate::archive`). `None` for the stub.
+    fn with_real_state(&self, _state: postern_perps_engine::Engine) -> Option<Box<dyn Engine>> {
+        None
+    }
     /// The real engine behind this adapter (`None` for the stub): read-only access for the API views and the index.
     fn real(&self) -> Option<&postern_perps_engine::Engine> {
         None

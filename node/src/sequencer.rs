@@ -186,7 +186,14 @@ pub struct Sequencer {
     pub wd_tree: crate::engine::IncTree,
     /// account -> its withdrawal ids, oldest first
     pub wd_by_account: BTreeMap<Address, Vec<u64>>,
+    /// The engine at height 0: the base of a state rebuild when no frame at or below the height is held
+    pub genesis_engine: Box<dyn Engine>,
+    /// frames rebuilt on demand from the log (`crate::archive`), newest last; the newest `REBUILT_KEEP` stay
+    pub rebuilt_frames: VecDeque<u64>,
 }
+
+/// How many frames rebuilt on demand are kept (each is a whole engine state).
+pub const REBUILT_KEEP: usize = 4;
 
 #[derive(Clone, Debug, Default)]
 pub struct RecoveryReport {
@@ -206,6 +213,10 @@ impl Sequencer {
         }
         if engine.genesis_log_hash() != g.genesis_log_hash() {
             return Err("engine genesis logHash(0) differs from the node genesis: refusing to start".into());
+        }
+        let genesis_engine = engine.clone_box();
+        if genesis_engine.height() != 0 {
+            return Err("the engine handed to the sequencer must be at height 0".into());
         }
         let (log, rep) = InputLog::open(&data_dir, &g)?;
         let mut recovered = RecoveryReport { torn_tail_bytes: rep.torn_tail_bytes, ..Default::default() };
@@ -268,6 +279,8 @@ impl Sequencer {
             pinned_frames: BTreeSet::new(),
             wd_tree: crate::engine::IncTree::new(postern_perps_engine::engine::WITHDRAWAL_DEPTH),
             wd_by_account: BTreeMap::new(),
+            genesis_engine,
+            rebuilt_frames: VecDeque::new(),
         };
         s.sync_withdrawals();
         s.pinned_frames = read_pinned(&s.data_dir);
@@ -782,7 +795,8 @@ impl Sequencer {
         let unfinal: Vec<u64> = self.frames.keys().copied().filter(|h| *h > lf).collect();
         let keep_unfinal: BTreeSet<u64> = unfinal.iter().rev().take(FRAMES_UNFINAL_KEEP).copied().collect();
         let pinned = self.pinned_frames.clone();
-        self.frames.retain(|h, _| keep_final.contains(h) || keep_unfinal.contains(h) || pinned.contains(h));
+        let rebuilt: BTreeSet<u64> = self.rebuilt_frames.iter().copied().collect();
+        self.frames.retain(|h, _| keep_final.contains(h) || keep_unfinal.contains(h) || pinned.contains(h) || rebuilt.contains(h));
     }
 
     /// Pins the frame of a checkpoint height (the relayer calls this for every checkpoint the vault accepted); the
@@ -795,6 +809,32 @@ impl Sequencer {
         }
         let v: Vec<u64> = self.pinned_frames.iter().copied().collect();
         let _ = std::fs::write(self.data_dir.join("pinned-frames.json"), serde_json::json!({"heights": v}).to_string());
+        self.prune_frames();
+    }
+
+    /// Is `height` a FINAL checkpoint whose engine state is not held (so a proof needs a rebuild from the log)?
+    pub fn final_without_frame(&self, height: u64) -> bool {
+        self.is_final(height) && !self.frames.contains_key(&height)
+    }
+
+    /// The nearest state at or below `height` a rebuild can start from: a held frame, else genesis.
+    pub fn rebuild_base(&self, height: u64) -> Option<(u64, Box<dyn Engine>)> {
+        if let Some((h, e)) = self.frames.range(..=height).next_back() {
+            if let Some(b) = self.engine.with_real_state((**e).clone()) {
+                return Some((*h, b));
+            }
+        }
+        self.engine.real().map(|_| (0, self.genesis_engine.clone_box()))
+    }
+
+    /// Keeps a frame rebuilt from the log (checked by the caller against the final checkpoint's state root).
+    pub fn insert_rebuilt_frame(&mut self, height: u64, e: postern_perps_engine::Engine) {
+        self.frames.insert(height, Arc::new(e));
+        self.rebuilt_frames.retain(|h| *h != height);
+        self.rebuilt_frames.push_back(height);
+        while self.rebuilt_frames.len() > REBUILT_KEEP {
+            self.rebuilt_frames.pop_front();
+        }
         self.prune_frames();
     }
 

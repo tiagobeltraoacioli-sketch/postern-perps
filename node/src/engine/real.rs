@@ -201,6 +201,9 @@ impl Engine for RealEngine {
     fn block_limits(&self) -> (usize, usize) {
         (pe::engine::MAX_INPUTS, pe::engine::MAX_BLOCK_BYTES)
     }
+    fn with_real_state(&self, state: pe::Engine) -> Option<Box<dyn Engine>> {
+        Some(Box::new(RealEngine { g: self.g.clone(), e: state, log_hash0: self.log_hash0 }))
+    }
     fn genesis_document(&self) -> Option<Vec<u8>> {
         Some(self.e.g.g.encoding().into())
     }

@@ -160,12 +160,34 @@ async fn remote_validator(a: HashMap<String, String>) {
     if let Some(cfg) = watcher_config(&a, g.vault) {
         tokio::spawn(watcher::run(cfg, view.clone(), rx.clone()));
     }
-    let e = Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked).expect("engine"));
+    let e: Box<dyn Engine> = Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked).expect("engine"));
+    let genesis_engine = e.clone_box();
     let v = perps_node::validator::Validator::new(g.clone(), keys.validators[i].clone(), e, view, a.get("data").map(PathBuf::from)).expect("validator");
     let base = a.get("sequencer").cloned().unwrap_or_else(|| "http://127.0.0.1:48900".into());
     eprintln!("postern-perps-node validator {} (UNAUDITED, THROWAWAY key) following {base}", perps_node::util::to_hex(&v.address));
+    // its own log and read service (R436-11): with --data the validator keeps the blocks it applied and restarts
+    // from them; with --listen it serves them and account proofs from its own replay
+    let store = match a.get("data") {
+        Some(d) => match perps_node::vserve::ValidatorStore::open(g.clone(), std::path::Path::new(d), genesis_engine, perps_node::util::to_hex(&v.address)) {
+            Ok(s) => Some(Arc::new(Mutex::new(s))),
+            Err(e) => die(format!("validator store: {e}")),
+        },
+        None => None,
+    };
+    if let Some(l) = a.get("listen") {
+        let listen: SocketAddr = l.parse().unwrap_or_else(|_| die("--listen: address".into()));
+        if !listen.ip().is_loopback() {
+            die("dev mode listens on loopback only".into());
+        }
+        let Some(st) = store.clone() else { die("--listen needs --data DIR (the validator serves its own log)".into()) };
+        let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| die(format!("bind {listen}: {e}")));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, perps_node::vserve::router(st)).await;
+        });
+        eprintln!("validator read service on http://{listen}");
+    }
     tokio::select! {
-        r = perps_node::node::run_remote_validator(base, v, rx) => {
+        r = perps_node::node::run_remote_validator_with(base, v, rx, store) => {
             if let Err(e) = r {
                 eprintln!("{e}");
                 std::process::exit(1);
