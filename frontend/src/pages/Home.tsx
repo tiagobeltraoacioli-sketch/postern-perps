@@ -17,6 +17,7 @@ import { formatBps, formatCompactUsd, formatDuration, formatFixed, formatPpm, fo
 import { notional } from '../lib/calc';
 import { AssetMark } from '../trade/AssetMark';
 import { OPERATOR_LINE, RESTRICTED_SUMMARY, RISK_POINTS } from '../compliance/notices';
+import { ESCAPE_VALUATION_WORDS } from '../lib/exit-band';
 
 /** What the page states about fees: read from compliance data, never typed into the prose. Exported for the test. */
 export const FEES = {
@@ -160,7 +161,7 @@ export function Home() {
             <strong>Forced request.</strong> Censored? Post your withdrawal, close or cancel on the L2. The exchange must process it within {formatDuration(v.forcedDelayMs)}.
           </li>
           <li>
-            <strong>Escape.</strong> A request ignored past its deadline, or no checkpoint for {formatDuration(v.escapeDelayMs)}: anyone can switch the vault to escape mode. Every account then claims its last proven balance; users are paid before the insurance fund.
+            <strong>Escape.</strong> A request ignored past its deadline, or no checkpoint for {formatDuration(v.escapeDelayMs)}: anyone can switch the vault to escape mode. Every account then claims its last proven balance ({ESCAPE_VALUATION_WORDS}); users are paid before the insurance fund.
           </li>
         </ol>
         <p className="fine">

@@ -197,7 +197,7 @@ describe('transactions: a closed list, described from the calldata', () => {
     // R436-18: a forced close is NOT always at the market: in a halted market it is priced against the closer.
     const close = describeTx(d, buildTx(d, { kind: 'requestForced', forced: 'closeAll', arg: 0n }));
     expect(close.notes.join(' ')).toMatch(/HALTED market.*worse for you/);
-    expect(close.notes.join(' ')).toMatch(/withdrawal request does not close positions/);
+    expect(close.notes.join(' ')).toMatch(/withdrawal request does not close positions/i);
     expect(describeTx(d, buildTx(d, { kind: 'requestForced', forced: 'withdraw', arg: 0n })).notes.join(' ')).not.toMatch(/halted market/i);
     expect(() => buildTx(d, { kind: 'requestForced', forced: 'cancelAll', arg: 1n })).toThrow(/only a withdrawal/);
     const badKind = encodeFunctionData({ abi: VAULT_ABI, functionName: 'requestForced', args: [7, 0n] } as never);

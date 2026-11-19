@@ -24,6 +24,7 @@ import { L2, L2Error, type Receipt } from './l2';
 import { accountLeaf, rootFromProof, withdrawalLeaf, type AccountLeaf, type WithdrawalRecord } from './merkle';
 import { formatFixed } from '../lib/format';
 import { USDC_DECIMALS } from '../lib/fixed';
+import { allBandsWords, FORCED_CLOSE_WORDS } from '../lib/exit-band';
 
 export type Deployment = { chainId: number; vault: Hex; token: Hex };
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -335,10 +336,8 @@ export function describeTx(d: Deployment, tx: { to: string; data: Hex }): TxDesc
         notes: [
           'The exchange must process this before the deadline the vault sets. If it does not, anyone can switch the vault to escape mode and every user exits with their last proven balance.',
           'One request can be open per account.',
-          // R436-18 (engine 0.2.3, SPEC 14): a forced close in a halted market is not a close at the market.
-          ...(kind === 'closeAll'
-            ? ['A position in a HALTED market is closed at the side of the exit band that is worse for you (a set discount from the last index that grows while the halt lasts, never past the price at which the position is worth nothing): it can cost the whole margin of a leveraged position. A withdrawal request does not close positions.']
-            : []),
+          // R436-18 (engine 0.2.3, SPEC 14): what a forced close costs in a halted market, with the table's figures.
+          ...(kind === 'closeAll' ? [FORCED_CLOSE_WORDS, allBandsWords(), 'A withdrawal request does not close positions.'] : []),
         ],
       };
     }

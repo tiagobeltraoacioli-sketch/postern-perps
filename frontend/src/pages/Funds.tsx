@@ -18,7 +18,8 @@ import { deployment, l2, refreshVault, useFunds, useProofKeeper, useVault } from
 import { keptProofFor, proofFile, systemProofsIn } from '../vault/keeper';
 import { api } from '../lib/api';
 import { config } from '../lib/config';
-import { formatDateTime, formatDuration, formatUsd, shortAddress, DASH } from '../lib/format';
+import { formatDateTime, formatDuration, formatPx, formatUsd, shortAddress, DASH } from '../lib/format';
+import { allBandsWords, bandWords, ESCAPE_VALUATION_WORDS, exitBand, exitPrice, FORCED_CLOSE_WORDS } from '../lib/exit-band';
 import { USDC_DECIMALS } from '../lib/fixed';
 import { parseAt } from '../trade/order-builder';
 import { validAddress } from '../wallet/wallet';
@@ -576,7 +577,7 @@ function Collect({ withdrawal: w, view, account, payout }: { withdrawal: Withdra
 
 const FORCED_CHOICES: [ForcedKind, string, string][] = [
   ['withdraw', 'Withdraw', 'The exchange must pay out your free collateral (or the amount you name) to this wallet by the normal certified path.'],
-  ['closeAll', 'Close all my positions', 'The exchange must close every position of this account: through the book, or in a halted market at the side of the exit band that is worse for you.'],
+  ['closeAll', 'Close all my positions', 'The exchange must close every position of this account: through the order book, or in a halted market at the side of the exit band that is worse for you.'],
   ['cancelAll', 'Cancel all my orders', 'The exchange must cancel every open order of this account.'],
 ];
 
@@ -599,6 +600,7 @@ function ExitTab({ view }: { view: VaultView | null }) {
   // R436-18: what the exchange reports about halts and this account's positions, read before a forced close is offered.
   const markets = useStore(feed.markets);
   const accountState = useStore(feed.account);
+  const tickers = useStore(feed.tickers);
   const haltedAny = markets.filter((m) => m.status === 'halted').map((m) => m.symbol);
   const haltedHere = haltedAny.filter((s) => accountState?.account.positions.some((p) => p.symbol === s && p.size !== 0n));
   const open = view?.account?.forcedOpen ? view.account : null;
@@ -658,12 +660,38 @@ function ExitTab({ view }: { view: VaultView | null }) {
                   <strong>
                     {haltedHere.join(', ')} {haltedHere.length === 1 ? 'is' : 'are'} halted and you hold a position there
                   </strong>
-                  <p>
-                    A forced close now is not a close at the market: in a halted market it is priced at the side of the exit band that is worse for you, a discount from the last index that grows while the halt lasts. It can cost the whole margin of that position. To take out your free collateral without closing, choose Withdraw.
-                  </p>
+                  <p>{FORCED_CLOSE_WORDS}</p>
+                  <ul>
+                    {haltedHere.map((symbol) => {
+                      const band = exitBand(symbol);
+                      const position = accountState?.account.positions.find((p) => p.symbol === symbol);
+                      const m = markets.find((x) => x.symbol === symbol);
+                      const index = tickers.get(symbol)?.index;
+                      if (!band || !position || !m) return <li key={symbol}>{symbol}: the launch table states no exit band for this market.</li>;
+                      const long = position.size > 0n;
+                      return (
+                        <li key={symbol}>
+                          {bandWords(band)}.{' '}
+                          {index !== undefined && (
+                            <>
+                              From the index the exchange last reported ({formatPx(index, m.priceDecimals)}), your {long ? 'long' : 'short'} would close at about{' '}
+                              <strong className="num">{formatPx(exitPrice(band, index, long, 0), m.priceDecimals)}</strong> now and{' '}
+                              <strong className="num">{formatPx(exitPrice(band, index, long, 10), m.priceDecimals)}</strong> after ten more minutes of halt (estimates; never past the price at which the position is worth nothing).
+                            </>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p>To take out your free collateral without closing anything, choose Withdraw.</p>
                 </div>
               )}
               {kind === 'closeAll' && haltedHere.length === 0 && haltedAny.length > 0 && <p className="msg-warn">{haltedAny.join(', ')} halted now. A forced close of a position in a halted market is priced against the closer; you hold none there.</p>}
+              {kind === 'closeAll' && haltedHere.length === 0 && (
+                <p className="fine">
+                  {FORCED_CLOSE_WORDS} {allBandsWords()}
+                </p>
+              )}
               {problems.map((p) => (
                 <p key={p} className="msg-danger">
                   {p}
@@ -789,7 +817,9 @@ function ExitExplainer({ view }: { view: VaultView | null }) {
         <li>
           <span className="exit-stage-n num">4</span>
           <strong>Everyone claims</strong>
-          <p>Each account takes its last proven balance (positions closed at the last mark price) straight from the vault. Users are paid before the insurance fund.</p>
+          <p>
+            Each account takes its last proven balance ({ESCAPE_VALUATION_WORDS}) straight from the vault. Users are paid before the insurance fund.
+          </p>
         </li>
       </ol>
     </div>
