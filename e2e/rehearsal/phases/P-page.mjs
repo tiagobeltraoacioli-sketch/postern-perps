@@ -50,6 +50,7 @@ export default async function (ctx) {
   await ctx.check('P-06', 'the harness ends clean: nothing left in the book, no error in the page console, every one of its assertions passed', async () => {
     blockedIf(!R, 'P-01 did not produce results');
     expect(R.failures.length === 0 && exit === 0, `exit ${exit}; failed: ${R.failures.join(' | ').slice(0, 500)}`);
-    return { assertions: R.results.length, transactionsThePageSent: R.facts.transactionsThePageSent?.map((t) => `${t.to}.${t.call}`), typedDataThePageSigned: R.facts.typedDataThePageSigned?.map((t) => t.primaryType) };
+    // the harness's own summary, as it wrote it (its shape is the harness's: copied, not interpreted)
+    return { assertions: R.results.length, transactionsThePageSent: R.facts.transactionsThePageSent ?? null, typedDataThePageSigned: R.facts.typedDataThePageSigned ?? null };
   });
 }
