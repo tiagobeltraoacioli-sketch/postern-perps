@@ -54,6 +54,17 @@ node's watcher: start it twice (the node requires two agreeing endpoints) with t
 `--deposit ACCOUNT:AMOUNT`, and give the node `--l2 http://127.0.0.1:P1,http://127.0.0.1:P2`. With `--funded` and
 no checkpoint yet, the suite sends CancelAll actions (at most 40) until one exists.
 
+Since API 0.3 the suite also checks, bit by bit: the account proof (`leafData.encoded` is the 88-byte SPEC 11 leaf
+of the named fields, `leaf = keccak256(0x00 || encoded)`, the 32 siblings walk to the final checkpoint's
+`accountsRoot`); and, against a server that does not call itself a mock, with `--funded` AND `--funded2 [LABEL]`
+(a second throwaway account funded the same way): a real fill between the two accounts (order ids and status in the
+action result, `GET /v1/orders/{id}`, both fills, the public trade, both positions, the 1m candle, the ticker, the
+fees charged against the published `takerFeeBps` / `makerFeeBps`, the round trip costing exactly the fees), then a
+withdrawal followed to `certified` and its `WithdrawalProof` verified to the checkpoint's `withdrawalsRoot`.
+Without `--funded2` those checks are skipped with that reason. From `lib/merkle32.mjs`, written from SPEC 11 and
+VAULT.md 5.5 and pinned to the vault's own vectors (`contracts/test/vectors/vault-vectors.json`); the mock's
+account tree and account proof are in that format too (its withdrawal tree is still its own: "Fidelity").
+
 Options: `--seed N` (default 7), `--start-time MS|now` (default 1794878400000; `now` makes the engine time
 follow the wall clock from launch so a browser's millisecond nonces fall inside the window), `--static` (blocks
 only when an action arrives or on `step`: byte-stable screenshots and tests), `--blocks N` initial blocks,
