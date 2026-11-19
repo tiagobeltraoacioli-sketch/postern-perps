@@ -63,7 +63,11 @@ counted as passed). The evidence file holds every check and the stack descriptio
 | I validators | signature by a stranger refused; a committee member signing another state root refused and never published; 3 of 7 stopped: blocks continue, nothing becomes final, finality returns with the fifth; each restarted validator signs again (finality with exactly 5 running when it is one of them); sequencer stopped cleanly and by SIGKILL: same chain after restart, finality resumes |
 | J geoblock | opening order from Brazil 451, exit actions still admitted, unknown country denied |
 | L conformance | the whole shared API conformance suite against this stack with two funded accounts, nothing skipped |
+| P page | the trading page itself (headless Chrome, the frontend's `stack-write.mjs`, no key: anvil signs for two of its development accounts) deposits, places an order that fills against the second page account, withdraws and collects from the vault |
 | K escape (last, one way) | every account's escape leaf fetched and verified for the vault's last checkpoint; sequencer and feeder stopped; the same proofs served by a validator's own read service WITHOUT the sequencer, verified against the vault's root and used for the claims; a late deposit; escape refused early, triggered after `escapeDelay`; vault takes nothing more; claims wait for the system shares; users are senior and paid in full; fee share only to the owner's address; no claim twice; late deposit refunded; books close to the unit; system share locked |
+
+The ssh tunnel is supervised (`tunnel-loop.sh` restarts it and logs every restart; the client retries a lost
+connection for 60 s; the evidence file records both counts).
 
 **Variant of phase K (R436-19): `REHEARSAL_ESCAPE=forced node e2e/rehearsal/run.mjs`.** Instead of going silent the
 exchange keeps running but never receives a user's forced withdrawal (one L2 endpoint hides the log, so the

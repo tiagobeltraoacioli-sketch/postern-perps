@@ -89,15 +89,11 @@ The counts at the current `main` are in [BRANCHES.md](BRANCHES.md).
 | R395-9 | Info | oracle | the sequencer's choice among signed observations biases the median inside a stated bound |
 
 ## Not done / not proven
-- The page has not yet placed an order or made a withdrawal against the real node: the harness
-  `frontend/integration/browser/stack-write.mjs`, run once against the stack (rehearsal phase P), got the page's
-  DEPOSIT through (vault and node), then stopped on two defects of the harness itself (a wrong `deposit` signature
-  in its own ABI list; no reconnect after a page reload). The page, the node and the vault were not at fault.
-
-- No external audit. The internal reviews (agents 395 and 436) are recorded in the cross-area log of the project
-  folder; their open items are listed in BRANCHES.md.
-- Not rehearsed: the fee sweep at the UTC day boundary (the engine clock cannot be moved in a local run) and a
-  shortfall escape (insurance first, then pro rata: covered by the vault's forge tests on engine vectors only).
+- Not rehearsed on the stack, with the reason: the fee sweep (it happens when the ENGINE time crosses a UTC day
+  boundary; block time is the sequencer's wall clock and the dev node has no clock offset, so a local run would
+  have to straddle midnight UTC); a shortfall escape (it needs, at the last accepted checkpoint, an account under
+  water that the engine could not liquidate, i.e. behind a halted market, and an insurance fund smaller than the
+  deficit: the vault's forge tests replay exactly that story from engine-produced vectors, the stack does not).
 - The L2 in every run is a local anvil, not the Bloch L2 (no proof-based finality, no real bUSDC bytecode).
 - One sequencer; a BFT sequencer set is designed for, not built. The committee (5 of 7) is trusted for safety, as
   docs/VAULT.md section 8 states.
