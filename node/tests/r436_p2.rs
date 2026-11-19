@@ -269,3 +269,43 @@ async fn r436_15_the_relayer_loop_is_loud_when_its_endpoints_lie_in_unison() {
     let _ = tx.send(true);
     let _ = h.await;
 }
+
+/// R436-16 (Low; SPEC S-16.4): the node compared the snapshot WRAPPER's logHash with its log, never the logHash
+/// inside the engine snapshot (the one field of a snapshot the state root does not bind). A snapshot whose
+/// engine state carried another logHash was loaded. Property: the restored engine's logHash must be the log's at
+/// that height, or the snapshot is refused and recovery falls back (older snapshot or replay), never silently.
+#[test]
+fn r436_16_a_snapshot_whose_engine_log_hash_is_not_the_logs_is_refused() {
+    let mut n = net_real("r436-16", 1000);
+    n.seq.snapshot_every = 3;
+    let ua = perps_node::sig::key_address(&user(33));
+    for i in 0..7u64 {
+        n.seq_view.lock().unwrap().deposits.insert(i, deposit(i, ua, 1_000_000_000 + i));
+        n.seq.produce(now() + i).unwrap().unwrap();
+    }
+    let (root, h) = (n.seq.engine.state_root(), n.seq.log.last_height);
+    assert_eq!(h, 7);
+    let (g, key, dir) = (n.g.clone(), n.keys.sequencer.clone(), n.dir.clone());
+    drop(n);
+    let (_, _, checked) = perps_node::dev::dev_genesis_real("test-r436-16", 7, 5, 1000, 0);
+    let open = || perps_node::sequencer::Sequencer::open(g.clone(), key.clone(), Box::new(perps_node::engine::real::RealEngine::new(g.clone(), checked.clone()).unwrap()), dir.clone(), view()).unwrap();
+    // control: the untouched snapshot at 6 is used
+    let s = open();
+    assert_eq!((s.recovered.snapshot_height, s.engine.state_root()), (Some(6), root));
+    let name = s.engine.name();
+    drop(s);
+    // the engine snapshot at 6 with ANOTHER logHash inside (bytes 58..90 of SPEC 16's layout: magic 8, version 2,
+    // genesis hash 32, height 8, time 8, logHash 32), its own checksum recomputed, in a wrapper that is intact
+    let path = perps_node::log::list_snapshots(&dir).into_iter().find(|x| x.0 == 6).unwrap().1;
+    let (meta, mut bytes) = perps_node::log::read_snapshot(&path, name).unwrap();
+    bytes[58] ^= 0x01;
+    let n_ = bytes.len();
+    let sum = keccak(&bytes[..n_ - 32]);
+    bytes[n_ - 32..].copy_from_slice(&sum);
+    perps_node::log::write_snapshot(&dir, &meta, name, &bytes, 2).unwrap();
+    let s = open();
+    assert_ne!(s.recovered.snapshot_height, Some(6), "the snapshot with a foreign logHash inside must not be used: {:?}", s.recovered);
+    assert_eq!(s.recovered.snapshot_height, Some(3), "the older snapshot is");
+    assert_eq!((s.engine.state_root(), s.log.last_height), (root, h));
+    assert_eq!(s.engine.real().unwrap().log_hash, s.log.last_log_hash, "the engine's own logHash is the log's");
+}
