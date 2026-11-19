@@ -1,7 +1,7 @@
 // The rehearsal's cast: throwaway accounts (public labels) and what each deposits. UNAUDITED prototype.
 // Copyright (c) 2026 Bloch Inc. All rights reserved.
 import { user } from '../lib/keys.mjs';
-import { fundedAccount } from '../../node/mock/conformance/run.mjs';
+import { fundedAccount, fundedAccount2 } from '../../node/mock/conformance/run.mjs';
 
 // label, deposit in USDC (decimal string), role
 export const CAST = [
@@ -14,10 +14,13 @@ export const CAST = [
   ['censored', '5000', 'user the sequencer ignores: exits by the forced path'],
   ['escapee', '5000', 'user who claims through the escape hatch'],
   ['conformance', '100000', 'the conformance suite\'s --funded account'],
+  ['conformance2', '100000', 'the conformance suite\'s --funded2 account (the other side of its real fill)'],
 ].map(([label, deposit, role]) => ({ ...user(label), deposit, role }));
 // the conformance suite signs with its own label-derived key (node/mock/conformance/run.mjs): fund THAT address
 CAST.find((c) => c.label === 'conformance').address = fundedAccount('funded');
 CAST.find((c) => c.label === 'conformance').key = null;
+CAST.find((c) => c.label === 'conformance2').address = fundedAccount2('funded2');
+CAST.find((c) => c.label === 'conformance2').key = null;
 
 export const who = (label) => {
   const a = CAST.find((c) => c.label === label);
